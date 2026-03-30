@@ -6,3 +6,6 @@ __pycache__/
 .claude/
 outputs/
 .envrc
+scripts/
+tests/
+ref/
