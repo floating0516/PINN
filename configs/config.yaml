@@ -1,0 +1,129 @@
+project_name: PINN_Earthquake_Magnitude_Prediction
+
+# 数据相关：时间窗、STF、P 波预处理、样本筛选
+# 兜底参数：default_theta_deg / default_phi_deg
+
+dataset:
+  # 事件过滤
+  blacklist_events:
+    - N.Honshu2011
+    - N.Honshu2012
+    - N.Honshu2013
+    - E.Fukushima2011
+    - Iwate2011
+
+  # 波形基础处理
+  units: mm  # 波形单位
+  center_mode: median  # 去中心方式
+  window_min_sec: 0.0  # 起始时间（秒）
+  window_max_sec: 600.0  # 结束时间（秒）
+
+  # STF 相关
+  stf_path: /Users/lihe/Library/Mobile Documents/com~apple~CloudDocs/PINN_Mag/dataset/STF_SCARDEC  # STF 目录
+  stf_m_ref: 1.0e18  # 矩率缩放参考值
+
+  # 几何兜底值
+  default_theta_deg: 45.0  # theta 默认值
+  default_phi_deg: 0.0  # phi 默认值
+
+  # P 波预处理
+  p_preprocess_enabled: true  # 是否启用 P 波预处理
+  p_velocity_mps: 4500  # P 波速度
+  p_arrival_offset_sec: 0.0  # P 到时偏移
+  p_baseline_mode: mean  # 基线模式
+
+  # 样本筛选
+  radial_peak_min_cm: 1 # 径向峰值阈值（cm）
+
+  # 滤波参数
+  filter:
+    type: lowpass  # 滤波类型
+    cutoff_low_hz: 0.1  # 低截止频率
+    cutoff_high_hz: 0.2  # 高截止频率
+    order: 6  # 阶数
+    window: hamming  # 窗函数
+
+# 模型相关：hidden_dim / TCN / Transformer / meta
+# 其中 num_layers 当前更偏兼容/备用
+
+model:
+  hidden_dim: 128  # 隐层宽度
+  num_layers: 3  # 备用层数参数
+  num_tcn_blocks: 6  # TCN 块数
+  transformer_num_layers: 3  # Transformer 层数
+  dropout: 0.2  # dropout 比例
+  use_meta: true  # 是否使用几何辅助输入
+
+# 路径相关：data_path / logs_dir / models_dir / results_dir 主要在用
+# output_dir 当前主流程弱依赖
+
+paths:
+  data_path: /Users/lihe/Library/Mobile Documents/com~apple~CloudDocs/PINN_Mag/dataset/gnss_events_matched.gcmt.npz  # 主数据文件
+  output_dir: ./outputs  # 总输出目录
+  logs_dir: ./outputs/logs  # 日志目录
+  models_dir: ./outputs/models  # 模型目录
+  results_dir: ./outputs/results  # 结果目录
+
+# 物理参数：当前损失会读取这些常数
+# radiation_pattern 当前主路线不是主要控制开关
+
+physics:
+  rho: 3400.0  # 密度
+  alpha: 7900.0  # P 波速度
+  beta: 4533.0  # S 波速度
+  attenuation: 0.8  # 衰减因子
+  geometrical_spreading_factor: 1.2  # 几何扩散因子
+  free_surface_factor: 1.5  # 自由表面因子
+  radiation_pattern: 1.0  # 旧辐射缩放参数
+
+# 评估相关
+
+evaluation:
+  sample_grid_rows: 4  # 样本诊断图行数
+
+# 训练相关：当前主路线为 stf_rate
+# physics_loss_weight / stf_loss_weight 偏旧路线参数
+
+training:
+  # 主训练参数
+  loss_name: stf_rate  # 当前主损失
+  random_seed: 42  # 随机种子
+  batch_size: 64  # batch 大小
+  epochs: 200  # 训练轮数
+  learning_rate: 0.0001  # 学习率
+  weight_decay: 1.0e-05  # 权重衰减
+  grad_clip_norm: 1.0  # 梯度裁剪上限
+  time_steps: 200  # 序列长度
+
+  # 数据划分
+  validation_split: 0.15  # 验证集比例
+  test_split: 0.15  # 测试集比例
+
+  # 学习率调度
+  warmup_epochs: 5  # warmup 轮数
+  scheduler_T0: 15  # 初始周期
+  scheduler_T_mult: 2  # 周期倍率
+
+  # 早停
+  early_stop_patience: 50  # 容忍轮数
+  early_stop_min_delta: 0.0001  # 最小改进
+
+  # 权重加载与 SWA
+  pretrain_path: null  # 预训练权重
+  swa_start: 50  # SWA 起始轮数
+
+  # 旧 loss 路线参数
+  physics_loss_weight: 0.2  # 旧物理损失权重
+  stf_loss_weight: 0.1  # 旧 STF 损失权重
+
+  # 当前主损失：stf_rate_loss
+  stf_rate_loss:
+    lambda_MSE: 1.0  # 数据拟合权重
+    lambda_wave: 0.0  # 波形项权重
+    lambda_nonneg: 0.5  # 非负约束权重
+    lambda_smooth: 0.0  # 平滑项权重
+    lambda_physics: 0.4  # 物理项权重
+    lambda_shape: 0.1  # 形状项权重
+    include_intermediate_field: true  # 是否包含中场项
+    radiation_pattern_mode: simplified  # 辐射模式
+    skip_travel_delays: true  # 是否跳过传播时延
