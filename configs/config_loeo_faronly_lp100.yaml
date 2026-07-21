@@ -1,0 +1,90 @@
+project_name: PINN_Earthquake_Magnitude_Prediction
+dataset:
+  blacklist_events:
+  - N.Honshu2011
+  - N.Honshu2012
+  - N.Honshu2013
+  - E.Fukushima2011
+  - Iwate2011
+  units: mm
+  center_mode: median
+  window_min_sec: 0.0
+  window_max_sec: 600.0
+  stf_path: /Users/lihe/Library/Mobile Documents/com~apple~CloudDocs/PINN_Mag/dataset/STF_SCARDEC
+  stf_m_ref: 1.0e18
+  default_theta_deg: 45.0
+  default_phi_deg: 0.0
+  p_preprocess_enabled: true
+  p_velocity_mps: 4500
+  p_arrival_offset_sec: 0.0
+  p_baseline_mode: mean
+  radial_peak_min_cm: 2.0
+  filter:
+    type: lowpass
+    cutoff_low_hz: 0.1
+    cutoff_high_hz: 0.2
+    order: 6
+    window: hamming
+model:
+  hidden_dim: 128
+  num_layers: 3
+  num_tcn_blocks: 6
+  transformer_num_layers: 3
+  dropout: 0.2
+  use_meta: true
+paths:
+  data_path: /Users/lihe/Library/Mobile Documents/com~apple~CloudDocs/PINN_Mag/dataset/gnss_events_matched.gcmt.npz
+  output_dir: ./outputs
+  logs_dir: ./outputs/logs
+  models_dir: ./outputs/models
+  results_dir: ./outputs/results
+physics:
+  rho: 3400.0
+  alpha: 7900.0
+  beta: 4533.0
+  attenuation: 0.8
+  geometrical_spreading_factor: 1.2
+  free_surface_factor: 1.5
+  radiation_pattern: 1.0
+evaluation:
+  sample_grid_rows: 4
+  unseen_event_dirs: []
+training:
+  loss_name: stf_rate
+  random_seed: 42
+  batch_size: 64
+  epochs: 200
+  learning_rate: 0.0001
+  weight_decay: 1.0e-05
+  grad_clip_norm: 1.0
+  time_steps: 200
+  validation_split: 0.15
+  test_split: 0.15
+  warmup_epochs: 5
+  scheduler_T0: 15
+  scheduler_T_mult: 2
+  early_stop_patience: 50
+  early_stop_min_delta: 0.0001
+  pretrain_path: null
+  swa_start: 50
+  physics_loss_weight: 0.2
+  stf_loss_weight: 0.1
+  stf_rate_loss:
+    lambda_MSE: 1.0
+    lambda_synth: 0.5
+    lambda_nonneg: 0.5
+    lambda_mag: 1.0
+    lambda_shape: 0.1
+    include_intermediate_field: false
+    radiation_pattern_mode: full
+    skip_travel_delays: true
+    include_far_field_P: true
+    include_far_field_S: true
+  curriculum_learning:
+    enabled: false
+    strategy: switch
+    switch_epoch: 100
+    start_mode: simplified
+    end_mode: full
+    linear_start_epoch: 0
+    linear_end_epoch: 100

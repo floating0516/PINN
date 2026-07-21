@@ -1,0 +1,49 @@
+# E2.4 课程学习策略实验配置
+#
+# 用法：
+#   python scripts/experiments/run_experiment.py --sweep configs/sweep_e2_4_curriculum.yaml
+#
+# 实验内容：
+#   (a) 硬切换：前 100 epochs simplified，后 100 epochs full
+#   (b) 线性过渡：radiation_mode 从 simplified 渐进到 full
+#   (c) 对照组：直接 full 模式训练 200 epochs（E1.1 中已有，此处重复以确保公平对比）
+
+experiments:
+  - name: "e2.4a_curriculum_switch"
+    description: "课程学习硬切换: simplified → full at epoch 100"
+    overrides:
+      training:
+        epochs: 200
+        stf_rate_loss:
+          radiation_pattern_mode: simplified  # 初始模式（课程学习会覆盖）
+        curriculum_learning:
+          enabled: true
+          strategy: switch
+          switch_epoch: 100
+          start_mode: simplified
+          end_mode: full
+
+  - name: "e2.4b_curriculum_linear"
+    description: "课程学习线性过渡: simplified → full, epoch 0-100"
+    overrides:
+      training:
+        epochs: 200
+        stf_rate_loss:
+          radiation_pattern_mode: simplified  # 初始模式
+        curriculum_learning:
+          enabled: true
+          strategy: linear
+          start_mode: simplified
+          end_mode: full
+          linear_start_epoch: 0
+          linear_end_epoch: 100
+
+  - name: "e2.4c_baseline_full_direct"
+    description: "对照组: 直接 full 模式训练 200 epochs"
+    overrides:
+      training:
+        epochs: 200
+        stf_rate_loss:
+          radiation_pattern_mode: full
+        curriculum_learning:
+          enabled: false

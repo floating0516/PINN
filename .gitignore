@@ -1,0 +1,57 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.claude/
+.envrc
+.worktrees/
+
+# 本地/工具链杂项（不删磁盘文件，仅不入库）
+.agent_context/
+.agents/
+.codegraph/
+.devin_backup_figs/
+.multica/
+*.code-workspace
+texput.log
+test.yaml
+
+# 运行产物
+outputs/
+outputs_experiments/
+
+# 参考资料（大文件/图片）
+ref/
+
+# 测试临时出图
+tests/figure/
+
+# 论文 LaTeX 编译产物与备份
+paper/srl/**/*.aux
+paper/srl/**/*.log
+paper/srl/**/*.out
+paper/srl/**/*.toc
+paper/srl/**/*.fls
+paper/srl/**/*.fdb_latexmk
+paper/srl/**/*.synctex.gz
+paper/srl/**/*.synctex
+paper/srl/**/*.xdv
+paper/srl/**/*.bak
+paper/srl/**/*~
+paper/srl/**/.*.bkp
+paper/srl/**/__pycache__/
+paper/srl/.claude/
+# 编译出的整篇 PDF（可由 tex 重编译）；图件 PDF/PNG 仍跟踪
+paper/srl/PINN_Magnitude_SRL.pdf
+paper/srl/PINN_Magnitude_SRL_CN.pdf
+# SSA 官方样例包体积大，模板类文件已在 Templates/ 保留
+paper/srl/Sample Files/
+
+# 根目录架构图预览大图（保留 .drawio 源）
+/pinn_model_loss_architecture.png
+/pinn_model_loss_architecture.drawio.png
+
+# paper/figures 编译中间文件
+paper/figures/*.aux
+paper/figures/*.log

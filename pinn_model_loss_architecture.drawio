@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="drawio" version="26.0.0">
+  <diagram name="PINN Model and Loss">
+    <mxGraphModel dx="1800" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="2" value="模型输入" style="swimlane;startSize=34;whiteSpace=wrap;html=1;rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="80" width="300" height="260" as="geometry" />
+        </mxCell>
+        <mxCell id="3" value="径向位移 radial&#xa;(B, 1, T)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=13;" vertex="1" parent="2">
+          <mxGeometry x="50" y="60" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="4" value="几何元数据 meta&#xa;[log(r), sinθ, cosθ, sinφ, cosφ]&#xa;(B, 5)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="2">
+          <mxGeometry x="35" y="160" width="230" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="5" value="PINNModel 前向结构 src/models/model.py" style="swimlane;startSize=34;whiteSpace=wrap;html=1;rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="400" y="40" width="560" height="440" as="geometry" />
+        </mxCell>
+        <mxCell id="6" value="Conv1d 嵌入&#xa;1 → hidden_dim=128&#xa;k=7, padding=3&#xa;GELU + GroupNorm" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="5">
+          <mxGeometry x="40" y="70" width="190" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="7" value="Residual Dilated TCN ×6&#xa;dilation=1,2,4,8,16,32&#xa;每块: Conv(d) → GN/GELU → Conv(2d) → GN/GELU → Dropout + residual" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="5">
+          <mxGeometry x="300" y="55" width="220" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="8" value="Squeeze-Excitation&#xa;mean over time → FC → ReLU → FC → Sigmoid&#xa;通道重标定" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="5">
+          <mxGeometry x="300" y="210" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="9" value="转为序列 (B,T,C)&#xa;+ Sinusoidal PE&#xa;+ meta_embed(meta)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="5">
+          <mxGeometry x="40" y="220" width="190" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="10" value="TransformerEncoder ×3&#xa;nhead=4&#xa;FFN=2×hidden_dim&#xa;dropout=0.2, GELU" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="5">
+          <mxGeometry x="40" y="340" width="190" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="11" value="LayerNorm&#xa;+ Rate Head&#xa;Linear → GELU → Dropout → Linear → ReLU(log1p)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" vertex="1" parent="5">
+          <mxGeometry x="300" y="335" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="12" value="网络输出 pred_rate&#xa;(B, T), log1p 编码&#xa;表示矩率序列 dot_M0(t)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1030" y="205" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="13" value="损失选择 train.py" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1320" y="210" width="170" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="14" value="当前主损失: STFRateWaveformLoss&#xa;training.loss_name = stf_rate&#xa;src/training/loss_stf_rate.py" style="swimlane;startSize=34;whiteSpace=wrap;html=1;rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1540" y="40" width="600" height="720" as="geometry" />
+        </mxCell>
+        <mxCell id="15" value="解码预测矩率&#xa;dot_M0 = stf_m_ref · (10^pred_rate - 1)&#xa;clamp ≥ 0&#xa;stf_m_ref = 1e18" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="14">
+          <mxGeometry x="40" y="60" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="16" value="参考 STF 监督&#xa;stf_true → log10(1 + STF/stf_m_ref)&#xa;用 has_stf mask 只监督有 STF 样本" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="14">
+          <mxGeometry x="320" y="60" width="240" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="17" value="辐射花型与物理系数&#xa;mode = full&#xa;A_IP, A_IS, A_FP, A_FS&#xa;C_int_P/S, C_far_P/S&#xa;ρ, α, β, r, geom, free_surface, attenuation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="14">
+          <mxGeometry x="40" y="190" width="520" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="18" value="物理正演合成径向位移 u_hat&#xa;M0(t)=∫dot_M0 dt&#xa;u_hat = C_int_P·M0(t-tP) + C_int_S·M0(t-tS)&#xa;+ C_far_P·dot_M0(t-tP) + C_far_S·dot_M0(t-tS)&#xa;skip_travel_delays=true: P 已对齐，S 用相对延迟" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;fontSize=12;" vertex="1" parent="14">
+          <mxGeometry x="40" y="335" width="520" height="125" as="geometry" />
+        </mxCell>
+        <mxCell id="19" value="L_synth: 合成波形项&#xa;MSE(u_hat / scale, u_obs / scale)&#xa;scale = max(|u_obs|)+ε" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="14">
+          <mxGeometry x="40" y="500" width="245" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="20" value="L_MSE: STF 数据项&#xa;MSE(pred_rate, STF_log)&#xa;仅 has_stf=true 样本" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="14">
+          <mxGeometry x="315" y="500" width="245" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="21" value="L_mag: 震级一致性&#xa;Mw_pred = 2/3(log10(max∫dot_M0dt)-9.1)&#xa;MSE(Mw_pred, Mw_true)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="14">
+          <mxGeometry x="40" y="595" width="245" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="22" value="L_nonneg + L_shape&#xa;L_nonneg = mean(clamp(-dot_M0)^2)&#xa;L_shape = MSE(归一化 STF 形状)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="14">
+          <mxGeometry x="315" y="595" width="245" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="23" value="总损失（当前配置）&#xa;L = 1.0·L_MSE + 0.5·L_synth + 0.5·L_nonneg&#xa;+ 0.4·L_mag + 0.1·L_shape" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="1540" y="810" width="600" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="24" value="旧分支: PhysicsLoss&#xa;loss_name != stf_rate 时使用&#xa;src/training/physics.py" style="swimlane;startSize=34;whiteSpace=wrap;html=1;rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1040" y="600" width="410" height="270" as="geometry" />
+        </mxCell>
+        <mxCell id="25" value="data_loss&#xa;MSE(pred_rate, stf_log_obs)&#xa;按 has_stf mask" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="24">
+          <mxGeometry x="35" y="55" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="26" value="physics_loss&#xa;dot_M0 积分 → Mw_pred&#xa;MSE(Mw_pred, true_mag)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;" vertex="1" parent="24">
+          <mxGeometry x="215" y="55" width="160" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="27" value="stf_loss&#xa;归一化 STF shape MSE&#xa;总损失 = data + w_phys·physics + w_stf·stf" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=12;" vertex="1" parent="24">
+          <mxGeometry x="60" y="155" width="290" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="28" value="训练更新" style="swimlane;startSize=34;whiteSpace=wrap;html=1;rounded=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="650" y="620" width="300" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="29" value="反向传播&#xa;loss.backward()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="28">
+          <mxGeometry x="55" y="60" width="190" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="30" value="梯度裁剪&#xa;clip_grad_norm_=1.0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="28">
+          <mxGeometry x="55" y="125" width="190" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="31" value="AdamW + CosineWarmRestarts&#xa;SWA 可选" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=12;" vertex="1" parent="28">
+          <mxGeometry x="55" y="190" width="190" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="32" value="radial" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="3" target="6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="33" value="meta" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;dashed=1;" edge="1" parent="1" source="4" target="9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="34" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="5" source="6" target="7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="35" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="5" source="7" target="8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="36" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="5" source="8" target="9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="37" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="5" source="9" target="10">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="38" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="5" source="10" target="11">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="39" value="pred_rate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="11" target="12">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="40" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.5;entryX=0;entryY=0.5;" edge="1" parent="1" source="12" target="13">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="41" value="yes: stf_rate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=1;exitY=0.35;entryX=0;entryY=0.15;strokeColor=#82b366;fontColor=#2d7600;" edge="1" parent="1" source="13" target="14">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="42" value="fallback" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;dashed=1;strokeColor=#666666;" edge="1" parent="1" source="13" target="24">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1405" y="520" />
+              <mxPoint x="1245" y="520" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="43" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="14" source="15" target="17">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="44" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.75;entryY=0;" edge="1" parent="14" source="16" target="17">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="45" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="14" source="17" target="18">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="46" value="u_hat vs u_obs" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.25;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="14" source="18" target="19">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="47" value="STF_log" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.75;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="14" source="18" target="20">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="48" value="Mw" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.35;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="14" source="18" target="21">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="49" value="shape / nonneg" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.65;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="14" source="18" target="22">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="50" value="weighted sum" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="1" source="14" target="23">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="51" value="loss" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0;exitY=0.5;entryX=1;entryY=0.5;" edge="1" parent="1" source="23" target="29">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1220" y="855" />
+              <mxPoint x="1220" y="705" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="52" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="28" source="29" target="30">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="53" value="" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;exitX=0.5;exitY=1;entryX=0.5;entryY=0;" edge="1" parent="28" source="30" target="31">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -1,0 +1,114 @@
+# E1.5 λ_synth 敏感性分析
+#
+# 目标：在已知最优 λ_mag=2.0 的基础上，sweep λ_synth（L_synth 波形损失权重）
+#   - λ_synth 是辐射模式（simplified/full）直接作用的参数
+#   - 所有先前实验均固定 λ_synth=0.5，本实验验证该假设是否最优
+#   - 回答：simplified 和 full 模式的最优 λ_synth 是否一致？
+#
+# 设计：
+#   λ_synth ∈ {0.1, 0.3, 0.5, 0.7, 1.0} × mode ∈ {simplified, full}
+#   = 10 组，全量物理项（中场+远P+远S），λ_mag 固定 2.0
+#
+# 注意：ls050_full（λ_synth=0.5, λ_mag=2.0, full）与 E1.4 full_lp200 完全等价
+#   （test_mae=0.0869），可作为内部一致性校验，运行时加 --resume 可跳过已完成项。
+#
+# 用法:
+#   python scripts/experiments/run_experiment.py \
+#       --sweep configs/sweep_e1_5_lambda_synth.yaml \
+#       --output-root ./outputs_experiments/e1_5 \
+#       --resume
+
+experiments:
+  # ── simplified 模式 ──────────────────────────────────────────────────────
+  - name: ls010_simplified
+    set:
+      - training.stf_rate_loss.lambda_synth=0.1
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  - name: ls030_simplified
+    set:
+      - training.stf_rate_loss.lambda_synth=0.3
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  - name: ls050_simplified
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  - name: ls070_simplified
+    set:
+      - training.stf_rate_loss.lambda_synth=0.7
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  - name: ls100_simplified
+    set:
+      - training.stf_rate_loss.lambda_synth=1.0
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  # ── full 模式 ─────────────────────────────────────────────────────────────
+  - name: ls010_full
+    set:
+      - training.stf_rate_loss.lambda_synth=0.1
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  - name: ls030_full
+    set:
+      - training.stf_rate_loss.lambda_synth=0.3
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  - name: ls050_full
+    # 与 E1.4 full_lp200 等价（λ_synth=0.5, λ_mag=2.0, full），test_mae=0.0869
+    # 作为内部一致性校验基准点
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  - name: ls070_full
+    set:
+      - training.stf_rate_loss.lambda_synth=0.7
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  - name: ls100_full
+    set:
+      - training.stf_rate_loss.lambda_synth=1.0
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
