@@ -18,6 +18,7 @@ from src.models.model import PINNModel
 from src.data.data_loader import get_data_loaders
 from src.training.physics import PhysicsLoss
 from src.training.loss_stf_rate import STFRateWaveformLoss
+from src.utils.config_v2 import validate_config_on_startup
 from src.utils.device import configure_runtime, get_preferred_device
 from src.utils.run_dirs import create_run_dir, make_run_id
 
@@ -36,6 +37,8 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         config_path = Path(__file__).parent.parent.parent / 'configs' / 'config.yaml'
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
+
+    validate_config_on_startup(config)
 
     # 设置全局随机种子，保证实验可复现
     seed = int((config.get('training', {}) or {}).get('random_seed', 42))

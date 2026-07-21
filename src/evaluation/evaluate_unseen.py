@@ -44,6 +44,7 @@ from src.data.data_loader import EarthquakeDataset
 from src.evaluation.evaluate import _ensure_time_steps, magnitude_series_from_rate
 from src.models.model import PINNModel
 from src.training.physics import PhysicsLoss
+from src.utils.config_v2 import validate_config_on_startup
 from src.utils.device import get_preferred_device
 from src.visualization.visualize import set_srl_plot_style
 
@@ -710,6 +711,8 @@ def evaluate_unseen_events(
     config_path = Path(model_dir) / "config.yaml"
     with config_path.open("r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
+
+    validate_config_on_startup(config)
 
     ds_cfg = config.get("dataset", {}) or {}
     train_cfg = config.get("training", {}) or {}

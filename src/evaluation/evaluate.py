@@ -15,6 +15,7 @@ from src.data.data_loader import get_data_loaders
 from src.training.physics import PhysicsLoss
 from src.baseline import Baseline
 from src.visualization.visualize import plot_mwg_time_evolution, set_srl_plot_style, maybe_show_plot
+from src.utils.config_v2 import validate_config_on_startup
 from src.utils.device import get_preferred_device
 from src.utils.run_dirs import create_run_dir, resolve_model_path
 
@@ -66,6 +67,8 @@ def evaluate(
         config_path = Path(__file__).parent.parent.parent / 'configs' / 'config.yaml'
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
+
+    validate_config_on_startup(config)
         
     device = get_preferred_device()
     ds_cfg = config.get('dataset', {}) or {}
