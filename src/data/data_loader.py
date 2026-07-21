@@ -1,6 +1,6 @@
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, random_split, Subset
 from pathlib import Path
 import yaml
 import math
@@ -67,6 +67,8 @@ class EarthquakeDataset(Dataset):
             if k in data:
                 rake_values = data[k]
                 break
+        strike_values = data['strike'] if 'strike' in data else None
+        dip_values = data['dip'] if 'dip' in data else None
 
         # 兼容不同数据结构：优先使用旧版 'enu'/'station_info'，否则尝试新版 'stations'
         has_enu = 'enu' in data and 'station_info' in data
@@ -159,6 +161,19 @@ class EarthquakeDataset(Dataset):
                 return 0
             return -1
         
+        def _compute_phi_slip_deg(azimuth_deg: float, strike_deg: float, dip_deg: float, rake_deg: float) -> float:
+            """计算 EEW_0012 Eq.4 中的 φ：台站方位角与滑移方向的夹角（度）"""
+            if not (np.isfinite(strike_deg) and np.isfinite(dip_deg) and np.isfinite(rake_deg)):
+                return azimuth_deg
+            strike_r = math.radians(strike_deg)
+            dip_r = math.radians(dip_deg)
+            rake_r = math.radians(rake_deg)
+            # 滑移矢量水平投影
+            slip_E = math.cos(rake_r) * math.sin(strike_r) - math.sin(rake_r) * math.cos(dip_r) * math.cos(strike_r)
+            slip_N = math.cos(rake_r) * math.cos(strike_r) + math.sin(rake_r) * math.cos(dip_r) * math.sin(strike_r)
+            slip_az = math.degrees(math.atan2(slip_E, slip_N))
+            return float(azimuth_deg - slip_az)
+
         def _match_stf_for_event(event_name: str) -> tuple[np.ndarray, np.ndarray] | None:
             if not self.stf_map:
                 return None
@@ -339,6 +354,11 @@ class EarthquakeDataset(Dataset):
                     else:
                         theta_deg = self.default_theta_deg
                     phi_deg = float(azimuth) if np.isfinite(azimuth) else self.default_phi_deg
+                    # 计算辐射花样用的 phi_slip_deg
+                    ev_strike = float(strike_values[i]) if strike_values is not None else np.nan
+                    ev_dip = float(dip_values[i]) if dip_values is not None else np.nan
+                    ev_rake = float(rake_values[i]) if rake_values is not None else np.nan
+                    phi_slip_deg = _compute_phi_slip_deg(phi_deg, ev_strike, ev_dip, ev_rake)
                     # STF 标签重采样
                     stf_pair = _match_stf_for_event(str(events[i]))
                     p_shift = (dist_m / self.p_velocity_mps + self.p_arrival_offset_sec) if (np.isfinite(dist_m) and self.p_velocity_mps > 0.0) else 0.0
@@ -363,6 +383,7 @@ class EarthquakeDataset(Dataset):
                         'dt': dt,
                         'theta_deg': theta_deg,
                         'phi_deg': phi_deg,
+                        'phi_slip_deg': phi_slip_deg,
                         'stf': stf_resampled,
                         'stf_log': stf_log,
                         'has_stf': stf_resampled is not None,
@@ -432,6 +453,11 @@ class EarthquakeDataset(Dataset):
                     else:
                         theta_deg = self.default_theta_deg
                     phi_deg = float(azimuth) if np.isfinite(azimuth) else self.default_phi_deg
+                    # 计算辐射花样用的 phi_slip_deg
+                    ev_strike = float(strike_values[i]) if strike_values is not None else np.nan
+                    ev_dip = float(dip_values[i]) if dip_values is not None else np.nan
+                    ev_rake = float(rake_values[i]) if rake_values is not None else np.nan
+                    phi_slip_deg = _compute_phi_slip_deg(phi_deg, ev_strike, ev_dip, ev_rake)
                     stf_pair = _match_stf_for_event(str(events[i]))
                     p_shift = (dist_m / self.p_velocity_mps + self.p_arrival_offset_sec) if (np.isfinite(dist_m) and self.p_velocity_mps > 0.0) else 0.0
                     stf_resampled = _resample_stf_to(dt, self.time_steps, stf_pair, p_shift_sec=float(p_shift))
@@ -455,6 +481,7 @@ class EarthquakeDataset(Dataset):
                         'dt': dt,
                         'theta_deg': theta_deg,
                         'phi_deg': phi_deg,
+                        'phi_slip_deg': phi_slip_deg,
                         'stf': stf_resampled,
                         'stf_log': stf_log,
                         'has_stf': stf_resampled is not None,
@@ -673,17 +700,20 @@ class EarthquakeDataset(Dataset):
             'dt': torch.tensor(sample['dt'], dtype=torch.float32),
             'theta_deg': torch.tensor(sample.get('theta_deg', self.default_theta_deg), dtype=torch.float32),
             'phi_deg': torch.tensor(sample.get('phi_deg', self.default_phi_deg), dtype=torch.float32),
+            'phi_slip_deg': torch.tensor(sample.get('phi_slip_deg', sample.get('phi_deg', self.default_phi_deg)), dtype=torch.float32),
             'stf': torch.tensor(sample['stf'], dtype=torch.float32) if sample.get('stf') is not None else torch.zeros(self.time_steps, dtype=torch.float32),
             'stf_log': torch.tensor(sample['stf_log'], dtype=torch.float32) if sample.get('stf_log') is not None else torch.zeros(self.time_steps, dtype=torch.float32),
             'has_stf': torch.tensor(bool(sample.get('has_stf', False))),
         }
 
-def get_data_loaders(config: dict) -> Tuple[DataLoader, DataLoader, DataLoader]:
+def _build_dataset(config: dict) -> EarthquakeDataset:
+    """Construct the full EarthquakeDataset from config.
+    Shared by the standard random-split loaders and the LOEO-CV loaders so that
+    all data preprocessing (units, filtering, windowing, blacklist, peak
+    threshold) is identical across evaluation protocols.
+    """
     data_path = config['paths']['data_path']
     time_steps = config['training']['time_steps']
-    batch_size = config['training']['batch_size']
-    val_split = config['training']['validation_split']
-    test_split = config['training']['test_split']
     ds_cfg = (config.get('dataset', {}) or {})
     blacklist = ds_cfg.get('blacklist_events', [])
     units = ds_cfg.get('units', 'auto')
@@ -700,9 +730,8 @@ def get_data_loaders(config: dict) -> Tuple[DataLoader, DataLoader, DataLoader]:
     p_arrival_offset_sec = float(ds_cfg.get('p_arrival_offset_sec', 0.0))
     p_baseline_mode = str(ds_cfg.get('p_baseline_mode', 'mean'))
     radial_peak_min_cm = float(ds_cfg.get('radial_peak_min_cm', ds_cfg.get('pgd_min_cm', 0.0)))
-    
     allow_missing_stf = bool(ds_cfg.get('allow_missing_stf', False))
-    dataset = EarthquakeDataset(
+    return EarthquakeDataset(
         data_path,
         time_steps,
         blacklist,
@@ -722,7 +751,79 @@ def get_data_loaders(config: dict) -> Tuple[DataLoader, DataLoader, DataLoader]:
         allow_missing_stf=allow_missing_stf,
         radial_peak_min_cm=radial_peak_min_cm,
     )
-    
+
+
+def _make_worker_init_and_gen(seed: int):
+    def _worker_init_fn(worker_id: int) -> None:
+        import random as _random
+        worker_seed = seed + worker_id
+        _random.seed(worker_seed)
+        np.random.seed(worker_seed)
+        torch.manual_seed(worker_seed)
+    g = torch.Generator()
+    g.manual_seed(seed)
+    return _worker_init_fn, g
+
+
+def list_event_indices(config: dict) -> List[Dict[str, Any]]:
+    """Return the unique events present in the (filtered) training dataset.
+    Each entry is {'event_index': int, 'event': str, 'n_stations': int}, ordered
+    by event_index. These are exactly the events available as LOEO-CV folds.
+    """
+    dataset = _build_dataset(config)
+    counts: Dict[int, Dict[str, Any]] = {}
+    for s in dataset.samples:
+        ei = int(s.get('event_index', -1))
+        if ei not in counts:
+            counts[ei] = {'event_index': ei, 'event': str(s.get('event', '')), 'n_stations': 0}
+        counts[ei]['n_stations'] += 1
+    return [counts[k] for k in sorted(counts)]
+
+
+def get_data_loaders_loeo(config: dict, leave_out_event_index: int) -> Tuple[DataLoader, DataLoader, DataLoader]:
+    """Leave-one-event-out data loaders.
+    All stations of ``leave_out_event_index`` form the test set; the remaining
+    events are split into train/val (using ``validation_split``). This measures
+    cross-event extrapolation rather than the same-event interpolation of the
+    standard random split.
+    """
+    dataset = _build_dataset(config)
+    batch_size = config['training']['batch_size']
+    val_split = config['training']['validation_split']
+    seed = int((config.get('training', {}) or {}).get('random_seed', 42))
+
+    test_idx = [i for i, s in enumerate(dataset.samples)
+                if int(s.get('event_index', -1)) == leave_out_event_index]
+    rest_idx = [i for i, s in enumerate(dataset.samples)
+                if int(s.get('event_index', -1)) != leave_out_event_index]
+    if not test_idx:
+        raise ValueError(f"leave_out_event_index={leave_out_event_index} has no stations in the dataset")
+
+    perm = torch.randperm(len(rest_idx), generator=torch.Generator().manual_seed(seed)).tolist()
+    rest_idx = [rest_idx[p] for p in perm]
+    n_val = int(len(rest_idx) * val_split)
+    val_idx = rest_idx[:n_val]
+    train_idx = rest_idx[n_val:]
+
+    train_dataset = Subset(dataset, train_idx)
+    val_dataset = Subset(dataset, val_idx)
+    test_dataset = Subset(dataset, test_idx)
+
+    worker_init_fn, g = _make_worker_init_and_gen(seed)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True,
+                              worker_init_fn=worker_init_fn, generator=g)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    return train_loader, val_loader, test_loader
+
+
+def get_data_loaders(config: dict) -> Tuple[DataLoader, DataLoader, DataLoader]:
+    batch_size = config['training']['batch_size']
+    val_split = config['training']['validation_split']
+    test_split = config['training']['test_split']
+
+    dataset = _build_dataset(config)
+
     # Split
     total_size = len(dataset)
     test_size = int(total_size * test_split)

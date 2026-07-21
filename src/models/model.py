@@ -58,7 +58,11 @@ class PINNModel(nn.Module):
             batch_first=True,
             activation='gelu',
         )
-        self.transformer = nn.TransformerEncoder(encoder_layer, num_layers=n_trans_layers)
+        # transformer_num_layers=0 -> Transformer branch disabled (TCN-only backbone)
+        self.transformer = (
+            nn.TransformerEncoder(encoder_layer, num_layers=n_trans_layers)
+            if n_trans_layers > 0 else None
+        )
         self.positional_encoding = SinusoidalPositionalEncoding(self.hidden_dim)
 
         # Transformer 后添加 LayerNorm 稳定输出
@@ -100,7 +104,8 @@ class PINNModel(nn.Module):
         if self.use_meta and meta is not None:
             meta_emb = self.meta_embed(meta)
             seq = seq + meta_emb.unsqueeze(1)
-        seq = self.transformer(seq)          # (B, T, C)
+        if self.transformer is not None:
+            seq = self.transformer(seq)      # (B, T, C)
         seq = self.post_transformer_norm(seq)  # LayerNorm 稳定输出
         feat = seq.transpose(1, 2)           # (B, C, T)
 
@@ -123,7 +128,8 @@ class PINNModel(nn.Module):
         shapes['to_seq'] = list(seq.shape)
         seq = self.positional_encoding(seq)
         shapes['pos'] = list(seq.shape)
-        seq = self.transformer(seq)
+        if self.transformer is not None:
+            seq = self.transformer(seq)
         shapes['transformer'] = list(seq.shape)
         feat = seq.transpose(1, 2)
         shapes['to_feat'] = list(feat.shape)

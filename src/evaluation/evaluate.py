@@ -45,6 +45,7 @@ def evaluate(
     save_plots: bool = True,
     show_plots: bool = False,
     save_metrics: bool = True,
+    test_loader=None,
 ) -> dict[str, object]:
     """评估已训练模型在测试集上的表现并生成可视化散点图
     参数:
@@ -82,8 +83,9 @@ def evaluate(
         _, results_dir = create_run_dir(results_root, run_id=results_run_id)
         results_run_id = results_dir.name
     
-    # 加载测试集
-    train_loader, _, test_loader = get_data_loaders(config)
+    # 加载测试集；test_loader 不为空时使用注入的测试集（如 LOEO-CV 留出事件）
+    if test_loader is None:
+        _, _, test_loader = get_data_loaders(config)
     
     if len(test_loader) == 0:
         print("未找到测试数据。")

@@ -1,0 +1,40 @@
+# E1.B Backbone ablation: TCN+Transformer hybrid vs TCN-only vs Transformer-only.
+# All use the headline farOnly_lp100 loss config (far-field P+S, no intermediate,
+# lambda_mag=1.0, lambda_synth=0.5, radiation_pattern_mode=full). Same seed=42.
+# Backbone is toggled by zeroing one branch (empty ModuleList -> passthrough):
+#   - hybrid:  num_tcn_blocks=6, transformer_num_layers=3 (reproduces headline)
+#   - tcn_only:        transformer_num_layers=0
+#   - transformer_only: num_tcn_blocks=0
+experiments:
+  - name: farOnly_lp100_hybrid
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=1.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=false
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+      - model.num_tcn_blocks=6
+      - model.transformer_num_layers=3
+
+  - name: farOnly_lp100_tcn_only
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=1.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=false
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+      - model.num_tcn_blocks=6
+      - model.transformer_num_layers=0
+
+  - name: farOnly_lp100_transformer_only
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=1.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=false
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+      - model.num_tcn_blocks=0
+      - model.transformer_num_layers=3

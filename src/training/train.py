@@ -21,7 +21,7 @@ from src.training.loss_stf_rate import STFRateWaveformLoss
 from src.utils.device import configure_runtime, get_preferred_device
 from src.utils.run_dirs import create_run_dir, make_run_id
 
-def train(config: dict | None = None) -> dict[str, object]:
+def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict[str, object]:
     """训练 PINN 模型（包含物理约束项）
     参数:
         无（从 configs/config.yaml 读取超参数与路径）
@@ -62,8 +62,11 @@ def train(config: dict | None = None) -> dict[str, object]:
     print(f"本次训练输出目录: {models_dir}")
     print(f"已保存配置快照: {config_snapshot_path}")
     
-    # 加载数据集（训练/验证/测试划分）
-    train_loader, val_loader, test_loader = get_data_loaders(config)
+    # 加载数据集（训练/验证/测试划分）；data_loaders 不为空时使用注入的加载器（如 LOEO-CV）
+    if data_loaders is not None:
+        train_loader, val_loader, test_loader = data_loaders
+    else:
+        train_loader, val_loader, test_loader = get_data_loaders(config)
     
     # 数据集检查输出
     try:
@@ -133,8 +136,46 @@ def train(config: dict | None = None) -> dict[str, object]:
     es_min_delta = float(config['training'].get('early_stop_min_delta', 0.0) or 0.0)
     es_counter = 0
     
+    # 课程学习配置（E2.4）
+    cl_cfg = (config.get('training', {}) or {}).get('curriculum_learning', {}) or {}
+    cl_enabled = bool(cl_cfg.get('enabled', False))
+    cl_strategy = str(cl_cfg.get('strategy', 'switch')).lower()
+    cl_switch_epoch = int(cl_cfg.get('switch_epoch', 100))
+    cl_start_mode = str(cl_cfg.get('start_mode', 'simplified')).lower()
+    cl_end_mode = str(cl_cfg.get('end_mode', 'full')).lower()
+    cl_linear_start = int(cl_cfg.get('linear_start_epoch', 0))
+    cl_linear_end = int(cl_cfg.get('linear_end_epoch', 100))
+    if cl_enabled:
+        print(f"课程学习: 策略={cl_strategy}, {cl_start_mode} → {cl_end_mode}")
+        if cl_strategy == 'switch':
+            print(f"  硬切换于 Epoch {cl_switch_epoch}")
+        else:
+            print(f"  线性过渡 Epoch {cl_linear_start} → {cl_linear_end}")
+
     print("开始训练...")
     for epoch in range(epochs):
+        # 课程学习：动态调整辐射模式
+        if cl_enabled and use_stf_rate_loss:
+            if cl_strategy == 'switch':
+                if epoch < cl_switch_epoch:
+                    criterion_2.radiation_mode = cl_start_mode
+                else:
+                    criterion_2.radiation_mode = cl_end_mode
+            elif cl_strategy == 'linear':
+                # 线性过渡：在 start_mode 和 end_mode 之间混合
+                # 通过随机选择模式来近似线性过渡
+                if epoch < cl_linear_start:
+                    criterion_2.radiation_mode = cl_start_mode
+                elif epoch >= cl_linear_end:
+                    criterion_2.radiation_mode = cl_end_mode
+                else:
+                    progress = (epoch - cl_linear_start) / max(cl_linear_end - cl_linear_start, 1)
+                    # 以 progress 的概率使用 end_mode
+                    if random.random() < progress:
+                        criterion_2.radiation_mode = cl_end_mode
+                    else:
+                        criterion_2.radiation_mode = cl_start_mode
+
         model.train()
         train_loss_total = 0.0
         train_data_loss_total = 0.0
@@ -149,6 +190,7 @@ def train(config: dict | None = None) -> dict[str, object]:
             magnitude = batch['magnitude'].to(device)
             theta_deg = batch.get('theta_deg', torch.tensor(0.0)).to(device)
             phi_deg = batch.get('phi_deg', torch.tensor(0.0)).to(device)
+            phi_slip_deg = batch.get('phi_slip_deg', phi_deg).to(device)
             stf_log = batch.get('stf_log', None)
             stf_true = batch.get('stf', None)
             has_stf = batch.get('has_stf', None)
@@ -187,19 +229,19 @@ def train(config: dict | None = None) -> dict[str, object]:
                     radial_obs=radial,
                     r_m=distance,
                     theta_deg=theta_deg,
-                    phi_deg=phi_deg,
+                    phi_deg=phi_slip_deg,
                     dt=dt_val,
                     stf_true=stf_true,
                     has_stf=has_stf,
                     true_mag=mag_from_stf,
                 )
                 data_loss = torch.tensor(float(loss_dict.get('L_MSE', 0.0)), device=device)
-                phys_loss = torch.tensor(float(loss_dict.get('L_physics', 0.0) + loss_dict.get('L_wave', 0.0)), device=device)
+                phys_loss = torch.tensor(float(loss_dict.get('L_mag', 0.0) + loss_dict.get('L_synth', 0.0)), device=device)
             else:
                 loss, data_loss, phys_loss, _ = criterion_1(
                     pred_log, stf_log, mag_from_stf, distance,
                     theta_deg,
-                    phi_deg,
+                    phi_slip_deg,
                     dt=dt_val,
                     stf_true=stf_true,
                     has_stf=has_stf,
@@ -239,6 +281,7 @@ def train(config: dict | None = None) -> dict[str, object]:
                 magnitude = batch['magnitude'].to(device)
                 theta_deg = batch.get('theta_deg', torch.tensor(0.0)).to(device)
                 phi_deg = batch.get('phi_deg', torch.tensor(0.0)).to(device)
+                phi_slip_deg = batch.get('phi_slip_deg', phi_deg).to(device)
                 stf_log = batch.get('stf_log', None)
                 stf_true = batch.get('stf', None)
                 has_stf = batch.get('has_stf', None)
@@ -274,7 +317,7 @@ def train(config: dict | None = None) -> dict[str, object]:
                         radial_obs=radial,
                         r_m=distance,
                         theta_deg=theta_deg,
-                        phi_deg=phi_deg,
+                        phi_deg=phi_slip_deg,
                         dt=dt_val,
                         stf_true=stf_true,
                         has_stf=has_stf,
@@ -309,7 +352,7 @@ def train(config: dict | None = None) -> dict[str, object]:
                     mag_from_stf = magnitude
                 loss, _, _, _ = criterion_1(
                     pred_log, stf_log, mag_from_stf, distance,
-                    theta_deg, phi_deg, dt=dt_val, stf_true=stf_true, has_stf=has_stf
+                    theta_deg, phi_slip_deg, dt=dt_val, stf_true=stf_true, has_stf=has_stf
                 )
                 # loss = criterion(pred_log, stf_log)
 

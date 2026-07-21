@@ -1,0 +1,84 @@
+# E1.1 λ_physics 敏感性分析
+# λ_physics ∈ {0.1, 0.2, 0.4, 0.6, 0.8, 1.0} × radiation_pattern_mode ∈ {simplified, full}
+# 共 12 组实验，每组 200 epochs
+#
+# 用法:
+#   python scripts/experiments/run_experiment.py \
+#       --sweep configs/sweep_e1_1_lambda_mag.yaml \
+#       --output-root ./outputs_experiments/e1_1 \
+#       --skip-unseen
+
+experiments:
+  # ── simplified 模式 ──
+  - name: lp010_simplified
+    set:
+      - training.stf_rate_loss.lambda_mag=0.1
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+
+  - name: lp020_simplified
+    set:
+      - training.stf_rate_loss.lambda_mag=0.2
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+
+  - name: lp040_simplified
+    set:
+      - training.stf_rate_loss.lambda_mag=0.4
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+
+  - name: lp060_simplified
+    set:
+      - training.stf_rate_loss.lambda_mag=0.6
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+
+  - name: lp080_simplified
+    set:
+      - training.stf_rate_loss.lambda_mag=0.8
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+
+  - name: lp100_simplified
+    set:
+      - training.stf_rate_loss.lambda_mag=1.0
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+
+  # ── full 模式 ──
+  - name: lp010_full
+    set:
+      - training.stf_rate_loss.lambda_mag=0.1
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=full
+
+  - name: lp020_full
+    set:
+      - training.stf_rate_loss.lambda_mag=0.2
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=full
+
+  - name: lp040_full
+    set:
+      - training.stf_rate_loss.lambda_mag=0.4
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=full
+
+  - name: lp060_full
+    set:
+      - training.stf_rate_loss.lambda_mag=0.6
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=full
+
+  - name: lp080_full
+    set:
+      - training.stf_rate_loss.lambda_mag=0.8
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=full
+
+  - name: lp100_full
+    set:
+      - training.stf_rate_loss.lambda_mag=1.0
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.radiation_pattern_mode=full

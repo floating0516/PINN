@@ -1,0 +1,62 @@
+# E1.3 物理项消融实验
+# 5 组: 仅远场P+S / 仅远场P / 仅远场S / 仅中场 / 全量
+# 均使用 full 辐射模式 + 当前最优 lambda_mag=0.4
+#
+# 用法:
+#   python scripts/experiments/run_experiment.py \
+#       --sweep configs/sweep_e1_3_ablation.yaml \
+#       --output-root ./outputs_experiments/e1_3 \
+#       --skip-unseen
+
+experiments:
+  # (a) 仅远场 P+S（关闭中场）
+  - name: ablation_far_only
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=0.4
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=false
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  # (b) 仅远场 P
+  - name: ablation_far_P_only
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=0.4
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=false
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=false
+
+  # (c) 仅远场 S
+  - name: ablation_far_S_only
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=0.4
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=false
+      - training.stf_rate_loss.include_far_field_P=false
+      - training.stf_rate_loss.include_far_field_S=true
+
+  # (d) 仅中场 P+S（关闭远场）
+  - name: ablation_int_only
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=0.4
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=false
+      - training.stf_rate_loss.include_far_field_S=false
+
+  # (e) 全量（远场+中场，当前默认）
+  - name: ablation_full
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=0.4
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+      - training.stf_rate_loss.include_intermediate_field_P=true
+      - training.stf_rate_loss.include_intermediate_field_S=true

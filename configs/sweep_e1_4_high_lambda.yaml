@@ -1,0 +1,67 @@
+# E1.4 高 λ_mag sweep + far_only 弱信号改进
+#
+# 主线 A: lp100_full 基线，扩大 λ_mag → 1.5 / 2.0 / 3.0
+#   - 全量物理项（中场+远P+远S），full 辐射花型
+#   - 延续 E1.1 未饱和趋势，观察拐点
+#
+# 主线 B: far_only（仅远场P+S，无中场）× λ_mag 1.0 / 1.5
+#   - 探索 far_only 在 cm0（全台站）下的退化是否因 λ 偏低
+#
+# 用法:
+#   python scripts/experiments/run_experiment.py \
+#       --sweep configs/sweep_e1_4_high_lambda.yaml \
+#       --output-root ./outputs_experiments/e1_4 \
+#       --resume
+
+experiments:
+  # ── 主线 A: 全量物理 × 高 λ ──────────────────────────────────────────
+  # A1: λ_mag=1.5，全量物理（对照 E1.1 lp100_full=0.0987）
+  - name: full_lp150
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=1.5
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  # A2: λ_mag=2.0
+  - name: full_lp200
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=2.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  # A3: λ_mag=3.0（观察是否过拟合或饱和）
+  - name: full_lp300
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=3.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=true
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  # ── 主线 B: far_only × 高 λ（探索 cm0 退化原因）────────────────────
+  # B1: far_only + λ_mag=1.0（对照：E1.3 far_only 用 λ=0.4，cm0=0.2072）
+  - name: farOnly_lp100
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=1.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=false
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true
+
+  # B2: far_only + λ_mag=1.5
+  - name: farOnly_lp150
+    set:
+      - training.stf_rate_loss.lambda_synth=0.5
+      - training.stf_rate_loss.lambda_mag=1.5
+      - training.stf_rate_loss.radiation_pattern_mode=full
+      - training.stf_rate_loss.include_intermediate_field=false
+      - training.stf_rate_loss.include_far_field_P=true
+      - training.stf_rate_loss.include_far_field_S=true

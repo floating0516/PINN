@@ -19,7 +19,7 @@ dataset:
   window_max_sec: 600.0  # 结束时间（秒）
 
   # STF 相关
-  stf_path: /Users/lihe/Library/Mobile Documents/com~apple~CloudDocs/PINN_Mag/dataset/STF_SCARDEC  # STF 目录
+  stf_path: /path/to/STF_SCARDEC  # STF 目录
   stf_m_ref: 1.0e18  # 矩率缩放参考值
 
   # 几何兜底值
@@ -33,7 +33,7 @@ dataset:
   p_baseline_mode: mean  # 基线模式
 
   # 样本筛选
-  radial_peak_min_cm: 1 # 径向峰值阈值（cm）
+  radial_peak_min_cm: 2.0 # 径向峰值阈值（cm）
 
   # 滤波参数
   filter:
@@ -58,7 +58,7 @@ model:
 # output_dir 当前主流程弱依赖
 
 paths:
-  data_path: /Users/lihe/Library/Mobile Documents/com~apple~CloudDocs/PINN_Mag/dataset/gnss_events_matched.gcmt.npz  # 主数据文件
+  data_path: /path/to/gnss_events_matched.gcmt.npz  # 主数据文件
   output_dir: ./outputs  # 总输出目录
   logs_dir: ./outputs/logs  # 日志目录
   models_dir: ./outputs/models  # 模型目录
@@ -80,6 +80,7 @@ physics:
 
 evaluation:
   sample_grid_rows: 4  # 样本诊断图行数
+  unseen_event_dirs: []  # 未见事件目录列表，供 run_experiment.py 使用
 
 # 训练相关：当前主路线为 stf_rate
 # physics_loss_weight / stf_loss_weight 偏旧路线参数
@@ -119,11 +120,20 @@ training:
   # 当前主损失：stf_rate_loss
   stf_rate_loss:
     lambda_MSE: 1.0  # 数据拟合权重
-    lambda_wave: 0.0  # 波形项权重
+    lambda_synth: 0.5  # 正演合成波形项权重
     lambda_nonneg: 0.5  # 非负约束权重
-    lambda_smooth: 0.0  # 平滑项权重
-    lambda_physics: 0.4  # 物理项权重
+    lambda_mag: 0.4  # 震级一致性项权重
     lambda_shape: 0.1  # 形状项权重
     include_intermediate_field: true  # 是否包含中场项
-    radiation_pattern_mode: simplified  # 辐射模式
+    radiation_pattern_mode: full  # 辐射模式
     skip_travel_delays: true  # 是否跳过传播时延
+
+  # 课程学习策略（E2.4）
+  curriculum_learning:
+    enabled: false  # 是否启用课程学习
+    strategy: switch  # 策略: switch（硬切换）或 linear（线性过渡）
+    switch_epoch: 100  # 硬切换策略下的切换轮次
+    start_mode: simplified  # 初始辐射模式
+    end_mode: full  # 目标辐射模式
+    linear_start_epoch: 0  # 线性过渡起始轮次
+    linear_end_epoch: 100  # 线性过渡结束轮次

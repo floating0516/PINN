@@ -226,6 +226,10 @@ def forward_displacement_from_rate(
     C_far_S: torch.Tensor,
     include_intermediate: bool = True,
     skip_delays: bool = False,
+    include_far_P: bool = True,
+    include_far_S: bool = True,
+    include_intermediate_P: bool = True,
+    include_intermediate_S: bool = True,
 ) -> torch.Tensor:
     """
     从矩率正演合成位移 (EEW_0012 Equation 3)
@@ -301,12 +305,16 @@ def forward_displacement_from_rate(
     
     # 远场贡献: 使用矩率 dot_M0 (EEW_0012 Eq.3)
     # u_far = C_far_P * dot_M0(t-tP) + C_far_S * dot_M0(t-tS)
-    u_far = C_far_P_t * rate_p + C_far_S_t * rate_s
+    u_far_P = C_far_P_t * rate_p if include_far_P else torch.zeros_like(rate_p)
+    u_far_S = C_far_S_t * rate_s if include_far_S else torch.zeros_like(rate_s)
+    u_far = u_far_P + u_far_S
     
     # 中场贡献: 使用矩历史 M0 (EEW_0012 Eq.3)
     # u_int = C_int_P * M0(t-tP) + C_int_S * M0(t-tS)
     if include_intermediate:
-        u_int = C_int_P_t * M0_p + C_int_S_t * M0_s
+        u_int_P = C_int_P_t * M0_p if include_intermediate_P else torch.zeros_like(M0_p)
+        u_int_S = C_int_S_t * M0_s if include_intermediate_S else torch.zeros_like(M0_s)
+        u_int = u_int_P + u_int_S
     else:
         u_int = torch.zeros_like(u_far)
     
@@ -333,10 +341,9 @@ def pinn_loss_stf_rate(
     free_surface: float = 1.0,
     attenuation: float = 1.0,
     lambda_MSE: float = 1.0,
-    lambda_wave: float = 0.5,
+    lambda_synth: float = 0.5,
     lambda_nonneg: float = 1.0,
-    lambda_smooth: float = 0.1,
-    lambda_physics: float = 0.1,
+    lambda_mag: float = 0.1,
     lambda_shape: float = 0.1,
     has_ref: torch.Tensor | None = None,
     include_intermediate: bool = True,
@@ -345,6 +352,10 @@ def pinn_loss_stf_rate(
     true_mag: torch.Tensor | None = None,
     stf_m_ref: float = 1.0e18,
     skip_delays: bool = False,
+    include_far_P: bool = True,
+    include_far_S: bool = True,
+    include_intermediate_P: bool = True,
+    include_intermediate_S: bool = True,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """
     基于物理的 PINN 损失函数 (EEW_0012 实现)
@@ -407,12 +418,16 @@ def pinn_loss_stf_rate(
         C_int_P, C_int_S, C_far_P, C_far_S,
         include_intermediate=include_intermediate,
         skip_delays=skip_delays,
+        include_far_P=include_far_P,
+        include_far_S=include_far_S,
+        include_intermediate_P=include_intermediate_P,
+        include_intermediate_S=include_intermediate_S,
     )
 
     # 波形损失 (仅用观测值归一化，保证梯度稳定性)
     # 用 u_obs 的最大值作为尺度因子（不依赖预测值，避免训练初期尺度波动）
     u_scale = u_obs.abs().amax(dim=1, keepdim=True) + 1e-12  # (B, 1)
-    L_wave = F.mse_loss(u_hat / u_scale, u_obs / u_scale)
+    L_synth = F.mse_loss(u_hat / u_scale, u_obs / u_scale)
 
     # MSE 损失（在 log1p 空间比较，避免尺度问题）
     if rate_ref is not None and pred_rate_log is not None:
@@ -445,13 +460,13 @@ def pinn_loss_stf_rate(
         L_smooth = rate_hat.new_tensor(0.0)
 
     # 物理约束: 震级一致性 (EEW_0012 Equation 10)
-    L_physics = rate_hat.new_tensor(0.0)
+    L_mag = rate_hat.new_tensor(0.0)
     if true_mag is not None:
         dt_scalar = float(dt_b[0].item()) if dt_b.dim() > 0 else float(dt)
         M0_seq = torch.cumsum(torch.clamp(rate_hat, min=0.0), dim=1) * dt_scalar
         M0_peak = torch.max(M0_seq, dim=1).values
         Mw_pred = compute_moment_magnitude(M0_peak)
-        L_physics = F.mse_loss(Mw_pred, true_mag.view(-1))
+        L_mag = F.mse_loss(Mw_pred, true_mag.view(-1))
 
     # 形状损失: 归一化后比较 STF 形状
     L_shape = rate_hat.new_tensor(0.0)
@@ -471,20 +486,18 @@ def pinn_loss_stf_rate(
     # 总损失
     total_loss = (
         float(lambda_MSE) * L_MSE
-        + float(lambda_wave) * L_wave
+        + float(lambda_synth) * L_synth
         + float(lambda_nonneg) * L_nonneg
-        + float(lambda_smooth) * L_smooth
-        + float(lambda_physics) * L_physics
+        + float(lambda_mag) * L_mag
         + float(lambda_shape) * L_shape
     )
 
     loss_dict = {
         "L_total": float(total_loss.detach().cpu()),
         "L_MSE": float(L_MSE.detach().cpu()),
-        "L_wave": float(L_wave.detach().cpu()),
+        "L_synth": float(L_synth.detach().cpu()),
         "L_nonneg": float(L_nonneg.detach().cpu()),
-        "L_smooth": float(L_smooth.detach().cpu()),
-        "L_physics": float(L_physics.detach().cpu()),
+        "L_mag": float(L_mag.detach().cpu()),
         "L_shape": float(L_shape.detach().cpu()),
     }
     return total_loss, loss_dict
@@ -514,10 +527,9 @@ class STFRateWaveformLoss(nn.Module):
 
         # 损失权重
         self.lambda_MSE = float(stf_cfg.get("lambda_MSE", 1.0))
-        self.lambda_wave = float(stf_cfg.get("lambda_wave", 0.5))
+        self.lambda_synth = float(stf_cfg.get("lambda_synth", 0.5))
         self.lambda_nonneg = float(stf_cfg.get("lambda_nonneg", 1.0))
-        self.lambda_smooth = float(stf_cfg.get("lambda_smooth", 0.1))
-        self.lambda_physics = float(stf_cfg.get("lambda_physics", 0.1))
+        self.lambda_mag = float(stf_cfg.get("lambda_mag", 0.1))
         self.lambda_shape = float(stf_cfg.get("lambda_shape", 0.1))
 
         # 矩率表示方式
@@ -538,6 +550,10 @@ class STFRateWaveformLoss(nn.Module):
         self.include_intermediate = bool(stf_cfg.get("include_intermediate_field", True))
         self.radiation_mode = str(stf_cfg.get("radiation_pattern_mode", "simplified")).lower()
         self.skip_travel_delays = bool(stf_cfg.get("skip_travel_delays", True))
+        self.include_far_P = bool(stf_cfg.get("include_far_field_P", True))
+        self.include_far_S = bool(stf_cfg.get("include_far_field_S", True))
+        self.include_intermediate_P = bool(stf_cfg.get("include_intermediate_field_P", True))
+        self.include_intermediate_S = bool(stf_cfg.get("include_intermediate_field_S", True))
 
     def _decode_rate(self, pred_rate: torch.Tensor) -> torch.Tensor:
         """将网络输出解码为真实矩率值"""
@@ -603,7 +619,7 @@ class STFRateWaveformLoss(nn.Module):
 
         # 调用核心损失函数
         # 注意: 传入 pred_rate (log1p 空间) 和 rate_ref_log (log1p 空间) 用于 MSE
-        #       传入 rate_hat (原始空间) 用于物理正演计算 L_wave
+        #       传入 rate_hat (原始空间) 用于物理正演计算 L_synth
         total_loss, loss_dict = pinn_loss_stf_rate(
             rate_hat=rate_hat,              # 原始尺度，用于物理正演
             rate_ref=rate_ref_log,          # log1p 尺度，用于 MSE
@@ -619,10 +635,9 @@ class STFRateWaveformLoss(nn.Module):
             free_surface=self.free_surface,
             attenuation=self.attenuation,
             lambda_MSE=self.lambda_MSE,
-            lambda_wave=self.lambda_wave,
+            lambda_synth=self.lambda_synth,
             lambda_nonneg=self.lambda_nonneg,
-            lambda_smooth=self.lambda_smooth,
-            lambda_physics=self.lambda_physics,
+            lambda_mag=self.lambda_mag,
             lambda_shape=self.lambda_shape,
             has_ref=has_ref,
             include_intermediate=self.include_intermediate,
@@ -631,6 +646,10 @@ class STFRateWaveformLoss(nn.Module):
             true_mag=true_mag,
             stf_m_ref=self.stf_m_ref,
             skip_delays=self.skip_travel_delays,
+            include_far_P=self.include_far_P,
+            include_far_S=self.include_far_S,
+            include_intermediate_P=self.include_intermediate_P,
+            include_intermediate_S=self.include_intermediate_S,
         )
         return total_loss, loss_dict
 

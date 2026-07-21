@@ -3,3 +3,4 @@ torch
 pyyaml
 matplotlib
 scikit-learn
+pygmt

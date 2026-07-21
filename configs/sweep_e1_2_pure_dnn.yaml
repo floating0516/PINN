@@ -1,0 +1,22 @@
+# E1.2 纯数据驱动对照组
+# lambda_mag=0.0, lambda_synth=0.0 禁用全部物理约束
+# 两种 radiation_pattern_mode 各一组（对照用途）
+#
+# 用法:
+#   python scripts/experiments/run_experiment.py \
+#       --sweep configs/sweep_e1_2_pure_dnn.yaml \
+#       --output-root ./outputs_experiments/e1_2 \
+#       --skip-unseen
+
+experiments:
+  - name: pure_dnn_simplified
+    set:
+      - training.stf_rate_loss.lambda_mag=0.0
+      - training.stf_rate_loss.lambda_synth=0.0
+      - training.stf_rate_loss.radiation_pattern_mode=simplified
+
+  - name: pure_dnn_full
+    set:
+      - training.stf_rate_loss.lambda_mag=0.0
+      - training.stf_rate_loss.lambda_synth=0.0
+      - training.stf_rate_loss.radiation_pattern_mode=full
