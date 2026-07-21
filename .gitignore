@@ -4,8 +4,32 @@ __pycache__/
 .pytest_cache/
 .venv/
 .claude/
-outputs/
 .envrc
-scripts/
-tests/
+.worktrees/
+
+# Local tool state
+.agent_context/
+.agents/
+.codegraph/
+.devin_backup_figs/
+.multica/
+*.code-workspace
+test.yaml
+texput.log
+
+# Runtime artifacts
+outputs/
+outputs_experiments/
+tests/figure/
+
+# Data, references, manuscripts, and local plans
+dataset/
 ref/
+paper/
+docs/superpowers/
+AGENTS.md
+description.md
+gmt.conf
+*.drawio
+*.drawio.png
+/pinn_model_loss_architecture.png
