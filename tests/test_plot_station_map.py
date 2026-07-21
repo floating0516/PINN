@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from scripts.plot_station_map import _inset_region, build_event_plot_plan
+from scripts.plotting.plot_station_map import _inset_region, build_event_plot_plan
 
 
 STATION_ROWS = {

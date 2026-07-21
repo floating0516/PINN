@@ -4,7 +4,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.run_unseen_event_experiments import build_experiment_specs, resolve_event_dirs
+from scripts.experiments.run_unseen_event_experiments import (
+    build_experiment_specs,
+    resolve_event_dirs,
+)
 
 
 ROOT = Path('/Users/lihe/Library/Mobile Documents/com~apple~CloudDocs/GNSS_EQDATA')

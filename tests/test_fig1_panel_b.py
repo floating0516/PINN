@@ -5,10 +5,16 @@ import json
 import sys
 
 import numpy as np
+import pytest
 from PIL import Image
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 FIG1_SRC = PROJECT_ROOT / "paper" / "srl" / "figure_sources" / "fig1_event_map"
+if not (FIG1_SRC / "plot_figure1_with_panel_b.py").is_file():
+    pytest.skip(
+        "paper figure source is not included in the lightweight package",
+        allow_module_level=True,
+    )
 if str(FIG1_SRC) not in sys.path:
     sys.path.insert(0, str(FIG1_SRC))
 

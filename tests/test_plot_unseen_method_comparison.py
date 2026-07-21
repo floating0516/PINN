@@ -6,7 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from scripts.plot_unseen_method_comparison import (
+from scripts.plotting.plot_unseen_method_comparison import (
     default_output_path,
     load_event_summary_rows,
     plot_method_comparison,

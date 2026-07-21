@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from scripts.evaluate_pgd_scaling_laws import (
+from scripts.evaluation.evaluate_pgd_scaling_laws import (
     azimuth_deg,
     compute_horizontal_pgd,
     compute_pgd_3d,
@@ -69,7 +69,7 @@ def test_parse_law_names_rejects_unknown():
 
 
 def test_plot_outputs_creates_scatter_and_bar_figures(tmp_path: Path):
-    from scripts.evaluate_pgd_scaling_laws import write_plot_outputs
+    from scripts.evaluation.evaluate_pgd_scaling_laws import write_plot_outputs
 
     rows = [
         {"event": "E1", "mw_ref": 7.0, "method": "melgar", "mw_pred": 7.1, "error": 0.1, "iqr": 0.2, "n_stations": 3},
