@@ -478,7 +478,7 @@ git commit -m "feat: add catalog magnitude prediction head"
 - Modify: `tests/test_event_metrics.py`
 - Modify: `tests/test_unseen_event_eval.py`
 
-- [ ] **Step 1: Write failing active-workflow integration tests**
+- [x] **Step 1: Write failing active-workflow integration tests**
 
 ```python
 def test_v2_batch_uses_catalog_magnitude_as_scalar_target(tmp_path: Path) -> None:
@@ -503,13 +503,13 @@ def test_active_training_selects_best_by_station_catalog_mae_without_stopping(tm
     assert result["checkpoint_metric"] == "station_mae_catalog"
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source /home/lihe/.config/pinn/server.env && "$PINN_ENV/bin/python" -m pytest tests/test_training_checkpointing.py tests/test_event_metrics.py tests/test_unseen_event_eval.py -q`
 
 Expected: FAIL because active callers still integrate STF and the log omits station catalog MAE.
 
-- [ ] **Step 3: Update training**
+- [x] **Step 3: Update training**
 
 For the active workflow, call `model.predict_heads`, pass both heads to the loss,
 accumulate station-level catalog MAE from `prediction.catalog_mw`, and save
@@ -519,14 +519,14 @@ RNG, scheduler, signal, and resume behavior. Training CSV columns must include
 `validation_station_mae_catalog`, `validation_event_mae_catalog`, and
 `window_mw_mean`.
 
-- [ ] **Step 4: Update internal and external evaluation**
+- [x] **Step 4: Update internal and external evaluation**
 
 Use `prediction.catalog_mw` as `mw_pred`. Decode and integrate the STF only into
 `mw_window_pred`/time-series diagnostics. Internal primary output remains the
 the `station_mae` value returned by `summarize_predictions`; event median metrics and
 the eight external events remain secondary diagnostics.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run the focused command from Step 2. Expected: all focused tests pass.
 

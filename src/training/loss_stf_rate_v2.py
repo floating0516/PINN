@@ -410,6 +410,9 @@ class STFRateWaveformLossV2(nn.Module):
         super().__init__()
         validate_config_v2(config)
         self.config = config
+        self.active_workflow = (
+            config.get("workflow") == "station_random_shifted_stf"
+        )
         loss_config = config["training"]["stf_rate_loss"]
         self.lambda_MSE = float(loss_config["lambda_MSE"])
         self.lambda_synth = float(loss_config["lambda_synth"])
@@ -479,6 +482,10 @@ class STFRateWaveformLossV2(nn.Module):
         has_stf: torch.Tensor | None = None,
         true_mag: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, float]]:
+        if self.active_workflow and pred_catalog_mw is None:
+            raise ValueError(
+                "active station workflow requires pred_catalog_mw"
+            )
         if radial_obs.ndim == 3 and radial_obs.shape[1] == 1:
             u_obs = radial_obs[:, 0, :]
         elif radial_obs.ndim == 2:

@@ -46,8 +46,9 @@ from src.data.metadata import metadata_distance_from_config
 from src.data.sample_builder import SampleRejected, build_station_sample
 from src.data.waveform import WaveformConfig, waveform_config_from_v2
 from src.evaluation.evaluate import (
+    _evaluation_time_steps,
     _ensure_time_steps,
-    _magnitude_from_rate,
+    _predict_outputs,
     magnitude_series_from_rate,
 )
 from src.evaluation.metrics import (
@@ -621,7 +622,6 @@ def evaluate_unseen_events(
     validate_config_on_startup(config)
 
     ds_cfg = config.get("dataset", {}) or {}
-    train_cfg = config.get("training", {}) or {}
     waveform_config = waveform_config_from_v2(config)
     threshold_cm = float(ds_cfg["radial_peak_min_cm"])
     if radial_peak_min_cm_override is not None:
@@ -636,13 +636,14 @@ def evaluate_unseen_events(
     criterion = (
         None if pipeline_version == 2 else PhysicsLoss(config).to(device)
     )
-    time_steps = int(train_cfg.get("time_steps", 200))
+    time_steps = _evaluation_time_steps(config)[0]
     stf_m_ref = float(
         (ds_cfg.get("stf", {}) or {}).get(
             "m_ref",
             ds_cfg.get("stf_m_ref", 1.0e18),
         )
     )
+    active_workflow = config.get("workflow") == "station_random_shifted_stf"
 
     station_rows: list[dict[str, Any]] = []
     event_rows: list[dict[str, Any]] = []
@@ -690,17 +691,22 @@ def evaluate_unseen_events(
                     torch.tensor([sample["theta_deg"]], dtype=torch.float32, device=device),
                     torch.tensor([sample["azimuth_deg"]], dtype=torch.float32, device=device),
                 )
-                rate_log = model(radial, meta=meta)
-                dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
-                dot_m0 = torch.clamp(dot_m0, min=0.0)
                 sample_dt = float(sample["waveform_dt_sec"])
-                mw_pred = float(
-                    _magnitude_from_rate(
-                        dot_m0,
-                        torch.tensor([sample_dt], device=device),
-                        pipeline_version=pipeline_version,
-                        legacy_criterion=criterion,
-                    )[0].item()
+                source_dt = 1.0 / float(ds_cfg["sample_rate_hz"])
+                prediction = _predict_outputs(
+                    model,
+                    radial,
+                    meta=meta,
+                    stf_m_ref=stf_m_ref,
+                    source_dt_sec=torch.tensor([source_dt], device=device),
+                    pipeline_version=pipeline_version,
+                    active_catalog_head=active_workflow,
+                    legacy_criterion=criterion,
+                )
+                dot_m0 = prediction.rate_nm_per_s
+                mw_pred = float(prediction.mw_pred[0].item())
+                mw_window_pred = float(
+                    prediction.mw_window_pred[0].item()
                 )
                 predictions.append(mw_pred)
 
@@ -732,6 +738,7 @@ def evaluate_unseen_events(
                     "event": event_label,
                     "station": station.station,
                     "mw_pred": mw_pred,
+                    "mw_window_pred": mw_window_pred,
                     "mw_catalog": bundle.magnitude,
                     "mw_stf_native": float("nan"),
                     "error_vs_catalog": mw_pred - bundle.magnitude,
@@ -757,7 +764,10 @@ def evaluate_unseen_events(
                     "pgd_error_ruhl": pgd_station_values["ruhl"] - bundle.magnitude,
                     "pgd_error_melgar": pgd_station_values["melgar"] - bundle.magnitude,
                 }
-                mw_series = magnitude_series_from_rate(dot_m0[0].view(-1), sample_dt)
+                mw_series = magnitude_series_from_rate(
+                    dot_m0[0].view(-1),
+                    source_dt,
+                )
                 station_rows.append(row)
                 panel_rows.append(
                     {
@@ -765,7 +775,7 @@ def evaluate_unseen_events(
                         "radial": np.asarray(sample["radial"], dtype=float),
                         "pred_rate": dot_m0[0].detach().cpu().numpy(),
                         "mw_series": mw_series,
-                        "time_axis": np.arange(dot_m0.shape[-1], dtype=float) * sample_dt,
+                        "time_axis": np.arange(dot_m0.shape[-1], dtype=float) * source_dt,
                     }
                 )
             if predictions:

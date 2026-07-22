@@ -2,11 +2,16 @@ import pytest
 import torch
 
 from src.evaluation.bootstrap import bootstrap_event_metrics
-from src.evaluation.evaluate import _evaluation_time_steps, _magnitude_from_rate
+from src.evaluation.evaluate import (
+    _evaluation_time_steps,
+    _magnitude_from_rate,
+    _predict_outputs,
+)
 from src.evaluation.metrics import (
     aggregate_event_predictions,
     summarize_predictions,
 )
+from src.models.model import PINNPrediction
 
 
 def test_dense_event_does_not_dominate_event_mae() -> None:
@@ -96,3 +101,52 @@ def test_v2_evaluation_keeps_waveform_and_stf_lengths_separate() -> None:
     }
 
     assert _evaluation_time_steps(config) == (6, 10)
+
+
+def test_active_evaluation_uses_three_hundred_step_station_window() -> None:
+    config = {
+        "pipeline_version": 2,
+        "workflow": "station_random_shifted_stf",
+        "dataset": {
+            "sample_rate_hz": 1.0,
+            "waveform": {"duration_sec": 200.0},
+            "stf": {
+                "duration_sec": 200.0,
+                "station_window_duration_sec": 300.0,
+            },
+        },
+        "training": {},
+    }
+
+    assert _evaluation_time_steps(config) == (200, 300)
+
+
+def test_active_evaluation_uses_scalar_mw_and_keeps_window_diagnostic() -> None:
+    class ScalarHeadModel:
+        def predict_heads(self, waveform, meta=None):
+            del meta
+            return PINNPrediction(
+                stf_encoded=torch.zeros(waveform.shape[0], 300),
+                catalog_mw=torch.full((waveform.shape[0],), 7.25),
+            )
+
+        def __call__(self, *_args, **_kwargs):
+            raise AssertionError("active evaluation must use predict_heads")
+
+    output = _predict_outputs(
+        ScalarHeadModel(),
+        torch.zeros(2, 1, 200),
+        meta=torch.zeros(2, 5),
+        stf_m_ref=1.0e18,
+        source_dt_sec=torch.ones(2),
+        pipeline_version=2,
+        active_catalog_head=True,
+        legacy_criterion=None,
+    )
+
+    assert torch.equal(output.mw_pred, torch.tensor([7.25, 7.25]))
+    torch.testing.assert_close(
+        output.mw_window_pred,
+        torch.tensor([0.6, 0.6]),
+    )
+    assert output.rate_nm_per_s.shape == (2, 300)

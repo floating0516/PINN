@@ -90,6 +90,7 @@ def _select_early_stop_value(
     values = {
         "val_loss": val_loss,
         "mw_mae": station_mw_mae,
+        "station_mae_catalog": station_mw_mae,
         "event_mae_catalog": event_mae_catalog,
     }
     if metric not in values:
@@ -116,10 +117,11 @@ def _prepare_v2_batch(
     waveform_valid_mask = batch["waveform_valid_mask"].to(device)
     stf_true = batch["stf"].to(device)
     has_stf = batch["has_stf"].to(device)
-    magnitude_target = str(
-        config["dataset"]["stf"]["magnitude_target"]
-    )
-    if magnitude_target == "stf_native":
+    active_workflow = config.get("workflow") == "station_random_shifted_stf"
+    magnitude_target = str(config["dataset"]["stf"]["magnitude_target"])
+    if active_workflow:
+        true_mag = batch["magnitude_catalog"].to(device)
+    elif magnitude_target == "stf_native":
         true_mag = batch["mw_stf_native"].to(device)
     elif magnitude_target == "catalog":
         true_mag = batch["magnitude_catalog"].to(device)
@@ -181,6 +183,7 @@ def _train_impl(
         raise ValueError('pretrain_path and resume_checkpoint are mutually exclusive')
 
     pipeline_version = int(config.get('pipeline_version', 1))
+    active_workflow = config.get('workflow') == 'station_random_shifted_stf'
     repository_root = Path(__file__).resolve().parents[2]
     started_at_utc = utc_now_iso()
     git_commit = current_git_commit(repository_root)
@@ -369,6 +372,10 @@ def _train_impl(
     es_patience = int(config['training'].get('early_stop_patience', 0) or 0)
     es_min_delta = float(config['training'].get('early_stop_min_delta', 0.0) or 0.0)
     es_counter = 0
+    checkpoint_metric = str(
+        config['training'].get('checkpoint_metric', str(es_metric))
+    )
+    selection_metric = checkpoint_metric if active_workflow else str(es_metric)
 
     if resume_payload is None:
         log_file = logs_dir / f"training_log_{run_id}.csv"
@@ -383,6 +390,9 @@ def _train_impl(
                     'Val_Loss',
                     'Val_MAE',
                     'Val_Event_MAE_Catalog',
+                    'validation_station_mae_catalog',
+                    'validation_event_mae_catalog',
+                    'window_mw_mean',
                     'LR',
                 ]
             )
@@ -569,7 +579,13 @@ def _train_impl(
             optimizer.zero_grad()
             
             # 前向计算
-            pred_log = model(radial, meta=meta)  # (B, T)
+            if active_workflow:
+                prediction = model.predict_heads(radial, meta=meta)
+                pred_log = prediction.stf_encoded
+                pred_catalog_mw = prediction.catalog_mw
+            else:
+                pred_log = model(radial, meta=meta)  # (B, T)
+                pred_catalog_mw = None
 
             # 统一使用 STF 积分 Mw 作为物理约束目标（与 evaluate.py 一致）
             if pipeline_version == 2:
@@ -583,6 +599,7 @@ def _train_impl(
                 if pipeline_version == 2:
                     loss, loss_dict = criterion_2(
                         pred_log,
+                        pred_catalog_mw=pred_catalog_mw,
                         radial_obs=radial,
                         source_distance_m=prepared_v2.source_distance_m,
                         theta_deg=prepared_v2.theta_deg,
@@ -645,6 +662,8 @@ def _train_impl(
         val_mw_mae_total = 0.0
         val_seen = 0
         val_mw_seen = 0
+        val_window_mw_total = 0.0
+        val_window_mw_seen = 0
         val_event_station_rows: list[dict[str, object]] = []
         
         with torch.no_grad():
@@ -679,7 +698,13 @@ def _train_impl(
                     dt_val = batch['dt'].mean().item()
                     meta = build_metadata_tensor(distance, theta_deg, phi_deg)
 
-                pred_log = model(radial, meta=meta)
+                if active_workflow:
+                    prediction = model.predict_heads(radial, meta=meta)
+                    pred_log = prediction.stf_encoded
+                    pred_catalog_mw = prediction.catalog_mw
+                else:
+                    pred_log = model(radial, meta=meta)
+                    pred_catalog_mw = None
                 
                 # 统一使用 STF 积分 Mw（与 evaluate.py 一致）
                 if pipeline_version == 2:
@@ -693,6 +718,7 @@ def _train_impl(
                     if pipeline_version == 2:
                         loss, loss_dict = criterion_2(
                             pred_log,
+                            pred_catalog_mw=pred_catalog_mw,
                             radial_obs=radial,
                             source_distance_m=prepared_v2.source_distance_m,
                             theta_deg=prepared_v2.theta_deg,
@@ -719,7 +745,9 @@ def _train_impl(
                     pred_dot_m0 = criterion_2._decode_rate(pred_log)
 
                     # 计算 Mw MAE（与 evaluate.py 一致的指标）
-                    if pipeline_version == 2:
+                    if active_workflow:
+                        pred_mw = pred_catalog_mw
+                    elif pipeline_version == 2:
                         pred_mw = moment_magnitude_from_rate(
                             pred_dot_m0,
                             prepared_v2.source_dt_sec,
@@ -770,6 +798,12 @@ def _train_impl(
                         batch_n = radial.size(0)
                         val_seen += batch_n
                         val_loss_total += float(loss.detach().cpu()) * batch_n
+                        window_mw_mean = float(
+                            loss_dict.get('window_mw_mean', float('nan'))
+                        )
+                        if math.isfinite(window_mw_mean):
+                            val_window_mw_total += window_mw_mean * batch_n
+                            val_window_mw_seen += batch_n
                     _raise_if_interrupted()
                     continue
                 if stf_true is not None:
@@ -801,6 +835,11 @@ def _train_impl(
         avg_val_loss = val_loss_total / val_count
         avg_val_mae = val_mae_total / val_count
         avg_mw_mae = val_mw_mae_total / max(val_mw_seen, 1) if val_mw_seen > 0 else float('nan')
+        avg_window_mw = (
+            val_window_mw_total / val_window_mw_seen
+            if val_window_mw_seen > 0
+            else float('nan')
+        )
         if val_event_station_rows:
             validation_event_rows = aggregate_event_predictions(
                 val_event_station_rows,
@@ -829,7 +868,19 @@ def _train_impl(
         # 追加日志
         with open(log_file, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([epoch+1, avg_train_loss, avg_train_data, avg_train_phys, avg_val_loss, avg_val_mae, avg_event_mae_catalog, current_lr])
+            writer.writerow([
+                epoch + 1,
+                avg_train_loss,
+                avg_train_data,
+                avg_train_phys,
+                avg_val_loss,
+                avg_val_mae,
+                avg_event_mae_catalog,
+                avg_mw_mae,
+                avg_event_mae_catalog,
+                avg_window_mw,
+                current_lr,
+            ])
         
         # 更新学习率（Warmup 后启用调度器）
         if epoch >= warmup_epochs:
@@ -837,16 +888,20 @@ def _train_impl(
             
         # 保存最佳模型/早停计数
         early_stop_value = _select_early_stop_value(
-            str(es_metric),
+            selection_metric,
             val_loss=avg_val_loss,
             station_mw_mae=avg_mw_mae,
             event_mae_catalog=avg_event_mae_catalog,
         )
         if not math.isfinite(early_stop_value):
             raise FloatingPointError(
-                f"non-finite early-stop metric {es_metric}"
+                f"non-finite checkpoint metric {selection_metric}"
             )
-        if es_metric in {'mw_mae', 'event_mae_catalog'}:
+        if selection_metric in {
+            'mw_mae',
+            'station_mae_catalog',
+            'event_mae_catalog',
+        }:
             if early_stop_value < best_mw_mae - es_min_delta:
                 best_mw_mae = early_stop_value
                 best_val_loss = avg_val_loss
@@ -854,7 +909,7 @@ def _train_impl(
                 torch.save(model.state_dict(), best_model_path)
                 print(
                     "  已保存新的最佳模型权重！"
-                    f"({es_metric}={early_stop_value:.4f})"
+                    f"({selection_metric}={early_stop_value:.4f})"
                 )
                 es_counter = 0
             else:
@@ -870,7 +925,11 @@ def _train_impl(
             else:
                 es_counter += 1
         
-        should_stop = es_patience > 0 and es_counter >= es_patience
+        should_stop = (
+            not active_workflow
+            and es_patience > 0
+            and es_counter >= es_patience
+        )
         if should_stop:
             print(f"早停触发（连续 {es_counter} 轮无改进，阈值 {es_min_delta}）")
 
@@ -917,6 +976,7 @@ def _train_impl(
         ),
         'best_val_loss': float(best_val_loss),
         'best_mw_mae': float(best_mw_mae),
+        'checkpoint_metric': checkpoint_metric,
         'device': str(device),
     }
     print("训练完成。")

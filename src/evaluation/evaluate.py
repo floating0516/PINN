@@ -3,6 +3,7 @@ import yaml
 import matplotlib.pyplot as plt
 import numpy as np
 import csv
+from dataclasses import dataclass
 from pathlib import Path
 import sys
 
@@ -35,6 +36,13 @@ from src.utils.provenance import (
 from src.utils.run_dirs import create_run_dir, resolve_model_path
 
 
+@dataclass(frozen=True)
+class EvaluationPrediction:
+    rate_nm_per_s: torch.Tensor
+    mw_pred: torch.Tensor
+    mw_window_pred: torch.Tensor
+
+
 def magnitude_series_from_rate(rate: torch.Tensor, dt: float) -> np.ndarray:
     m0_seq = torch.cumsum(torch.clamp(rate, min=0.0), dim=0) * dt
     m0_seq = torch.clamp(m0_seq, min=1.0e9)
@@ -62,9 +70,12 @@ def _evaluation_time_steps(config: dict) -> tuple[int, int]:
         waveform_steps = int(
             round(float(dataset['waveform']['duration_sec']) * sample_rate_hz)
         )
-        source_steps = int(
-            round(float(dataset['stf']['duration_sec']) * sample_rate_hz)
+        source_duration = (
+            float(dataset['stf']['station_window_duration_sec'])
+            if config.get('workflow') == 'station_random_shifted_stf'
+            else float(dataset['stf']['duration_sec'])
         )
+        source_steps = int(round(source_duration * sample_rate_hz))
         return waveform_steps, source_steps
     legacy_steps = int((config.get('training', {}) or {}).get('time_steps', 250))
     return legacy_steps, legacy_steps
@@ -90,6 +101,41 @@ def _magnitude_from_rate(
     return legacy_criterion.utils.magnitude_from_rate(
         rate_nm_per_s,
         dt_value,
+    )
+
+
+def _predict_outputs(
+    model,
+    radial: torch.Tensor,
+    *,
+    meta: torch.Tensor,
+    stf_m_ref: float,
+    source_dt_sec,
+    pipeline_version: int,
+    active_catalog_head: bool,
+    legacy_criterion,
+) -> EvaluationPrediction:
+    if active_catalog_head:
+        heads = model.predict_heads(radial, meta=meta)
+        rate_encoded = heads.stf_encoded
+        mw_pred = heads.catalog_mw
+    else:
+        rate_encoded = model(radial, meta=meta)
+        mw_pred = None
+    rate_nm_per_s = torch.clamp(
+        stf_m_ref * (torch.pow(10.0, rate_encoded) - 1.0),
+        min=0.0,
+    )
+    mw_window_pred = _magnitude_from_rate(
+        rate_nm_per_s,
+        source_dt_sec,
+        pipeline_version=pipeline_version,
+        legacy_criterion=legacy_criterion,
+    )
+    return EvaluationPrediction(
+        rate_nm_per_s=rate_nm_per_s,
+        mw_pred=mw_pred if mw_pred is not None else mw_window_pred,
+        mw_window_pred=mw_window_pred,
     )
 
 def evaluate(
@@ -132,6 +178,7 @@ def evaluate(
         )
     )
     pipeline_version = int(config.get('pipeline_version', 1))
+    active_workflow = config.get('workflow') == 'station_random_shifted_stf'
     input_time_steps, source_time_steps = _evaluation_time_steps(config)
     
     # 路径设置
@@ -272,15 +319,19 @@ def evaluate(
             else:
                 metadata_distance_m = source_metadata_distance_m
             meta = build_metadata_tensor(metadata_distance_m, theta_deg, azimuth_deg)
-            rate_log = model(radial, meta=meta)
-            dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
-            dot_m0 = torch.clamp(dot_m0, min=0.0)
-            mw_pred = _magnitude_from_rate(
-                dot_m0,
-                magnitude_dt_batch,
+            prediction = _predict_outputs(
+                model,
+                radial,
+                meta=meta,
+                stf_m_ref=stf_m_ref,
+                source_dt_sec=magnitude_dt_batch,
                 pipeline_version=pipeline_version,
+                active_catalog_head=active_workflow,
                 legacy_criterion=criterion,
             )
+            dot_m0 = prediction.rate_nm_per_s
+            mw_pred = prediction.mw_pred
+            mw_window_pred = prediction.mw_window_pred
             mw_pred_values = mw_pred.cpu().numpy().flatten()
             pred_mags.extend(mw_pred_values)
 
@@ -293,7 +344,7 @@ def evaluate(
                 stf_true = stf_true.to(device)
                 mw_stf_batch = _magnitude_from_rate(
                     stf_true,
-                    dt_batch,
+                    magnitude_dt_batch,
                     pipeline_version=pipeline_version,
                     legacy_criterion=criterion,
                 )
@@ -347,6 +398,9 @@ def evaluate(
                         'event': str(ev),
                         'station': str(st),
                         'mw_pred': float(mw_pred_values[i]),
+                        'mw_window_pred': float(
+                            mw_window_pred.view(-1)[i].detach().cpu()
+                        ),
                         'mw_catalog': catalog_mw,
                         'mw_stf_native': stf_reference_mw,
                         'error_vs_catalog': float(mw_pred_values[i]) - catalog_mw,
@@ -407,12 +461,12 @@ def evaluate(
         event_rows,
         reference_key=primary_reference_key,
     )
-    mae = float(evaluation_metrics['event_mae'])
-    rmse = float(evaluation_metrics['event_rmse'])
+    mae = float(evaluation_metrics['station_mae'])
+    rmse = float(evaluation_metrics['station_rmse'])
     
-    print("测试集事件级结果：")
-    print(f"Event MAE：{mae:.4f}")
-    print(f"Event RMSE：{rmse:.4f}")
+    print("测试集台站级结果：")
+    print(f"Station MAE：{mae:.4f}")
+    print(f"Station RMSE：{rmse:.4f}")
     
     metrics_path = results_dir / 'metrics.txt' if save_metrics else None
     station_csv_path = results_dir / 'station_predictions.csv' if save_metrics else None
@@ -639,10 +693,6 @@ def evaluate(
         else:
             metadata_distance_m = source_metadata_distance_m
         meta_s = build_metadata_tensor(metadata_distance_m, theta_deg_s, azimuth_deg_s)
-        rate_log = model(radial, meta=meta_s)
-        dot_m0_pred = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
-        dot_m0_pred = torch.clamp(dot_m0_pred, min=0.0)
-
         if stf_true is not None:
             stf_true = stf_true.to(device)
 
@@ -658,6 +708,18 @@ def evaluate(
             )
         else:
             source_dt = source_dt.to(device)
+
+        sample_prediction = _predict_outputs(
+            model,
+            radial,
+            meta=meta_s,
+            stf_m_ref=stf_m_ref,
+            source_dt_sec=source_dt,
+            pipeline_version=pipeline_version,
+            active_catalog_head=active_workflow,
+            legacy_criterion=criterion,
+        )
+        dot_m0_pred = sample_prediction.rate_nm_per_s
 
         if magnitude_true is not None:
             magnitude_true = magnitude_true.to(device)

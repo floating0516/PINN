@@ -199,7 +199,7 @@ def test_v2_batch_preparation_uses_explicit_fields() -> None:
         prepared.observation_dt_sec,
         batch["waveform_dt_sec"],
     )
-    assert torch.equal(prepared.true_mag, batch["mw_stf_native"])
+    assert torch.equal(prepared.true_mag, batch["magnitude_catalog"])
     assert torch.allclose(prepared.metadata[:, 0], torch.log(batch["source_distance_m"]))
     assert torch.allclose(
         prepared.metadata[:, 3],

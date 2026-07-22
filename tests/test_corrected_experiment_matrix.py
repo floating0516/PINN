@@ -217,6 +217,7 @@ def test_catalog_scaled_stf_is_event_invariant_and_conserves_catalog_moment(
     [
         ("val_loss", 3.0),
         ("mw_mae", 2.0),
+        ("station_mae_catalog", 2.0),
         ("event_mae_catalog", 1.0),
     ],
 )

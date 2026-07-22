@@ -29,7 +29,7 @@ from src.training.checkpointing import (
     validate_checkpoint_provenance,
     write_emergency_checkpoint,
 )
-from src.training.train import train
+from src.training.train import _prepare_v2_batch, train
 
 
 def _make_training_objects() -> tuple[
@@ -243,6 +243,46 @@ def _injected_loaders() -> tuple[list[dict], list[dict], list[dict], dict]:
         "validation_record_count": 1,
         "test_record_count": 0,
     }
+
+
+def test_active_v2_batch_uses_catalog_magnitude_as_scalar_target(
+    tmp_path: Path,
+) -> None:
+    config = _training_config(tmp_path)
+    batch = _training_batch()
+    batch["mw_stf_native"] = torch.tensor([6.5])
+    batch["magnitude_catalog"] = torch.tensor([7.4])
+
+    prepared = _prepare_v2_batch(batch, config, torch.device("cpu"))
+
+    assert torch.equal(prepared.true_mag, batch["magnitude_catalog"])
+
+
+def test_active_training_logs_station_catalog_metric_and_runs_all_epochs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "src.training.train.get_preferred_device",
+        lambda: torch.device("cpu"),
+    )
+    config = _training_config(tmp_path)
+    config["training"].update(epochs=2, swa_start=0)
+
+    result = train(config=config, data_loaders=_injected_loaders())
+
+    with Path(result["log_file"]).open(
+        encoding="utf-8",
+        newline="",
+    ) as stream:
+        rows = list(csv.DictReader(stream))
+    assert len(rows) == 2
+    assert {
+        "validation_station_mae_catalog",
+        "validation_event_mae_catalog",
+        "window_mw_mean",
+    }.issubset(rows[0])
+    assert result["checkpoint_metric"] == "station_mae_catalog"
 
 
 def test_train_commits_full_epoch_state_and_resume_reuses_run(

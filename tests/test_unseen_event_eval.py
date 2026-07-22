@@ -6,6 +6,8 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import torch
+import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -18,6 +20,7 @@ from src.evaluation.evaluate_unseen import (
     StationWaveform,
     _format_event_display_name,
     _station_sample_from_bundle,
+    evaluate_unseen_events,
     load_event_bundle,
     plot_event_station_waveforms,
     plot_unseen_event_mw_figure,
@@ -25,6 +28,7 @@ from src.evaluation.evaluate_unseen import (
     summarize_event_predictions,
     write_unseen_event_outputs,
 )
+from src.models.model import PINNPrediction
 
 
 def _write_event_dir(base_dir: Path, event_name: str = "xizang-test") -> Path:
@@ -255,6 +259,101 @@ def test_station_sample_exposes_max_radial_cm(tmp_path: Path):
     assert sample is not None
     assert "radial_peak_cm" in sample
     assert float(sample["radial_peak_cm"]) > 0.0
+
+
+def test_active_unseen_evaluation_uses_catalog_head(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = yaml.safe_load(
+        Path("configs/config_v2.yaml").read_text(encoding="utf-8")
+    )
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    (model_dir / "config.yaml").write_text(
+        yaml.safe_dump(config, sort_keys=False),
+        encoding="utf-8",
+    )
+    (model_dir / "best_model.pth").write_bytes(b"checkpoint")
+
+    class ScalarHeadModel:
+        def __init__(self, _config):
+            pass
+
+        def to(self, _device):
+            return self
+
+        def load_state_dict(self, _state):
+            return None
+
+        def eval(self):
+            return self
+
+        def predict_heads(self, waveform, meta=None):
+            del meta
+            return PINNPrediction(
+                stf_encoded=torch.zeros(waveform.shape[0], 300),
+                catalog_mw=torch.full(
+                    (waveform.shape[0],),
+                    7.3,
+                    device=waveform.device,
+                ),
+            )
+
+        def __call__(self, *_args, **_kwargs):
+            raise AssertionError("active unseen evaluation must use predict_heads")
+
+    bundle = EventBundle(
+        event_name="External Event",
+        magnitude=7.1,
+        latitude=0.0,
+        longitude=0.0,
+        depth_km=10.0,
+        mechanism="normal",
+        stations=[
+            StationWaveform(
+                station="STA",
+                latitude=0.1,
+                longitude=0.1,
+                t=np.arange(200.0),
+                e_m=np.linspace(0.001, 0.01, 200),
+                n_m=np.zeros(200),
+                u_m=np.zeros(200),
+                dt=1.0,
+            )
+        ],
+    )
+    sample = {
+        "radial": np.zeros(200, dtype=np.float32),
+        "source_distance_m": 20_000.0,
+        "epicentral_distance_m": 17_000.0,
+        "theta_deg": 30.0,
+        "azimuth_deg": 45.0,
+        "waveform_dt_sec": 1.0,
+        "radial_peak_cm": 3.0,
+    }
+    monkeypatch.setattr(
+        "src.evaluation.evaluate_unseen.get_preferred_device",
+        lambda: torch.device("cpu"),
+    )
+    monkeypatch.setattr("src.evaluation.evaluate_unseen.torch.load", lambda *_args, **_kwargs: {})
+    monkeypatch.setattr("src.evaluation.evaluate_unseen.PINNModel", ScalarHeadModel)
+    monkeypatch.setattr("src.evaluation.evaluate_unseen.load_event_bundle", lambda _path: bundle)
+    monkeypatch.setattr(
+        "src.evaluation.evaluate_unseen._station_sample_from_bundle",
+        lambda *_args, **_kwargs: sample,
+    )
+
+    result = evaluate_unseen_events(
+        event_dirs=[tmp_path / "event"],
+        model_dir=model_dir,
+        output_dir=tmp_path / "output",
+        save_plots=False,
+    )
+
+    row = result["station_rows"][0]
+    assert row["mw_pred"] == pytest.approx(7.3)
+    assert row["mw_window_pred"] == pytest.approx(0.6)
 
 
 def test_external_adapter_matches_training_npz_preprocessing(tmp_path: Path):
