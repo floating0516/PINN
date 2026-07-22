@@ -10,6 +10,10 @@ from src.data.dataset_v2 import (
     CorrectedEarthquakeDataset,
     _load_stf_files,
 )
+from src.data.loaders_v2 import get_data_loaders_v2
+from src.evaluation.evaluate import evaluate
+from src.models.model import PINNModel
+from src.training.train import train
 
 
 def make_v2_dataset_config(
@@ -306,6 +310,104 @@ def test_station_workflow_shifts_same_event_stf_by_station_p_arrival(
     assert item["stf"].shape == (300,)
     assert item["p_arrival_sec"].ndim == 0
     assert item["mw_stf_window"].ndim == 0
+
+
+def test_active_workflow_trains_reloads_and_evaluates_locked_station_split(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    npz_path = tmp_path / "events.npz"
+    _write_stations_npz(npz_path, station_count=20)
+    stf_dir = tmp_path / "stf"
+    _write_stf(stf_dir, "eventa")
+    config = make_station_window_config(
+        npz_path=npz_path,
+        stf_dir=stf_dir,
+    )
+    config["model"].update(
+        {
+            "hidden_dim": 8,
+            "num_layers": 1,
+            "num_tcn_blocks": 1,
+            "transformer_num_layers": 1,
+            "dropout": 0.0,
+            "use_meta": True,
+        }
+    )
+    config["paths"].update(
+        {
+            "logs_dir": str(tmp_path / "logs"),
+            "models_dir": str(tmp_path / "models"),
+            "results_dir": str(tmp_path / "results"),
+        }
+    )
+    config["training"].update(
+        {
+            "loss_name": "stf_rate",
+            "random_seed": 42,
+            "batch_size": 4,
+            "epochs": 1,
+            "learning_rate": 1.0e-4,
+            "weight_decay": 0.0,
+            "grad_clip_norm": 1.0,
+            "validation_event_fraction": 0.15,
+            "test_event_fraction": 0.15,
+            "early_stop_metric": "mw_mae",
+            "early_stop_min_delta": 0.0,
+            "warmup_epochs": 0,
+            "scheduler_T0": 2,
+            "scheduler_T_mult": 1,
+            "swa_start": 0,
+            "num_workers": 0,
+            "stf_rate_loss": {
+                "lambda_MSE": 1.0,
+                "lambda_synth": 0.5,
+                "lambda_mag": 1.0,
+                "lambda_shape": 0.1,
+                "include_intermediate_field": False,
+                "radiation_pattern_mode": "full",
+            },
+        }
+    )
+    config["evaluation"]["sample_grid_rows"] = 1
+    loaders = get_data_loaders_v2(config)
+    train_loader, validation_loader, test_loader, manifest = loaders
+    monkeypatch.setattr(
+        "src.training.train.get_preferred_device",
+        lambda: torch.device("cpu"),
+    )
+    monkeypatch.setattr(
+        "src.evaluation.evaluate.get_preferred_device",
+        lambda: torch.device("cpu"),
+    )
+
+    training = train(config=config, data_loaders=loaders)
+    checkpoint = torch.load(
+        training["best_model_path"],
+        map_location="cpu",
+    )
+    reloaded = PINNModel(config)
+    reloaded.load_state_dict(checkpoint, strict=True)
+    result = evaluate(
+        model_path=training["best_model_path"],
+        config=config,
+        test_loader=test_loader,
+        save_plots=False,
+        save_metrics=False,
+    )
+
+    assert len(train_loader.dataset) == 14
+    assert len(validation_loader.dataset) == 3
+    assert len(test_loader.dataset) == 3
+    assert manifest["assignment_sha256"]
+    assert sum(len(keys) for keys in manifest["sample_keys"].values()) == 20
+    assert np.isfinite(result["mae"])
+    assert np.isfinite(result["rmse"])
+    assert all(np.isfinite(row["mw_pred"]) for row in result["station_rows"])
+    assert all(
+        np.isfinite(row["mw_window_pred"])
+        for row in result["station_rows"]
+    )
 
 
 def test_stations_layout_converts_absolute_timestamps_to_origin_time(
