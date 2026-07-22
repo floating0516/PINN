@@ -2,6 +2,7 @@ import torch
 import yaml
 import matplotlib.pyplot as plt
 import numpy as np
+import csv
 from pathlib import Path
 import sys
 
@@ -12,7 +13,12 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from src.models.model import PINNModel
 from src.data.data_loader import get_data_loaders
+from src.data.loaders_v2 import get_data_loaders_v2
 from src.data.metadata import build_metadata_tensor
+from src.evaluation.metrics import (
+    aggregate_event_predictions,
+    summarize_predictions,
+)
 from src.training.physics import PhysicsLoss
 from src.baseline import Baseline
 from src.visualization.visualize import plot_mwg_time_evolution, set_srl_plot_style, maybe_show_plot
@@ -73,7 +79,12 @@ def evaluate(
         
     device = get_preferred_device()
     ds_cfg = config.get('dataset', {}) or {}
-    stf_m_ref = float(ds_cfg.get('stf_m_ref', 1.0e18))
+    stf_m_ref = float(
+        (ds_cfg.get('stf', {}) or {}).get(
+            'm_ref',
+            ds_cfg.get('stf_m_ref', 1.0e18),
+        )
+    )
     train_cfg = config.get('training', {}) or {}
     time_steps = int(train_cfg.get('time_steps', 250))
     pipeline_version = int(config.get('pipeline_version', 1))
@@ -90,7 +101,10 @@ def evaluate(
     
     # 加载测试集；test_loader 不为空时使用注入的测试集（如 LOEO-CV 留出事件）
     if test_loader is None:
-        _, _, test_loader = get_data_loaders(config)
+        if pipeline_version == 2:
+            _, _, test_loader, _ = get_data_loaders_v2(config)
+        else:
+            _, _, test_loader = get_data_loaders(config)
     
     if len(test_loader) == 0:
         print("未找到测试数据。")
@@ -147,6 +161,18 @@ def evaluate(
     criterion = PhysicsLoss(config).to(device)
     baseline = Baseline.from_config(config)
     mwg_items: list[dict[str, object]] = []
+    station_rows: list[dict[str, object]] = []
+    primary_reference = str(
+        (config.get('evaluation', {}) or {}).get(
+            'primary_reference',
+            'catalog',
+        )
+    )
+    primary_reference_key = (
+        'mw_stf_native'
+        if primary_reference == 'stf_native'
+        else 'mw_catalog'
+    )
     
     print("开始评估...")
     with torch.no_grad():
@@ -155,8 +181,12 @@ def evaluate(
             radial = _ensure_time_steps(radial, time_steps)
             stf_true = batch.get('stf', None)
             has_stf = batch.get('has_stf', None)
-            magnitude = batch.get('magnitude', None)
+            magnitude = batch.get(
+                'magnitude_catalog' if pipeline_version == 2 else 'magnitude',
+                None,
+            )
             distance_m = batch.get('source_distance_m' if pipeline_version == 2 else 'distance', None)
+            epicentral_distance_m = batch.get('epicentral_distance_m', None)
             mechanism = batch.get('mechanism', None)
             event_names = batch.get('event', None)
             station_names = batch.get('station', None)
@@ -165,7 +195,13 @@ def evaluate(
                 'azimuth_deg' if pipeline_version == 2 else 'phi_deg',
                 torch.zeros(radial.size(0)),
             ).to(device)
-            dt_val = batch['dt'].mean().item()
+            dt_batch = batch.get(
+                'waveform_dt_sec' if pipeline_version == 2 else 'dt',
+                None,
+            )
+            if dt_batch is None:
+                dt_batch = torch.ones(radial.size(0), dtype=radial.dtype)
+            dt_val = dt_batch.mean().item()
             metadata_distance_m = (
                 distance_m.to(device)
                 if distance_m is not None
@@ -176,28 +212,22 @@ def evaluate(
             dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
             dot_m0 = torch.clamp(dot_m0, min=0.0)
             mw_pred = criterion.utils.magnitude_from_rate(dot_m0, dt_val)
-            pred_mags.extend(mw_pred.cpu().numpy().flatten())
-            dt_batch = batch.get('dt', None)
+            mw_pred_values = mw_pred.cpu().numpy().flatten()
+            pred_mags.extend(mw_pred_values)
 
-            mw_true_batch = None
-            if stf_true is not None and torch.is_tensor(stf_true):
+            mw_stf_batch = None
+            if pipeline_version == 2 and torch.is_tensor(
+                batch.get('mw_stf_native', None)
+            ):
+                mw_stf_batch = batch['mw_stf_native'].to(device)
+            elif stf_true is not None and torch.is_tensor(stf_true):
                 stf_true = stf_true.to(device)
-                mw_true_batch = criterion.utils.magnitude_from_rate(stf_true, dt_val)
+                mw_stf_batch = criterion.utils.magnitude_from_rate(stf_true, dt_val)
 
             B = int(radial.size(0))
             has_mask = None
             if has_stf is not None and torch.is_tensor(has_stf) and int(has_stf.numel()) >= B:
                 has_mask = has_stf.view(-1)[:B].bool()
-            for i in range(B):
-                use_stf = bool(has_mask[i].item()) if has_mask is not None else (mw_true_batch is not None)
-                if use_stf and mw_true_batch is not None and int(mw_true_batch.numel()) >= B:
-                    true_mags.append(float(mw_true_batch.view(-1)[i].item()))
-                elif magnitude is not None and torch.is_tensor(magnitude) and int(magnitude.numel()) >= B:
-                    true_mags.append(float(magnitude.view(-1)[i].item()))
-                else:
-                    true_mags.append(float('nan'))
-
-            dt_batch = batch.get('dt', None)
             for i in range(B):
                 if torch.is_tensor(dt_batch) and int(dt_batch.numel()) >= B:
                     dt_i = float(dt_batch.view(-1)[i].item())
@@ -205,10 +235,21 @@ def evaluate(
                     dt_i = float(dt_val)
                 ev = event_names[i] if isinstance(event_names, (list, tuple)) and len(event_names) > i else (str(event_names) if event_names is not None else 'unknown')
                 st = station_names[i] if isinstance(station_names, (list, tuple)) and len(station_names) > i else ''
-                true_mw = None
-                if mw_true_batch is not None and int(mw_true_batch.numel()) >= B:
+                stf_reference_mw = float('nan')
+                if mw_stf_batch is not None and int(mw_stf_batch.numel()) >= B:
                     if has_mask is None or bool(has_mask[i].item()):
-                        true_mw = float(mw_true_batch.view(-1)[i].item())
+                        stf_reference_mw = float(mw_stf_batch.view(-1)[i].item())
+                catalog_mw = (
+                    float(magnitude.view(-1)[i].item())
+                    if torch.is_tensor(magnitude) and int(magnitude.numel()) >= B
+                    else float('nan')
+                )
+                primary_mw = (
+                    stf_reference_mw
+                    if primary_reference_key == 'mw_stf_native'
+                    else catalog_mw
+                )
+                true_mags.append(primary_mw)
                 mech_i = int(mechanism.view(-1)[i].item()) if torch.is_tensor(mechanism) and int(mechanism.numel()) >= B else None
                 if distance_m is not None and torch.is_tensor(distance_m) and int(distance_m.numel()) >= B:
                     distance_km_i = float(distance_m.view(-1)[i].item()) / 1000.0
@@ -219,12 +260,36 @@ def evaluate(
                 if stf_true is not None and torch.is_tensor(stf_true) and int(stf_true.size(0)) >= B:
                     if has_mask is None or bool(has_mask[i].item()):
                         stf_np = stf_true[i].detach().cpu().numpy()
-                mwg_items.append({'event': str(ev), 'station': str(st), 'dt': dt_i, 'mw_series': mw_series, 'true_mw': true_mw, 'stf': stf_np, 'mechanism': mech_i, 'distance_km': distance_km_i})
+                epicentral_distance_km_i = (
+                    float(epicentral_distance_m.view(-1)[i].item()) / 1000.0
+                    if torch.is_tensor(epicentral_distance_m)
+                    and int(epicentral_distance_m.numel()) >= B
+                    else float('nan')
+                )
+                azimuth_i = float(azimuth_deg.view(-1)[i].item())
+                theta_i = float(theta_deg.view(-1)[i].item())
+                station_rows.append(
+                    {
+                        'event': str(ev),
+                        'station': str(st),
+                        'mw_pred': float(mw_pred_values[i]),
+                        'mw_catalog': catalog_mw,
+                        'mw_stf_native': stf_reference_mw,
+                        'error_vs_catalog': float(mw_pred_values[i]) - catalog_mw,
+                        'error_vs_stf_native': float(mw_pred_values[i]) - stf_reference_mw,
+                        'epicentral_distance_km': epicentral_distance_km_i,
+                        'source_distance_km': distance_km_i,
+                        'theta_deg': theta_i,
+                        'azimuth_deg': azimuth_i,
+                        'threshold_cm': float(ds_cfg.get('radial_peak_min_cm', 0.0)),
+                    }
+                )
+                mwg_items.append({'event': str(ev), 'station': str(st), 'dt': dt_i, 'mw_series': mw_series, 'true_mw': stf_reference_mw, 'stf': stf_np, 'mechanism': mech_i, 'distance_km': distance_km_i})
             if distance_m is not None:
                 u_hr = radial.squeeze(1)
                 distance_cpu = distance_m.view(-1).detach().cpu()
                 theta_cpu = theta_deg.view(-1).detach().cpu()
-                phi_cpu = phi_deg.view(-1).detach().cpu()
+                phi_cpu = azimuth_deg.view(-1).detach().cpu()
                 # 基线内部使用 float64，MPS 不支持，因此统一在 CPU 上计算
                 for i in range(B):
                     if torch.is_tensor(dt_batch) and int(dt_batch.numel()) >= B:
@@ -259,18 +324,41 @@ def evaluate(
     mechanisms = np.array(mechanisms, dtype=np.int64) if len(mechanisms) > 0 else None
     
     # 指标计算
-    mae = mean_absolute_error(true_mags, pred_mags)
-    rmse = np.sqrt(mean_squared_error(true_mags, pred_mags))
+    event_rows = aggregate_event_predictions(
+        station_rows,
+        reference_key=primary_reference_key,
+    )
+    evaluation_metrics = summarize_predictions(
+        station_rows,
+        event_rows,
+        reference_key=primary_reference_key,
+    )
+    mae = float(evaluation_metrics['event_mae'])
+    rmse = float(evaluation_metrics['event_rmse'])
     
-    print("测试集结果：")
-    print(f"MAE：{mae:.4f}")
-    print(f"RMSE：{rmse:.4f}")
+    print("测试集事件级结果：")
+    print(f"Event MAE：{mae:.4f}")
+    print(f"Event RMSE：{rmse:.4f}")
     
     metrics_path = results_dir / 'metrics.txt' if save_metrics else None
+    station_csv_path = results_dir / 'station_predictions.csv' if save_metrics else None
+    event_csv_path = results_dir / 'event_summary.csv' if save_metrics else None
     if save_metrics:
-        with open(metrics_path, 'w') as f:
-            f.write(f"MAE：{mae:.4f}\n")
-            f.write(f"RMSE：{rmse:.4f}\n")
+        with open(metrics_path, 'w', encoding='utf-8') as f:
+            for key, value in evaluation_metrics.items():
+                f.write(f"{key}: {value}\n")
+        station_fields = list(station_rows[0]) if station_rows else []
+        if station_fields:
+            with open(station_csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=station_fields)
+                writer.writeheader()
+                writer.writerows(station_rows)
+        event_fields = list(event_rows[0]) if event_rows else []
+        if event_fields:
+            with open(event_csv_path, 'w', encoding='utf-8', newline='') as f:
+                writer = csv.DictWriter(f, fieldnames=event_fields)
+                writer.writeheader()
+                writer.writerows(event_rows)
 
     out_mwg = results_dir / 'mwg_time_evolution.png' if save_plots else None
     mwg_plot_path = plot_mwg_time_evolution(
@@ -436,9 +524,15 @@ def evaluate(
         radial = sample_batch['radial'].to(device)
         radial = _ensure_time_steps(radial, time_steps)
         stf_true = sample_batch.get('stf', None)
-        dt = sample_batch.get('dt', None)
+        dt = sample_batch.get(
+            'waveform_dt_sec' if pipeline_version == 2 else 'dt',
+            None,
+        )
         distance_m = sample_batch.get('source_distance_m' if pipeline_version == 2 else 'distance', None)
-        magnitude_true = sample_batch.get('magnitude', None)
+        magnitude_true = sample_batch.get(
+            'magnitude_catalog' if pipeline_version == 2 else 'magnitude',
+            None,
+        )
 
         theta_deg_s = sample_batch.get('theta_deg', torch.zeros(radial.size(0))).to(device).view(-1)
         azimuth_deg_s = sample_batch.get(
@@ -529,14 +623,14 @@ def evaluate(
             # 右列：Mw(t) - 黑色实线（真实）vs 红色虚线（预测），标注最终震级
             mw_pred_series = magnitude_series_from_rate(dot_m0_pred[i], dt_i)
             if stf_true is not None:
-                mw_true_series = magnitude_series_from_rate(stf_true[i], dt_i)
+                mw_stf_series = magnitude_series_from_rate(stf_true[i], dt_i)
             else:
-                mw_true_series = None
+                mw_stf_series = None
 
-            if mw_true_series is not None:
-                final_mw_true = mw_true_series[-1]
-                axes[i, 2].plot(t_axis, mw_true_series, color='black', linewidth=1.1, 
-                              linestyle='-', label=f'True (Final Mw: {final_mw_true:.2f})')
+            if mw_stf_series is not None:
+                final_mw_stf = mw_stf_series[-1]
+                axes[i, 2].plot(t_axis, mw_stf_series, color='black', linewidth=1.1,
+                              linestyle='-', label=f'STF native (Final Mw: {final_mw_stf:.2f})')
             
             final_mw_pred = mw_pred_series[-1]
             axes[i, 2].plot(t_axis, mw_pred_series, color='#D55E00', linewidth=1.1, 
@@ -552,8 +646,8 @@ def evaluate(
             if distance_m is not None:
                 row_parts.append(f"Distance: {float(distance_m[i].item())/1000.0:.0f} km")
             if magnitude_true is not None:
-                if mw_true_series is not None:
-                    row_parts.append(f"True Mw: {float(mw_true_series[-1]):.2f}")
+                if mw_stf_series is not None:
+                    row_parts.append(f"STF Mw: {float(mw_stf_series[-1]):.2f}")
                 else:
                     row_parts.append(f"True Mw: {float(magnitude_true[i].item()):.2f}")
             if len(row_parts) > 0:
@@ -582,10 +676,15 @@ def evaluate(
         'results_run_id': results_run_id,
         'mae': float(mae),
         'rmse': float(rmse),
+        'metrics': evaluation_metrics,
+        'station_rows': station_rows,
+        'event_rows': event_rows,
         'baseline_mae': float(mae_base),
         'baseline_rmse': float(rmse_base),
         'sample_count': int(x_vals.size),
         'metrics_path': metrics_path,
+        'station_csv_path': station_csv_path,
+        'event_csv_path': event_csv_path,
         'baseline_metrics_path': baseline_metrics_path,
         'scatter_path': scatter_path,
         'baseline_scatter_path': baseline_scatter_path,

@@ -14,15 +14,18 @@ import re
 import sys
 from pathlib import Path
 
-import numpy as np
 import torch
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.data_loader import get_data_loaders_loeo, list_event_indices
+from src.data.data_loader import get_data_loaders_loeo
 from src.data.metadata import build_metadata_tensor
+from src.evaluation.metrics import (
+    aggregate_event_predictions,
+    summarize_predictions,
+)
 from src.models.model import PINNModel
 from src.training.physics import PhysicsLoss
 from src.utils.device import get_preferred_device
@@ -44,7 +47,12 @@ def eval_fold(fold_dir: Path, ev_idx: int, device) -> list[dict]:
         config = yaml.safe_load(f)
 
     ds_cfg = config.get("dataset", {}) or {}
-    stf_m_ref = float(ds_cfg.get("stf_m_ref", 1.0e18))
+    stf_m_ref = float(
+        (ds_cfg.get("stf", {}) or {}).get(
+            "m_ref",
+            ds_cfg.get("stf_m_ref", 1.0e18),
+        )
+    )
     time_steps = int(config["training"].get("time_steps", 250))
     pipeline_version = int(config.get("pipeline_version", 1))
 
@@ -70,7 +78,10 @@ def eval_fold(fold_dir: Path, ev_idx: int, device) -> list[dict]:
                 "azimuth_deg" if pipeline_version == 2 else "phi_deg",
                 torch.zeros(B),
             ).to(device)
-            dt_val = batch["dt"].mean().item()
+            dt_batch = batch.get(
+                "stf_dt_sec" if pipeline_version == 2 else "dt"
+            )
+            dt_val = dt_batch.mean().item()
             metadata_distance_m = (
                 distance_m.to(device)
                 if distance_m is not None
@@ -83,10 +94,17 @@ def eval_fold(fold_dir: Path, ev_idx: int, device) -> list[dict]:
 
             stf_true = batch.get("stf", None)
             mw_stf = None
-            if stf_true is not None and torch.is_tensor(stf_true):
+            if pipeline_version == 2 and torch.is_tensor(
+                batch.get("mw_stf_native", None)
+            ):
+                mw_stf = batch["mw_stf_native"].cpu().numpy().flatten()
+            elif stf_true is not None and torch.is_tensor(stf_true):
                 mw_stf = criterion.utils.magnitude_from_rate(stf_true.to(device), dt_val).cpu().numpy().flatten()
             has_stf = batch.get("has_stf", None)
-            magnitude = batch.get("magnitude", None)
+            magnitude = batch.get(
+                "magnitude_catalog" if pipeline_version == 2 else "magnitude",
+                None,
+            )
             events = batch.get("event", ["?"] * B)
             stations = batch.get("station", ["?"] * B)
             mechanism = batch.get("mechanism", ["?"] * B)
@@ -94,17 +112,32 @@ def eval_fold(fold_dir: Path, ev_idx: int, device) -> list[dict]:
             for i in range(B):
                 mw_cat = float(magnitude.view(-1)[i].item()) if torch.is_tensor(magnitude) else float("nan")
                 use_stf = bool(has_stf.view(-1)[i].item()) if torch.is_tensor(has_stf) else (mw_stf is not None)
-                mw_true = float(mw_stf[i]) if (use_stf and mw_stf is not None) else mw_cat
+                mw_stf_native = float(mw_stf[i]) if (use_stf and mw_stf is not None) else float("nan")
+                epicentral_distance = batch.get("epicentral_distance_m", None)
+                azimuth = batch.get("azimuth_deg", None)
                 rows.append(
                     {
                         "event": str(events[i]) if not torch.is_tensor(events) else str(events[i].item()),
                         "station": str(stations[i]) if not torch.is_tensor(stations) else str(stations[i].item()),
                         "mechanism": str(mechanism[i]) if not torch.is_tensor(mechanism) else str(mechanism[i].item()),
-                        "distance_km": float(distance_m.view(-1)[i].item()) / 1000.0 if torch.is_tensor(distance_m) else float("nan"),
                         "mw_pred": float(mw_pred[i]),
-                        "mw_true_stf": float(mw_stf[i]) if mw_stf is not None else float("nan"),
                         "mw_catalog": mw_cat,
-                        "mw_true_used": mw_true,
+                        "mw_stf_native": mw_stf_native,
+                        "error_vs_catalog": float(mw_pred[i]) - mw_cat,
+                        "error_vs_stf_native": float(mw_pred[i]) - mw_stf_native,
+                        "epicentral_distance_km": (
+                            float(epicentral_distance.view(-1)[i].item()) / 1000.0
+                            if torch.is_tensor(epicentral_distance)
+                            else float("nan")
+                        ),
+                        "source_distance_km": float(distance_m.view(-1)[i].item()) / 1000.0 if torch.is_tensor(distance_m) else float("nan"),
+                        "theta_deg": float(theta_deg.view(-1)[i].item()),
+                        "azimuth_deg": (
+                            float(azimuth.view(-1)[i].item())
+                            if torch.is_tensor(azimuth)
+                            else float("nan")
+                        ),
+                        "threshold_cm": float(ds_cfg.get("radial_peak_min_cm", 0.0)),
                     }
                 )
     return rows
@@ -122,6 +155,7 @@ def main() -> None:
 
     fold_dirs = sorted(d for d in root.iterdir() if d.is_dir() and d.name.startswith("fold_"))
     summary_rows = []
+    all_station_rows: list[dict] = []
     sp_path = root / "station_predictions.csv"
     ev_path = root / "loeo_event_summary.csv"
     sp_f = open(sp_path, "w", newline="", encoding="utf-8")
@@ -142,48 +176,45 @@ def main() -> None:
             continue
         for r in rows:
             r["event_index"] = ev_idx
+            all_station_rows.append(r)
             if sp_writer is None:
                 sp_writer = csv.DictWriter(sp_f, fieldnames=list(r.keys()))
                 sp_writer.writeheader()
             sp_writer.writerow(r)
         sp_f.flush()
 
-        preds = np.array([r["mw_pred"] for r in rows])
-        mw_cat = np.nanmedian([r["mw_catalog"] for r in rows])
-        med = float(np.median(preds))
-        err = med - float(mw_cat)
-        station_mae = float(np.mean(np.abs(preds - mw_cat)))
-        summary_rows.append(
-            {
-                "event_index": ev_idx,
-                "event": ev_name,
-                "mw_catalog": float(mw_cat),
-                "mw_pred_median": med,
-                "event_error": err,
-                "abs_event_error": abs(err),
-                "n_stations": len(rows),
-                "pred_std": float(np.std(preds)),
-                "pred_iqr": float(np.percentile(preds, 75) - np.percentile(preds, 25)),
-                "station_mae_vs_catalog": station_mae,
-                "error": "",
-            }
+        aggregated = aggregate_event_predictions(
+            rows,
+            reference_key="mw_catalog",
         )
-        print(f"  n={len(rows)} mw_cat={mw_cat:.2f} pred_med={med:.3f} err={err:+.3f}")
+        if aggregated:
+            event_row = {"event_index": ev_idx, **aggregated[0], "error": ""}
+            summary_rows.append(event_row)
+            print(
+                f"  n={event_row['n_stations']} "
+                f"mw_cat={event_row['mw_catalog']:.2f} "
+                f"pred_med={event_row['mw_pred_median']:.3f} "
+                f"err={event_row['error_vs_catalog']:+.3f}"
+            )
 
     sp_f.close()
     with open(ev_path, "w", newline="", encoding="utf-8") as f:
-        fieldnames = ["event_index", "event", "mw_catalog", "mw_pred_median", "event_error",
-                      "abs_event_error", "n_stations", "pred_std", "pred_iqr",
-                      "station_mae_vs_catalog", "error"]
+        fieldnames = ["event_index", "event", "mw_pred_median", "mw_catalog",
+                      "mw_stf_native", "error_vs_catalog", "error_vs_stf_native",
+                      "n_stations", "pred_std", "pred_iqr", "error"]
         w = csv.DictWriter(f, fieldnames=fieldnames)
         w.writeheader()
         for r in summary_rows:
             w.writerow({k: r.get(k, "") for k in fieldnames})
 
-    ok = [r for r in summary_rows if r.get("abs_event_error") is not None and not r.get("error")]
+    ok = [r for r in summary_rows if not r.get("error")]
     if ok:
-        errs = np.array([r["abs_event_error"] for r in ok])
-        print(f"\nfolds ok: {len(ok)}  event-level MAE={errs.mean():.4f} median={np.median(errs):.4f} max={errs.max():.4f}")
+        metrics = summarize_predictions(
+            all_station_rows,
+            ok,
+            reference_key="mw_catalog",
+        )
+        print(f"\nfolds ok: {len(ok)}  event-level MAE={metrics['event_mae']:.4f}")
     print(f"saved: {sp_path}\nsaved: {ev_path}")
 
 

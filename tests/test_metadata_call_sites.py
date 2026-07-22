@@ -30,3 +30,8 @@ def test_external_geometry_uses_the_shared_v2_sample_builder() -> None:
         assert "build_station_sample(" in text, name
         assert "_calculate_geodetics(" not in text, name
         assert "_build_unseen_dataset_helper" not in text, name
+
+
+def test_evaluate_baseline_uses_the_renamed_azimuth_tensor() -> None:
+    text = Path("src/evaluation/evaluate.py").read_text(encoding="utf-8")
+    assert "phi_cpu = phi_deg" not in text

@@ -45,6 +45,10 @@ from src.data.metadata import build_metadata_tensor
 from src.data.sample_builder import SampleRejected, build_station_sample
 from src.data.waveform import WaveformConfig, waveform_config_from_v2
 from src.evaluation.evaluate import _ensure_time_steps, magnitude_series_from_rate
+from src.evaluation.metrics import (
+    aggregate_event_predictions,
+    summarize_predictions,
+)
 from src.models.model import PINNModel
 from src.training.physics import PhysicsLoss
 from src.utils.config_v2 import validate_config_on_startup
@@ -201,20 +205,22 @@ def load_event_bundle(event_dir: str | Path) -> EventBundle:
     )
 
 
-def summarize_event_predictions(*, event_name: str, mw_true: float, predictions: list[float]) -> dict[str, Any]:
-    pred = np.asarray(predictions, dtype=float)
-    if pred.size == 0:
+def summarize_event_predictions(*, event_name: str, mw_catalog: float, predictions: list[float]) -> dict[str, Any]:
+    if not predictions:
         raise ValueError("predictions 不能为空")
-    mw_pred = float(np.median(pred))
-    return {
-        "event": event_name,
-        "mw_true": float(mw_true),
-        "mw_pred_median": mw_pred,
-        "error": mw_pred - float(mw_true),
-        "n_stations": int(pred.size),
-        "pred_std": float(np.std(pred)) if pred.size > 1 else 0.0,
-        "pred_iqr": float(np.percentile(pred, 75) - np.percentile(pred, 25)) if pred.size > 1 else 0.0,
-    }
+    station_rows = [
+        {
+            "event": event_name,
+            "mw_pred": prediction,
+            "mw_catalog": mw_catalog,
+            "mw_stf_native": float("nan"),
+        }
+        for prediction in predictions
+    ]
+    return aggregate_event_predictions(
+        station_rows,
+        reference_key="mw_catalog",
+    )[0]
 
 
 def plot_event_station_waveforms(
@@ -283,7 +289,7 @@ def plot_unseen_event_mw_figure(
     ax.spines["right"].set_visible(False)
 
     event_rows = sorted(event_rows, key=lambda row: float(row.get("max_radial_cm", float("-inf"))), reverse=True)
-    mw_true = float(event_rows[0]["mw_true"])
+    mw_catalog = float(event_rows[0]["mw_catalog"])
     mechanism = str(event_rows[0].get("mechanism", "")).strip()
     pred_vals = np.asarray([float(row["mw_pred"]) for row in event_rows], dtype=float)
     final_pred = float(np.median(pred_vals))
@@ -307,16 +313,16 @@ def plot_unseen_event_mw_figure(
 
     ax.fill_between(common_t, q25, q75, color="#F4A261", alpha=0.22, zorder=2)
     ax.plot(common_t, median_series, color="#E66100", linewidth=2.0, zorder=3)
-    ax.axhline(mw_true, color="black", linestyle=(0, (4, 3)), linewidth=1.3, zorder=4)
-    ax.axhline(mw_true + 0.3, color="#9E9E9E", linestyle=(0, (4, 3)), linewidth=1.0, zorder=2)
-    ax.axhline(mw_true - 0.3, color="#9E9E9E", linestyle=(0, (4, 3)), linewidth=1.0, zorder=2)
+    ax.axhline(mw_catalog, color="black", linestyle=(0, (4, 3)), linewidth=1.3, zorder=4)
+    ax.axhline(mw_catalog + 0.3, color="#9E9E9E", linestyle=(0, (4, 3)), linewidth=1.0, zorder=2)
+    ax.axhline(mw_catalog - 0.3, color="#9E9E9E", linestyle=(0, (4, 3)), linewidth=1.0, zorder=2)
 
     mech_text = f"  {mechanism}" if mechanism else ""
-    ax.set_title(f"{event_name}  $M_w$={mw_true:.1f}{mech_text}")
+    ax.set_title(f"{event_name}  $M_w$={mw_catalog:.1f}{mech_text}")
     ax.set_xlabel("Time step")
     ax.set_ylabel("$M_w$")
     ax.set_xlim(float(common_t[0]), float(common_t[-1]))
-    ax.set_ylim(mw_true - 2.0, mw_true + 0.5)
+    ax.set_ylim(mw_catalog - 2.0, mw_catalog + 0.5)
     ax.text(0.98, 0.12, f"N={len(event_rows)}", transform=ax.transAxes, ha="right", va="bottom", fontsize=7)
     ax.text(0.98, 0.05, f"Pred={final_pred:.2f}±{spread:.02f}", transform=ax.transAxes, ha="right", va="bottom", fontsize=7)
 
@@ -351,13 +357,13 @@ def plot_unseen_station_panels(
         radial = np.asarray(row["radial"], dtype=float)
         pred_rate = np.asarray(row["pred_rate"], dtype=float)
         mw_series = np.asarray(row["mw_series"], dtype=float)
-        mw_true = float(row["mw_true"])
+        mw_catalog = float(row["mw_catalog"])
         mw_pred = float(row["mw_pred"])
         dist_km = float(row["distance_km"])
 
         ax0, ax1, ax2 = axes[row_idx]
         ax0.plot(t, radial, color=_OKABE_ITO[0], linewidth=1.0)
-        ax0.text(0.02, 0.92, f"Dist: {dist_km:.0f} km | $M_w$: {mw_true:.2f}", transform=ax0.transAxes, ha="left", va="top", fontsize=6)
+        ax0.text(0.02, 0.92, f"Dist: {dist_km:.0f} km | $M_w$: {mw_catalog:.2f}", transform=ax0.transAxes, ha="left", va="top", fontsize=6)
         ax0.set_ylabel("Radial disp.")
         ax0.grid(True, axis="y", linestyle=":", linewidth=0.4, color="#CCCCCC")
         ax0.spines["top"].set_visible(False); ax0.spines["right"].set_visible(False)
@@ -373,7 +379,7 @@ def plot_unseen_station_panels(
             ax1.legend(frameon=False)
 
         ax2.plot(t, mw_series, color=_OKABE_ITO[1], linestyle="--", label=f"Predicted: {mw_pred:.2f}")
-        ax2.axhline(mw_true, color="black", linewidth=0.9, linestyle="-", label=f"Reference: {mw_true:.2f}")
+        ax2.axhline(mw_catalog, color="black", linewidth=0.9, linestyle="-", label=f"Reference: {mw_catalog:.2f}")
         ax2.set_ylabel("$M_w(t)$")
         ax2.grid(True, axis="y", linestyle=":", linewidth=0.4, color="#CCCCCC")
         ax2.spines["top"].set_visible(False); ax2.spines["right"].set_visible(False)
@@ -428,7 +434,7 @@ def _compute_pgd_3d(e_m: np.ndarray, n_m: np.ndarray, u_m: np.ndarray) -> float:
     return float(np.max(np.sqrt(e_m ** 2 + n_m ** 2 + u_m ** 2)))
 
 
-def _summarize_scalar_predictions(prefix: str, mw_true: float, predictions: list[float]) -> dict[str, Any]:
+def _summarize_scalar_predictions(prefix: str, mw_catalog: float, predictions: list[float]) -> dict[str, Any]:
     if not predictions:
         return {
             f"{prefix}_mw_pred_median": float("nan"),
@@ -440,7 +446,7 @@ def _summarize_scalar_predictions(prefix: str, mw_true: float, predictions: list
     mw_pred = float(np.median(pred))
     return {
         f"{prefix}_mw_pred_median": mw_pred,
-        f"{prefix}_error": mw_pred - float(mw_true),
+        f"{prefix}_error": mw_pred - float(mw_catalog),
         f"{prefix}_n_stations": int(pred.size),
         f"{prefix}_pred_iqr": float(np.percentile(pred, 75) - np.percentile(pred, 25)) if pred.size > 1 else 0.0,
     }
@@ -483,10 +489,10 @@ def write_unseen_event_outputs(
         for idx, event_name in enumerate(events):
             colors[event_name] = palette[idx % len(palette)]
             rows = [row for row in station_rows if str(row["event"]) == event_name]
-            x = [float(row["mw_true"]) for row in rows]
+            x = [float(row["mw_catalog"]) for row in rows]
             y = [float(row["mw_pred"]) for row in rows]
             ax.scatter(x, y, label=event_name, s=20, alpha=0.8, color=colors[event_name], edgecolors="none")
-        all_vals = [float(row["mw_true"]) for row in station_rows] + [float(row["mw_pred"]) for row in station_rows]
+        all_vals = [float(row["mw_catalog"]) for row in station_rows] + [float(row["mw_pred"]) for row in station_rows]
         lo = math.floor(min(all_vals) * 10.0) / 10.0
         hi = math.ceil(max(all_vals) * 10.0) / 10.0
         ax.plot([lo, hi], [lo, hi], linestyle="--", color="black", linewidth=0.9)
@@ -509,13 +515,13 @@ def write_unseen_event_outputs(
         _apply_pub_style()
         labels = [str(row["event"]) for row in event_rows]
         x = np.arange(len(labels), dtype=float)
-        true_vals = [float(row["mw_true"]) for row in event_rows]
+        true_vals = [float(row["mw_catalog"]) for row in event_rows]
         pred_vals = [float(row["mw_pred_median"]) for row in event_rows]
         fig, ax = plt.subplots(figsize=(7.2, 3.6))
         ax.plot(x, true_vals, marker="o", markersize=4, linewidth=1.2, label="Reference $M_w$", color=_OKABE_ITO[0])
         ax.plot(x, pred_vals, marker="s", markersize=4, linewidth=1.2, label="Predicted $M_w$", color=_OKABE_ITO[1])
         for xi, row in zip(x, event_rows):
-            ax.text(xi, float(row["mw_pred_median"]) + 0.03, f"err={float(row['error']):+.2f}", ha="center", va="bottom", fontsize=6)
+            ax.text(xi, float(row["mw_pred_median"]) + 0.03, f"err={float(row['error_vs_catalog']):+.2f}", ha="center", va="bottom", fontsize=6)
         ax.set_xticks(x)
         ax.set_xticklabels(labels, rotation=15, ha="right")
         ax.set_ylabel("$M_w$")
@@ -619,6 +625,9 @@ def evaluate_unseen_events(
     ds_cfg = config.get("dataset", {}) or {}
     train_cfg = config.get("training", {}) or {}
     waveform_config = waveform_config_from_v2(config)
+    threshold_cm = float(ds_cfg["radial_peak_min_cm"])
+    if radial_peak_min_cm_override is not None:
+        threshold_cm = float(radial_peak_min_cm_override)
 
     device = get_preferred_device()
     checkpoint = torch.load(model_path, map_location=device)
@@ -700,9 +709,16 @@ def evaluate_unseen_events(
                 row = {
                     "event": event_label,
                     "station": station.station,
-                    "mw_true": bundle.magnitude,
                     "mw_pred": mw_pred,
-                    "error": mw_pred - bundle.magnitude,
+                    "mw_catalog": bundle.magnitude,
+                    "mw_stf_native": float("nan"),
+                    "error_vs_catalog": mw_pred - bundle.magnitude,
+                    "error_vs_stf_native": float("nan"),
+                    "epicentral_distance_km": float(sample["epicentral_distance_m"]) / 1000.0,
+                    "source_distance_km": float(sample["source_distance_m"]) / 1000.0,
+                    "theta_deg": float(sample["theta_deg"]),
+                    "azimuth_deg": float(sample["azimuth_deg"]),
+                    "threshold_cm": threshold_cm,
                     "distance_km": float(sample["source_distance_m"]) / 1000.0,
                     "mechanism": bundle.mechanism,
                     "dt": sample_dt,
@@ -733,7 +749,7 @@ def evaluate_unseen_events(
             if predictions:
                 event_row = summarize_event_predictions(
                     event_name=event_label,
-                    mw_true=bundle.magnitude,
+                    mw_catalog=bundle.magnitude,
                     predictions=predictions,
                 )
                 event_row.update(
@@ -756,9 +772,15 @@ def evaluate_unseen_events(
         event_rows=event_rows,
         panel_rows=panel_rows,
     )
+    metrics = summarize_predictions(
+        station_rows,
+        event_rows,
+        reference_key="mw_catalog",
+    )
     return {
         "station_rows": station_rows,
         "event_rows": event_rows,
+        "metrics": metrics,
         **output_paths,
     }
 

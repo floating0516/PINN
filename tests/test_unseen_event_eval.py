@@ -229,14 +229,14 @@ def test_summarize_event_predictions_returns_median_and_spread():
     """验证：事件级汇总使用中位数，并返回离散度统计量"""
     summary = summarize_event_predictions(
         event_name="Xizang",
-        mw_true=7.1,
+        mw_catalog=7.1,
         predictions=[7.0, 7.2, 7.4],
     )
 
     assert summary["event"] == "Xizang"
-    assert summary["mw_true"] == pytest.approx(7.1)
+    assert summary["mw_catalog"] == pytest.approx(7.1)
     assert summary["mw_pred_median"] == pytest.approx(7.2)
-    assert summary["error"] == pytest.approx(0.1)
+    assert summary["error_vs_catalog"] == pytest.approx(0.1)
     assert summary["n_stations"] == 3
     assert summary["pred_iqr"] == pytest.approx(0.2)
 
@@ -396,7 +396,7 @@ def test_plot_unseen_station_panels_creates_panel_figure(tmp_path: Path):
         {
             "event": "EventA",
             "station": "STA_LOW",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred": 7.0,
             "distance_km": 120.0,
             "max_radial_cm": 1.5,
@@ -408,7 +408,7 @@ def test_plot_unseen_station_panels_creates_panel_figure(tmp_path: Path):
         {
             "event": "EventA",
             "station": "STA_HIGH",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred": 7.2,
             "distance_km": 80.0,
             "max_radial_cm": 4.5,
@@ -435,7 +435,7 @@ def test_plot_unseen_event_mw_figure_creates_single_event_summary_figure(tmp_pat
         {
             "event": "EventA",
             "station": "STA1",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred": 7.0,
             "distance_km": 120.0,
             "max_radial_cm": 3.2,
@@ -445,7 +445,7 @@ def test_plot_unseen_event_mw_figure_creates_single_event_summary_figure(tmp_pat
         {
             "event": "EventA",
             "station": "STA2",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred": 7.2,
             "distance_km": 90.0,
             "max_radial_cm": 4.1,
@@ -469,7 +469,7 @@ def test_plot_unseen_event_mw_figure_uses_true_magnitude_centered_ylim(tmp_path:
         {
             "event": "EventA",
             "station": "STA1",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred": 7.0,
             "distance_km": 120.0,
             "max_radial_cm": 3.2,
@@ -507,7 +507,7 @@ def test_plot_unseen_event_mw_figure_draws_true_magnitude_pm_03_guides(tmp_path:
         {
             "event": "EventA",
             "station": "STA1",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred": 7.0,
             "distance_km": 120.0,
             "max_radial_cm": 3.2,
@@ -543,9 +543,9 @@ def test_write_unseen_event_outputs_creates_one_panel_per_event(tmp_path: Path):
         {
             "event": "EventA",
             "station": "STA1",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred": 7.0,
-            "error": -0.1,
+            "error_vs_catalog": -0.1,
             "distance_km": 120.0,
             "mechanism": "normal",
             "dt": 1.0,
@@ -556,18 +556,18 @@ def test_write_unseen_event_outputs_creates_one_panel_per_event(tmp_path: Path):
     event_rows = [
         {
             "event": "EventA",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred_median": 7.0,
-            "error": -0.1,
+            "error_vs_catalog": -0.1,
             "n_stations": 1,
             "pred_std": 0.0,
             "pred_iqr": 0.0,
         },
         {
             "event": "EventB",
-            "mw_true": 7.7,
+            "mw_catalog": 7.7,
             "mw_pred_median": 7.8,
-            "error": 0.1,
+            "error_vs_catalog": 0.1,
             "n_stations": 1,
             "pred_std": 0.0,
             "pred_iqr": 0.0,
@@ -577,7 +577,7 @@ def test_write_unseen_event_outputs_creates_one_panel_per_event(tmp_path: Path):
         {
             "event": "EventA",
             "station": "STA1",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred": 7.0,
             "distance_km": 120.0,
             "max_radial_cm": 3.2,
@@ -589,7 +589,7 @@ def test_write_unseen_event_outputs_creates_one_panel_per_event(tmp_path: Path):
         {
             "event": "EventB",
             "station": "STA2",
-            "mw_true": 7.7,
+            "mw_catalog": 7.7,
             "mw_pred": 7.8,
             "distance_km": 80.0,
             "max_radial_cm": 4.5,
@@ -622,7 +622,7 @@ def test_write_unseen_event_outputs_splits_station_panels_into_three_pages(tmp_p
             {
                 "event": event_name,
                 "station": f"STA{idx:02d}",
-                "mw_true": 7.1,
+                "mw_catalog": 7.1,
                 "mw_pred": 7.0 + idx * 0.01,
                 "distance_km": 80.0 + idx,
                 "max_radial_cm": 20.0 - idx,
@@ -639,9 +639,9 @@ def test_write_unseen_event_outputs_splits_station_panels_into_three_pages(tmp_p
         event_rows=[
             {
                 "event": event_name,
-                "mw_true": 7.1,
+                "mw_catalog": 7.1,
                 "mw_pred_median": 7.0,
-                "error": -0.1,
+                "error_vs_catalog": -0.1,
                 "n_stations": 13,
                 "pred_std": 0.0,
                 "pred_iqr": 0.0,
@@ -666,9 +666,9 @@ def test_write_unseen_event_outputs_creates_event_mw_figures(tmp_path: Path):
         event_rows=[
             {
                 "event": "EventA",
-                "mw_true": 7.1,
+                "mw_catalog": 7.1,
                 "mw_pred_median": 7.0,
-                "error": -0.1,
+                "error_vs_catalog": -0.1,
                 "n_stations": 2,
                 "pred_std": 0.1,
                 "pred_iqr": 0.2,
@@ -678,7 +678,7 @@ def test_write_unseen_event_outputs_creates_event_mw_figures(tmp_path: Path):
             {
                 "event": "EventA",
                 "station": "STA1",
-                "mw_true": 7.1,
+                "mw_catalog": 7.1,
                 "mw_pred": 7.0,
                 "distance_km": 120.0,
                 "max_radial_cm": 3.2,
@@ -690,7 +690,7 @@ def test_write_unseen_event_outputs_creates_event_mw_figures(tmp_path: Path):
             {
                 "event": "EventA",
                 "station": "STA2",
-                "mw_true": 7.1,
+                "mw_catalog": 7.1,
                 "mw_pred": 7.2,
                 "distance_km": 90.0,
                 "max_radial_cm": 4.1,
@@ -711,9 +711,9 @@ def test_write_unseen_event_outputs_creates_csv_and_figures(tmp_path: Path):
         {
             "event": "Xizang",
             "station": "STA1",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred": 7.0,
-            "error": -0.1,
+            "error_vs_catalog": -0.1,
             "distance_km": 120.0,
             "mechanism": "normal",
             "dt": 1.0,
@@ -725,9 +725,9 @@ def test_write_unseen_event_outputs_creates_csv_and_figures(tmp_path: Path):
         {
             "event": "Myanmar",
             "station": "STA2",
-            "mw_true": 7.7,
+            "mw_catalog": 7.7,
             "mw_pred": 7.9,
-            "error": 0.2,
+            "error_vs_catalog": 0.2,
             "distance_km": 160.0,
             "mechanism": "strike-slip",
             "dt": 1.0,
@@ -740,9 +740,9 @@ def test_write_unseen_event_outputs_creates_csv_and_figures(tmp_path: Path):
     event_rows = [
         {
             "event": "Xizang",
-            "mw_true": 7.1,
+            "mw_catalog": 7.1,
             "mw_pred_median": 7.0,
-            "error": -0.1,
+            "error_vs_catalog": -0.1,
             "n_stations": 1,
             "pred_std": 0.0,
             "pred_iqr": 0.0,
@@ -754,9 +754,9 @@ def test_write_unseen_event_outputs_creates_csv_and_figures(tmp_path: Path):
         },
         {
             "event": "Myanmar",
-            "mw_true": 7.7,
+            "mw_catalog": 7.7,
             "mw_pred_median": 7.9,
-            "error": 0.2,
+            "error_vs_catalog": 0.2,
             "n_stations": 1,
             "pred_std": 0.0,
             "pred_iqr": 0.0,
@@ -799,9 +799,9 @@ def test_write_unseen_event_outputs_preserves_station_pgd_columns(tmp_path: Path
             {
                 "event": "Xizang",
                 "station": "STA1",
-                "mw_true": 7.1,
+                "mw_catalog": 7.1,
                 "mw_pred": 7.0,
-                "error": -0.1,
+                "error_vs_catalog": -0.1,
                 "distance_km": 120.0,
                 "mechanism": "normal",
                 "dt": 1.0,
@@ -811,9 +811,9 @@ def test_write_unseen_event_outputs_preserves_station_pgd_columns(tmp_path: Path
             {
                 "event": "Xizang",
                 "station": "STA2",
-                "mw_true": 7.1,
+                "mw_catalog": 7.1,
                 "mw_pred": 7.2,
-                "error": 0.1,
+                "error_vs_catalog": 0.1,
                 "distance_km": 130.0,
                 "mechanism": "normal",
                 "dt": 1.0,
@@ -857,18 +857,18 @@ def test_write_unseen_event_outputs_preserves_event_pgd_columns(tmp_path: Path):
         event_rows=[
             {
                 "event": "Xizang",
-                "mw_true": 7.1,
+                "mw_catalog": 7.1,
                 "mw_pred_median": 7.0,
-                "error": -0.1,
+                "error_vs_catalog": -0.1,
                 "n_stations": 1,
                 "pred_std": 0.0,
                 "pred_iqr": 0.0,
             },
             {
                 "event": "Myanmar",
-                "mw_true": 7.7,
+                "mw_catalog": 7.7,
                 "mw_pred_median": 7.9,
-                "error": 0.2,
+                "error_vs_catalog": 0.2,
                 "n_stations": 2,
                 "pred_std": 0.1,
                 "pred_iqr": 0.2,
