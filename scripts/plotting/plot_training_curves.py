@@ -72,10 +72,14 @@ def build_loss_summary(config: dict) -> str:
         stf_cfg = (train_cfg.get("stf_rate_loss", {}) or {})
         ordered_items = [
             ("λ_MSE", stf_cfg.get("lambda_MSE", 1.0)),
-            ("λ_nonneg", stf_cfg.get("lambda_nonneg", 1.0)),
             ("λ_phys", stf_cfg.get("lambda_mag", 0.1)),
             ("λ_shape", stf_cfg.get("lambda_shape", 0.1)),
         ]
+        if int(config.get("pipeline_version", 1)) != 2:
+            ordered_items.insert(
+                1,
+                ("λ_nonneg", stf_cfg.get("lambda_nonneg", 1.0)),
+            )
     else:
         ordered_items = [
             ("w_phys", train_cfg.get("physics_loss_weight", 0.0)),

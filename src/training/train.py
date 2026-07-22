@@ -10,17 +10,91 @@ import sys
 from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
+from dataclasses import dataclass
 
 # 将项目根目录加入 sys.path 以便导入 src
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
 from src.models.model import PINNModel
 from src.data.data_loader import get_data_loaders
+from src.data.metadata import build_metadata_tensor
 from src.training.physics import PhysicsLoss
 from src.training.loss_stf_rate import STFRateWaveformLoss
+from src.training.loss_stf_rate_v2 import (
+    STFRateWaveformLossV2,
+    moment_magnitude_from_rate,
+)
 from src.utils.config_v2 import validate_config_on_startup
 from src.utils.device import configure_runtime, get_preferred_device
 from src.utils.run_dirs import create_run_dir, make_run_id
+
+
+@dataclass(frozen=True)
+class _PreparedV2Batch:
+    radial: torch.Tensor
+    source_distance_m: torch.Tensor
+    theta_deg: torch.Tensor
+    phi_slip_deg: torch.Tensor
+    source_dt_sec: torch.Tensor
+    observation_dt_sec: torch.Tensor
+    waveform_valid_mask: torch.Tensor
+    stf_true: torch.Tensor
+    has_stf: torch.Tensor
+    true_mag: torch.Tensor
+    metadata: torch.Tensor
+
+
+def _build_stf_rate_criterion(
+    config: dict,
+    device: torch.device,
+) -> torch.nn.Module:
+    if int(config.get("pipeline_version", 1)) == 2:
+        return STFRateWaveformLossV2(config).to(device)
+    return STFRateWaveformLoss(config).to(device)
+
+
+def _prepare_v2_batch(
+    batch: dict,
+    config: dict,
+    device: torch.device,
+) -> _PreparedV2Batch:
+    radial = batch["radial"].to(device)
+    source_distance_m = batch["source_distance_m"].to(device)
+    theta_deg = batch["theta_deg"].to(device)
+    azimuth_deg = batch["azimuth_deg"].to(device)
+    phi_slip_deg = batch["phi_slip_deg"].to(device)
+    source_dt_sec = batch["stf_dt_sec"].to(device)
+    observation_dt_sec = batch["waveform_dt_sec"].to(device)
+    waveform_valid_mask = batch["waveform_valid_mask"].to(device)
+    stf_true = batch["stf"].to(device)
+    has_stf = batch["has_stf"].to(device)
+    magnitude_target = str(
+        config["dataset"]["stf"]["magnitude_target"]
+    )
+    if magnitude_target == "stf_native":
+        true_mag = batch["mw_stf_native"].to(device)
+    elif magnitude_target == "catalog":
+        true_mag = batch["magnitude_catalog"].to(device)
+    else:
+        raise ValueError(f"unknown magnitude_target: {magnitude_target}")
+    metadata = build_metadata_tensor(
+        source_distance_m,
+        theta_deg,
+        azimuth_deg,
+    )
+    return _PreparedV2Batch(
+        radial=radial,
+        source_distance_m=source_distance_m,
+        theta_deg=theta_deg,
+        phi_slip_deg=phi_slip_deg,
+        source_dt_sec=source_dt_sec,
+        observation_dt_sec=observation_dt_sec,
+        waveform_valid_mask=waveform_valid_mask,
+        stf_true=stf_true,
+        has_stf=has_stf,
+        true_mag=true_mag,
+        metadata=metadata,
+    )
 
 def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict[str, object]:
     """训练 PINN 模型（包含物理约束项）
@@ -99,10 +173,15 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
     )
     print(f"调度器: CosineAnnealingWarmRestarts(T_0={scheduler_T0}, T_mult={scheduler_T_mult})")
     
-    criterion_1 = PhysicsLoss(config).to(device)
-    criterion_2 = STFRateWaveformLoss(config).to(device)
+    pipeline_version = int(config.get('pipeline_version', 1))
+    criterion_1 = (
+        None if pipeline_version == 2 else PhysicsLoss(config).to(device)
+    )
+    criterion_2 = _build_stf_rate_criterion(config, device)
     loss_name = str((config.get('training', {}) or {}).get('loss_name', 'physics')).lower()
     use_stf_rate_loss = loss_name in ['stf_rate', 'stf-rate', 'stf_rate_wave', 'waveform_rate']
+    if pipeline_version == 2 and not use_stf_rate_loss:
+        raise ValueError('pipeline_version=2 requires the STF-rate loss')
 
     # 预训练模型加载（用于微调）
     pretrain_path = config['training'].get('pretrain_path', None)
@@ -187,33 +266,42 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         
         for batch in train_loader:
             # 输入张量
-            radial = batch['radial'].to(device)
-            vertical = batch['vertical'].to(device)
-            distance = batch['distance'].to(device)
-            magnitude = batch['magnitude'].to(device)
-            theta_deg = batch.get('theta_deg', torch.tensor(0.0)).to(device)
-            phi_deg = batch.get('phi_deg', torch.tensor(0.0)).to(device)
-            phi_slip_deg = batch.get('phi_slip_deg', phi_deg).to(device)
-            stf_log = batch.get('stf_log', None)
-            stf_true = batch.get('stf', None)
-            has_stf = batch.get('has_stf', None)
-            if stf_log is not None:
-                stf_log = stf_log.to(device)
-            if stf_true is not None:
-                stf_true = stf_true.to(device)
-            if has_stf is not None:
-                has_stf = has_stf.to(device)
-            dt_val = batch['dt'].mean().item() # 批次平均 dt（近似）
-
-            # 构建元数据张量 [log(dist), sin(θ), cos(θ), sin(φ), cos(φ)]
-            dist_log = torch.log(distance.view(-1).clamp(min=1.0))  # (B,)
-            theta_r = torch.deg2rad(theta_deg.view(-1))
-            phi_r = torch.deg2rad(phi_deg.view(-1))
-            meta = torch.stack([
-                dist_log,
-                torch.sin(theta_r), torch.cos(theta_r),
-                torch.sin(phi_r),   torch.cos(phi_r),
-            ], dim=1)  # (B, 5)
+            if pipeline_version == 2:
+                prepared_v2 = _prepare_v2_batch(batch, config, device)
+                radial = prepared_v2.radial
+                distance = prepared_v2.source_distance_m
+                magnitude = prepared_v2.true_mag
+                theta_deg = prepared_v2.theta_deg
+                phi_slip_deg = prepared_v2.phi_slip_deg
+                stf_true = prepared_v2.stf_true
+                has_stf = prepared_v2.has_stf
+                meta = prepared_v2.metadata
+            else:
+                radial = batch['radial'].to(device)
+                vertical = batch['vertical'].to(device)
+                distance = batch['distance'].to(device)
+                magnitude = batch['magnitude'].to(device)
+                theta_deg = batch.get('theta_deg', torch.tensor(0.0)).to(device)
+                phi_deg = batch.get('phi_deg', torch.tensor(0.0)).to(device)
+                phi_slip_deg = batch.get('phi_slip_deg', phi_deg).to(device)
+                stf_log = batch.get('stf_log', None)
+                stf_true = batch.get('stf', None)
+                has_stf = batch.get('has_stf', None)
+                if stf_log is not None:
+                    stf_log = stf_log.to(device)
+                if stf_true is not None:
+                    stf_true = stf_true.to(device)
+                if has_stf is not None:
+                    has_stf = has_stf.to(device)
+                dt_val = batch['dt'].mean().item()
+                dist_log = torch.log(distance.view(-1).clamp(min=1.0))
+                theta_r = torch.deg2rad(theta_deg.view(-1))
+                phi_r = torch.deg2rad(phi_deg.view(-1))
+                meta = torch.stack([
+                    dist_log,
+                    torch.sin(theta_r), torch.cos(theta_r),
+                    torch.sin(phi_r), torch.cos(phi_r),
+                ], dim=1)
 
             optimizer.zero_grad()
             
@@ -221,23 +309,40 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
             pred_log = model(radial, meta=meta)  # (B, T)
 
             # 统一使用 STF 积分 Mw 作为物理约束目标（与 evaluate.py 一致）
-            if stf_true is not None:
+            if pipeline_version == 2:
+                mag_from_stf = prepared_v2.true_mag
+            elif stf_true is not None:
                 mag_from_stf = criterion_1.utils.magnitude_from_rate(stf_true, dt_val)
             else:
                 mag_from_stf = magnitude
 
             if use_stf_rate_loss:
-                loss, loss_dict = criterion_2(
-                    pred_log,
-                    radial_obs=radial,
-                    r_m=distance,
-                    theta_deg=theta_deg,
-                    phi_deg=phi_slip_deg,
-                    dt=dt_val,
-                    stf_true=stf_true,
-                    has_stf=has_stf,
-                    true_mag=mag_from_stf,
-                )
+                if pipeline_version == 2:
+                    loss, loss_dict = criterion_2(
+                        pred_log,
+                        radial_obs=radial,
+                        source_distance_m=prepared_v2.source_distance_m,
+                        theta_deg=prepared_v2.theta_deg,
+                        phi_slip_deg=prepared_v2.phi_slip_deg,
+                        source_dt_sec=prepared_v2.source_dt_sec,
+                        observation_dt_sec=prepared_v2.observation_dt_sec,
+                        waveform_valid_mask=prepared_v2.waveform_valid_mask,
+                        stf_true=prepared_v2.stf_true,
+                        has_stf=prepared_v2.has_stf,
+                        true_mag=prepared_v2.true_mag,
+                    )
+                else:
+                    loss, loss_dict = criterion_2(
+                        pred_log,
+                        radial_obs=radial,
+                        r_m=distance,
+                        theta_deg=theta_deg,
+                        phi_deg=phi_slip_deg,
+                        dt=dt_val,
+                        stf_true=stf_true,
+                        has_stf=has_stf,
+                        true_mag=mag_from_stf,
+                    )
                 data_loss = torch.tensor(float(loss_dict.get('L_MSE', 0.0)), device=device)
                 phys_loss = torch.tensor(float(loss_dict.get('L_mag', 0.0) + loss_dict.get('L_synth', 0.0)), device=device)
             else:
@@ -278,58 +383,90 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         
         with torch.no_grad():
             for batch in val_loader:
-                radial = batch['radial'].to(device)
-                vertical = batch['vertical'].to(device)
-                distance = batch['distance'].to(device)
-                magnitude = batch['magnitude'].to(device)
-                theta_deg = batch.get('theta_deg', torch.tensor(0.0)).to(device)
-                phi_deg = batch.get('phi_deg', torch.tensor(0.0)).to(device)
-                phi_slip_deg = batch.get('phi_slip_deg', phi_deg).to(device)
-                stf_log = batch.get('stf_log', None)
-                stf_true = batch.get('stf', None)
-                has_stf = batch.get('has_stf', None)
-                if stf_log is not None:
-                    stf_log = stf_log.to(device)
-                if stf_true is not None:
-                    stf_true = stf_true.to(device)
-                if has_stf is not None:
-                    has_stf = has_stf.to(device)
-                dt_val = batch['dt'].mean().item()
-
-                # 构建元数据张量
-                dist_log = torch.log(distance.view(-1).clamp(min=1.0))
-                theta_r = torch.deg2rad(theta_deg.view(-1))
-                phi_r = torch.deg2rad(phi_deg.view(-1))
-                meta = torch.stack([
-                    dist_log,
-                    torch.sin(theta_r), torch.cos(theta_r),
-                    torch.sin(phi_r),   torch.cos(phi_r),
-                ], dim=1)  # (B, 5)
+                if pipeline_version == 2:
+                    prepared_v2 = _prepare_v2_batch(batch, config, device)
+                    radial = prepared_v2.radial
+                    distance = prepared_v2.source_distance_m
+                    magnitude = prepared_v2.true_mag
+                    theta_deg = prepared_v2.theta_deg
+                    phi_slip_deg = prepared_v2.phi_slip_deg
+                    stf_true = prepared_v2.stf_true
+                    has_stf = prepared_v2.has_stf
+                    meta = prepared_v2.metadata
+                else:
+                    radial = batch['radial'].to(device)
+                    vertical = batch['vertical'].to(device)
+                    distance = batch['distance'].to(device)
+                    magnitude = batch['magnitude'].to(device)
+                    theta_deg = batch.get('theta_deg', torch.tensor(0.0)).to(device)
+                    phi_deg = batch.get('phi_deg', torch.tensor(0.0)).to(device)
+                    phi_slip_deg = batch.get('phi_slip_deg', phi_deg).to(device)
+                    stf_log = batch.get('stf_log', None)
+                    stf_true = batch.get('stf', None)
+                    has_stf = batch.get('has_stf', None)
+                    if stf_log is not None:
+                        stf_log = stf_log.to(device)
+                    if stf_true is not None:
+                        stf_true = stf_true.to(device)
+                    if has_stf is not None:
+                        has_stf = has_stf.to(device)
+                    dt_val = batch['dt'].mean().item()
+                    dist_log = torch.log(distance.view(-1).clamp(min=1.0))
+                    theta_r = torch.deg2rad(theta_deg.view(-1))
+                    phi_r = torch.deg2rad(phi_deg.view(-1))
+                    meta = torch.stack([
+                        dist_log,
+                        torch.sin(theta_r), torch.cos(theta_r),
+                        torch.sin(phi_r), torch.cos(phi_r),
+                    ], dim=1)
 
                 pred_log = model(radial, meta=meta)
                 
                 # 统一使用 STF 积分 Mw（与 evaluate.py 一致）
-                if stf_true is not None:
+                if pipeline_version == 2:
+                    mag_from_stf = prepared_v2.true_mag
+                elif stf_true is not None:
                     mag_from_stf = criterion_1.utils.magnitude_from_rate(stf_true, dt_val)
                 else:
                     mag_from_stf = magnitude
 
                 if use_stf_rate_loss:
-                    loss, loss_dict = criterion_2(
-                        pred_log,
-                        radial_obs=radial,
-                        r_m=distance,
-                        theta_deg=theta_deg,
-                        phi_deg=phi_slip_deg,
-                        dt=dt_val,
-                        stf_true=stf_true,
-                        has_stf=has_stf,
-                        true_mag=mag_from_stf,
-                    )
+                    if pipeline_version == 2:
+                        loss, loss_dict = criterion_2(
+                            pred_log,
+                            radial_obs=radial,
+                            source_distance_m=prepared_v2.source_distance_m,
+                            theta_deg=prepared_v2.theta_deg,
+                            phi_slip_deg=prepared_v2.phi_slip_deg,
+                            source_dt_sec=prepared_v2.source_dt_sec,
+                            observation_dt_sec=prepared_v2.observation_dt_sec,
+                            waveform_valid_mask=prepared_v2.waveform_valid_mask,
+                            stf_true=prepared_v2.stf_true,
+                            has_stf=prepared_v2.has_stf,
+                            true_mag=prepared_v2.true_mag,
+                        )
+                    else:
+                        loss, loss_dict = criterion_2(
+                            pred_log,
+                            radial_obs=radial,
+                            r_m=distance,
+                            theta_deg=theta_deg,
+                            phi_deg=phi_slip_deg,
+                            dt=dt_val,
+                            stf_true=stf_true,
+                            has_stf=has_stf,
+                            true_mag=mag_from_stf,
+                        )
                     pred_dot_m0 = criterion_2._decode_rate(pred_log)
 
                     # 计算 Mw MAE（与 evaluate.py 一致的指标）
-                    pred_mw = criterion_1.utils.magnitude_from_rate(pred_dot_m0, dt_val)
+                    if pipeline_version == 2:
+                        pred_mw = moment_magnitude_from_rate(
+                            pred_dot_m0,
+                            prepared_v2.source_dt_sec,
+                        )
+                    else:
+                        pred_mw = criterion_1.utils.magnitude_from_rate(pred_dot_m0, dt_val)
                     true_mw = mag_from_stf
                     mw_diff = torch.abs(pred_mw.view(-1) - true_mw.view(-1))
                     mw_diff = mw_diff[torch.isfinite(mw_diff)]

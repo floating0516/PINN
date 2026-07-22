@@ -266,7 +266,8 @@ def collect_summary_row(
     row["lambda_mag"] = stf_loss_cfg.get("lambda_mag", "")
     row["lambda_synth"] = stf_loss_cfg.get("lambda_synth", "")
     row["lambda_MSE"] = stf_loss_cfg.get("lambda_MSE", "")
-    row["lambda_nonneg"] = stf_loss_cfg.get("lambda_nonneg", "")
+    if int(config.get("pipeline_version", 1)) != 2:
+        row["lambda_nonneg"] = stf_loss_cfg.get("lambda_nonneg", "")
     row["lambda_shape"] = stf_loss_cfg.get("lambda_shape", "")
     row["radiation_pattern_mode"] = stf_loss_cfg.get("radiation_pattern_mode", "")
     row["include_intermediate_field"] = stf_loss_cfg.get("include_intermediate_field", "")
