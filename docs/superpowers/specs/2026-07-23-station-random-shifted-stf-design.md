@@ -1,7 +1,8 @@
 # Station-Random, Shifted-STF Training Design
 
 **Date:** 2026-07-23
-**Status:** Approved in conversation for the simplified constant-velocity stage
+**Status:** Approved in conversation for the simplified constant-velocity and
+fixed 300-second station-window stage
 
 ## Objective
 
@@ -72,25 +73,38 @@ must be reviewed before it can replace constant velocity.
 
 ## Station-Aligned STF Target
 
-Retain the canonical 200-second source STF for provenance and moment audits.
-Derive the training target independently for each station:
+Retain the canonical 200-second source STF and its full event moment for
+provenance. Derive the training target independently for each station:
 
 ```text
 station_rate(t) = source_rate(t - tau_P)
 ```
 
 Fractional shifts use interpolation on the frozen one-second target grid. The
-shifted discrete integral must equal the canonical target moment within the
-configured numerical tolerance. No station-dependent amplitude rescaling is
-allowed except the single correction required to remove interpolation error.
+station target is exactly 300 one-second bins covering `[0, 300)` seconds.
+Values shifted to `t >= 300` seconds are discarded. The target is never
+renormalized or amplitude-rescaled to restore the discarded tail.
 
-A 200-second station target is too short: the accepted data have source
-distances up to 799.812 km, P delays up to 101.242 seconds, and 35 records fall
-below the 99.5-percent retained-moment gate after a 200-second shift. The
-station target therefore contains the 200-second canonical source window plus
-the rounded maximum P-delay margin. For the current audited dataset this is a
-302-step target. Preflight recomputes and freezes the required length before a
-run; it fails rather than truncating or silently renormalizing a short window.
+The full event moment and the station-window moment are distinct quantities:
+
+```text
+full_event_moment = integral(canonical_source_rate)
+station_window_moment = integral(station_rate[0:300])
+retained_moment_fraction = station_window_moment / full_event_moment
+```
+
+The full event moment is station invariant. The station-window moment is
+allowed to decrease with P delay because a later shift leaves less of the
+canonical STF inside the fixed window. Preflight records both moments and the
+retained fraction for every sample. It rejects non-finite values or fractions
+outside `[0, 1]` by more than the configured numerical tolerance, but it does
+not enforce a minimum-retention gate,
+resize the target, or restore missing moment.
+
+For context, the accepted data have source distances up to 799.812 km and P
+delays up to 101.242 seconds. A 300-second target therefore preserves nearly
+all of the 200-second canonical source interval for the current data while
+intentionally allowing the latest tail to be truncated at distant stations.
 
 ## Physics Alignment
 
@@ -101,13 +115,23 @@ twice:
 - the S contribution uses `tau_S - tau_P`;
 - the same relative timing applies to far- and intermediate-field terms;
 - synthesis loss compares only the observed waveform interval and its mask;
-- predicted Mw integrates the complete shifted STF target window.
+- STF shape and synthesis losses consume the truncated 300-step station target;
+- a separate scalar magnitude head predicts full catalog Mw, and its magnitude
+  loss compares directly with catalog Mw;
+- integrating the STF output yields station-window moment/Mw for diagnostics
+  only and is never treated as the full catalog moment.
 
 All shift and synthesis paths consume the same travel-time provider.
 
 ## Model Candidates
 
 Model A is the existing TCN+Transformer hybrid `PINNModel` with metadata.
+
+Every candidate must expose two semantically separate outputs: a 300-step
+station-window STF and a scalar full-event catalog-Mw estimate. The scalar head
+may share encoded features with the STF decoder, but it must not obtain full Mw
+only by integrating the truncated STF. No loss path may renormalize the STF to
+make its window integral equal catalog Mw.
 
 Model B is the user-referenced `Cross1` model. No matching identifier or source
 currently exists in the repository, staging tree, configs, or Git history.
@@ -137,17 +161,17 @@ validation checkpoint to occur at any epoch.
 
 ## Metrics and Selection
 
-Primary internal metrics are station-level catalog-Mw MAE, RMSE, and bias.
-Validation station MAE selects each run's checkpoint. Candidate models rank by
-their mean validation station MAE across the three required seeds; mean
-absolute validation bias and then parameter count break an exact tie. The
-locked test splits are evaluated only after the model identity is frozen, and
-test metrics cannot change that selection.
+Primary internal metrics are station-level catalog-Mw MAE, RMSE, and bias from
+the separate scalar magnitude head. Validation station MAE selects each run's
+checkpoint. Candidate models rank by their mean validation station MAE across
+the three required seeds; mean absolute validation bias and then parameter
+count break an exact tie. The locked test splits are evaluated only after the
+model identity is frozen, and test metrics cannot change that selection.
 
 Secondary diagnostics include event-median MAE, per-event station IQR/standard
-deviation, sample counts, displacement thresholds, STF loss components, and
-waveform synthesis error. Secondary metrics do not override the primary
-station-level rule.
+deviation, sample counts, displacement thresholds, STF loss components,
+station-window moment/Mw, retained-moment fraction, and waveform synthesis
+error. Secondary metrics do not override the primary station-level rule.
 
 The eight external events run once after internal selection as a sanity check.
 Their results are preserved, but they cannot alter the selected checkpoint,
@@ -162,12 +186,13 @@ change, then verify:
 2. per-split station-count and magnitude-distribution audits;
 3. one authoritative constant-velocity travel-time provider;
 4. fractional P shifting and exact station-target shape;
-5. shifted discrete moment conservation and 99.5-percent window retention;
+5. fixed 300-step truncation, no renormalization, and retained-fraction audit;
 6. P-zero/S-relative delay behavior with no double shift;
-7. independent 200-step observation and 302-step station-target lengths;
-8. station-level checkpoint selection with no early termination;
-9. full checkpoint/resume and signal equivalence;
-10. finite CPU and single-GPU smoke results before any formal run.
+7. independent 200-step observation and 300-step station-target lengths;
+8. independent station-window STF and full catalog-Mw outputs and losses;
+9. station-level checkpoint selection with no early termination;
+10. full checkpoint/resume and signal equivalence;
+11. finite CPU and single-GPU smoke results before any formal run.
 
 ## Deferred Inputs
 
