@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import copy
 from functools import partial
+import hashlib
+import json
+import math
 import os
 from pathlib import Path
 import random
@@ -17,6 +20,7 @@ from src.data.splits import (
     assert_no_event_overlap,
     make_event_balanced_weights,
     make_event_group_split,
+    make_within_event_station_split,
 )
 
 
@@ -49,51 +53,6 @@ def _runtime_config(config: dict[str, Any]) -> dict[str, Any]:
     if "path" in stf:
         stf["path"] = _resolve_data_path(stf["path"])
     return result
-
-
-def _within_event_split(
-    events: list[str],
-    *,
-    validation_fraction: float,
-    test_fraction: float,
-    seed: int,
-) -> EventGroupSplit:
-    by_event: dict[str, list[int]] = {}
-    for index, event in enumerate(events):
-        by_event.setdefault(event, []).append(index)
-    rng = np.random.default_rng(seed)
-    train: list[int] = []
-    validation: list[int] = []
-    test: list[int] = []
-    for event in sorted(by_event):
-        indices = np.asarray(by_event[event], dtype=np.int64)
-        shuffled = rng.permutation(indices).tolist()
-        maximum_held_out = max(0, len(shuffled) - 1)
-        validation_count = (
-            0
-            if validation_fraction == 0.0
-            else max(1, int(round(len(shuffled) * validation_fraction)))
-        )
-        test_count = (
-            0
-            if test_fraction == 0.0
-            else max(1, int(round(len(shuffled) * test_fraction)))
-        )
-        while validation_count + test_count > maximum_held_out:
-            if validation_count >= test_count and validation_count > 0:
-                validation_count -= 1
-            elif test_count > 0:
-                test_count -= 1
-        test.extend(shuffled[:test_count])
-        validation.extend(
-            shuffled[test_count : test_count + validation_count]
-        )
-        train.extend(shuffled[test_count + validation_count :])
-    return EventGroupSplit(
-        train_indices=sorted(train),
-        validation_indices=sorted(validation),
-        test_indices=sorted(test),
-    )
 
 
 def _loeo_split(
@@ -140,9 +99,50 @@ def _worker_init(worker_id: int, seed: int) -> None:
 def _split_manifest(
     protocol: str,
     seed: int,
-    events: list[str],
+    samples: list[dict[str, Any]],
     split: EventGroupSplit,
 ) -> dict[str, Any]:
+    events = [str(sample["event"]) for sample in samples]
+    sample_keys = [
+        f"{sample['event']}::{sample['station']}" for sample in samples
+    ]
+    if len(set(sample_keys)) != len(sample_keys):
+        raise ValueError("duplicate event/station sample key in dataset")
+    split_indices = {
+        "train": split.train_indices,
+        "validation": split.validation_indices,
+        "test": split.test_indices,
+    }
+    keys_by_split = {
+        name: sorted(sample_keys[index] for index in indices)
+        for name, indices in split_indices.items()
+    }
+    per_event_counts: dict[str, dict[str, int]] = {}
+    for event in sorted(set(events)):
+        per_event_counts[event] = {
+            name: sum(events[index] == event for index in indices)
+            for name, indices in split_indices.items()
+        }
+
+    def magnitude_summary(indices: list[int]) -> dict[str, float | int | None]:
+        values = [
+            float(samples[index]["magnitude_catalog"])
+            for index in indices
+            if math.isfinite(float(samples[index]["magnitude_catalog"]))
+        ]
+        return {
+            "count": len(values),
+            "mean": float(np.mean(values)) if values else None,
+            "minimum": min(values) if values else None,
+            "maximum": max(values) if values else None,
+        }
+
+    canonical_assignments = json.dumps(
+        keys_by_split,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
     return {
         "protocol": protocol,
         "seed": seed,
@@ -154,7 +154,59 @@ def _split_manifest(
         "train_record_count": len(split.train_indices),
         "validation_record_count": len(split.validation_indices),
         "test_record_count": len(split.test_indices),
+        "sample_keys": keys_by_split,
+        "per_event_station_counts": per_event_counts,
+        "catalog_mw_summary": {
+            name: magnitude_summary(indices)
+            for name, indices in split_indices.items()
+        },
+        "assignment_sha256": hashlib.sha256(
+            canonical_assignments
+        ).hexdigest(),
     }
+
+
+def _validate_active_split_manifest(
+    manifest: dict[str, Any],
+    *,
+    validation_fraction: float,
+    test_fraction: float,
+) -> None:
+    total = sum(
+        int(manifest[f"{name}_record_count"])
+        for name in ("train", "validation", "test")
+    )
+    expected = {
+        "train": 1.0 - validation_fraction - test_fraction,
+        "validation": validation_fraction,
+        "test": test_fraction,
+    }
+    for name, fraction in expected.items():
+        observed = int(manifest[f"{name}_record_count"]) / total
+        if abs(observed - fraction) > 0.01:
+            raise ValueError(
+                f"{name} split fraction {observed:.6f} differs from "
+                f"{fraction:.6f}"
+            )
+
+    summaries = manifest["catalog_mw_summary"]
+    all_means = [
+        float(summary["mean"])
+        for summary in summaries.values()
+        if summary["mean"] is not None
+    ]
+    full_mean = sum(
+        float(summary["mean"]) * int(summary["count"])
+        for summary in summaries.values()
+        if summary["mean"] is not None
+    ) / sum(int(summary["count"]) for summary in summaries.values())
+    if any(abs(mean - full_mean) > 0.05 for mean in all_means):
+        raise ValueError("station-weighted catalog Mw split means differ by > 0.05")
+
+    for event, counts in manifest["per_event_station_counts"].items():
+        event_total = sum(int(value) for value in counts.values())
+        if event_total >= 3 and any(int(value) < 1 for value in counts.values()):
+            raise ValueError(f"event {event} is missing a split assignment")
 
 
 def get_data_loaders_v2(
@@ -164,8 +216,10 @@ def get_data_loaders_v2(
     max_events: int | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader, dict[str, Any]]:
     full_dataset = CorrectedEarthquakeDataset(_runtime_config(config))
-    full_events = [str(sample["event"]) for sample in full_dataset.samples]
+    full_samples = list(full_dataset.samples)
+    full_events = [str(sample["event"]) for sample in full_samples]
     dataset: Dataset = full_dataset
+    samples = full_samples
     events = full_events
     if max_events is not None:
         if isinstance(max_events, bool) or int(max_events) != max_events or max_events < 2:
@@ -179,6 +233,7 @@ def get_data_loaders_v2(
         if len(selected_events) < 2:
             raise ValueError("max_events retained fewer than two events")
         dataset = Subset(full_dataset, selected_indices)
+        samples = [full_samples[index] for index in selected_indices]
         events = [full_events[index] for index in selected_indices]
     training = config["training"]
     protocol = str(training["split_protocol"])
@@ -193,8 +248,11 @@ def get_data_loaders_v2(
             seed,
         )
     elif protocol == "within_event_station":
-        split = _within_event_split(
-            events,
+        split = make_within_event_station_split(
+            [
+                (str(sample["event"]), str(sample["station"]))
+                for sample in samples
+            ],
             validation_fraction=validation_fraction,
             test_fraction=test_fraction,
             seed=seed,
@@ -253,11 +311,18 @@ def get_data_loaders_v2(
         shuffle=False,
         num_workers=num_workers,
     )
+    split_manifest = _split_manifest(protocol, seed, samples, split)
+    if config.get("workflow") == "station_random_shifted_stf":
+        _validate_active_split_manifest(
+            split_manifest,
+            validation_fraction=validation_fraction,
+            test_fraction=test_fraction,
+        )
     return (
         train_loader,
         validation_loader,
         test_loader,
-        _split_manifest(protocol, seed, events, split),
+        split_manifest,
     )
 
 

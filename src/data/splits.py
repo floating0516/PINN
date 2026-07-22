@@ -65,6 +65,56 @@ def make_event_group_split(
     return split
 
 
+def make_within_event_station_split(
+    sample_keys: list[tuple[str, str]],
+    validation_fraction: float,
+    test_fraction: float,
+    seed: int,
+) -> EventGroupSplit:
+    if not sample_keys:
+        raise ValueError("sample_keys must not be empty")
+    normalized_keys = [
+        (str(event), str(station)) for event, station in sample_keys
+    ]
+    if len(set(normalized_keys)) != len(normalized_keys):
+        raise ValueError("duplicate event/station sample key")
+
+    by_event: dict[str, list[tuple[str, int]]] = {}
+    for index, (event, station) in enumerate(normalized_keys):
+        by_event.setdefault(event, []).append((station, index))
+
+    rng = np.random.default_rng(seed)
+    train: list[int] = []
+    validation: list[int] = []
+    test: list[int] = []
+    for event in sorted(by_event):
+        ordered = sorted(by_event[event])
+        permutation = rng.permutation(len(ordered)).tolist()
+        shuffled = [ordered[position][1] for position in permutation]
+        maximum_held_out = max(0, len(shuffled) - 1)
+        validation_count = _requested_group_count(
+            len(shuffled), validation_fraction
+        )
+        test_count = _requested_group_count(len(shuffled), test_fraction)
+        while validation_count + test_count > maximum_held_out:
+            if validation_count >= test_count and validation_count > 0:
+                validation_count -= 1
+            elif test_count > 0:
+                test_count -= 1
+
+        test.extend(shuffled[:test_count])
+        validation.extend(
+            shuffled[test_count : test_count + validation_count]
+        )
+        train.extend(shuffled[test_count + validation_count :])
+
+    return EventGroupSplit(
+        train_indices=sorted(train),
+        validation_indices=sorted(validation),
+        test_indices=sorted(test),
+    )
+
+
 def assert_no_event_overlap(
     events: list[str],
     split: EventGroupSplit,

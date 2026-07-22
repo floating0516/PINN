@@ -347,7 +347,12 @@ class _SmokeDataset(Dataset):
     def __init__(self, config: dict) -> None:
         del config
         self.samples = [
-            {"event": event, "value": torch.tensor(index)}
+            {
+                "event": event,
+                "station": f"S{index:02d}",
+                "magnitude_catalog": 7.0 + 0.1 * index,
+                "value": torch.tensor(index),
+            }
             for index, event in enumerate("AABBCCDDEE")
         ]
 

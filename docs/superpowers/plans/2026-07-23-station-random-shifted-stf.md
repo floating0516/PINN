@@ -248,7 +248,7 @@ git commit -m "feat: derive truncated station STF targets"
 - Modify: `tests/test_group_splits.py`
 - Modify: `tests/test_provenance.py`
 
-- [ ] **Step 1: Write failing split tests**
+- [x] **Step 1: Write failing split tests**
 
 ```python
 def test_station_split_is_order_independent_and_has_no_key_overlap() -> None:
@@ -283,13 +283,13 @@ def test_real_split_contract_has_expected_seed_42_counts(real_config: dict) -> N
     )
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source /home/lihe/.config/pinn/server.env && "$PINN_ENV/bin/python" -m pytest tests/test_group_splits.py tests/test_provenance.py -q`
 
 Expected: FAIL because split ownership and complete manifest fields are absent.
 
-- [ ] **Step 3: Implement stable key assignment**
+- [x] **Step 3: Implement stable key assignment**
 
 ```python
 def make_within_event_station_split(
@@ -328,7 +328,7 @@ catalog-Mw distribution summaries, seed, protocol, and SHA-256 over canonical
 JSON. Fail on duplicate/missing keys, invalid total fractions, or catalog-Mw mean
 drift above 0.05. Disable event-balanced sampling for the active workflow.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 Run the focused command from Step 2. Expected: all focused tests pass.
 

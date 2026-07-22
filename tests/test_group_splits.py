@@ -5,6 +5,7 @@ import torch
 from torch.utils.data import Dataset, WeightedRandomSampler
 
 from src.data import loaders_v2
+from src.data import splits as splits_module
 from src.data.loaders_v2 import get_data_loaders_v2
 from src.data.splits import (
     assert_no_event_overlap,
@@ -53,10 +54,84 @@ def test_event_balanced_weights_sum_equally_per_event() -> None:
     assert abs(sum(weights[:3]) - weights[3]) < 1.0e-12
 
 
+def test_station_split_is_order_independent_and_has_no_key_overlap() -> None:
+    keys = [
+        ("A", "A03"),
+        ("A", "A01"),
+        ("A", "A02"),
+        ("B", "B03"),
+        ("B", "B01"),
+        ("B", "B02"),
+    ]
+    first = splits_module.make_within_event_station_split(
+        keys,
+        validation_fraction=0.15,
+        test_fraction=0.15,
+        seed=42,
+    )
+    reversed_keys = list(reversed(keys))
+    second = splits_module.make_within_event_station_split(
+        reversed_keys,
+        validation_fraction=0.15,
+        test_fraction=0.15,
+        seed=42,
+    )
+
+    def assigned(split, source):
+        return (
+            {source[index] for index in split.train_indices},
+            {source[index] for index in split.validation_indices},
+            {source[index] for index in split.test_indices},
+        )
+
+    first_sets = assigned(first, keys)
+    second_sets = assigned(second, reversed_keys)
+    assert first_sets == second_sets
+    assert not first_sets[0] & first_sets[1]
+    assert not first_sets[0] & first_sets[2]
+    assert not first_sets[1] & first_sets[2]
+    assert set.union(*first_sets) == set(keys)
+
+
+def test_station_split_uses_per_event_seventy_fifteen_fifteen_counts() -> None:
+    keys = [
+        (event, f"{event}{index:02d}")
+        for event in ("A", "B")
+        for index in range(20)
+    ]
+
+    split = splits_module.make_within_event_station_split(
+        keys,
+        validation_fraction=0.15,
+        test_fraction=0.15,
+        seed=17,
+    )
+
+    for event in ("A", "B"):
+        assert sum(keys[index][0] == event for index in split.train_indices) == 14
+        assert sum(keys[index][0] == event for index in split.validation_indices) == 3
+        assert sum(keys[index][0] == event for index in split.test_indices) == 3
+
+
+def test_station_split_rejects_duplicate_sample_keys() -> None:
+    with pytest.raises(ValueError, match="duplicate"):
+        splits_module.make_within_event_station_split(
+            [("A", "STA"), ("A", "STA")],
+            validation_fraction=0.15,
+            test_fraction=0.15,
+            seed=42,
+        )
+
+
 class _FakeDataset(Dataset):
     def __init__(self) -> None:
         self.samples = [
-            {"event": event, "value": torch.tensor(index)}
+            {
+                "event": event,
+                "station": f"S{index:02d}",
+                "magnitude_catalog": 7.0 + 0.1 * index,
+                "value": torch.tensor(index),
+            }
             for index, event in enumerate(
                 ["A", "A", "A", "B", "B", "C", "C", "D", "E", "E"]
             )
@@ -123,6 +198,10 @@ def test_grouped_loader_uses_balanced_sampler_and_manifest(
         "train_record_count",
         "validation_record_count",
         "test_record_count",
+        "sample_keys",
+        "per_event_station_counts",
+        "catalog_mw_summary",
+        "assignment_sha256",
     }
 
     event_weight_sums: dict[str, float] = defaultdict(float)
@@ -166,9 +245,30 @@ def test_within_event_station_keeps_each_event_in_training(
 ) -> None:
     _patch_dataset(monkeypatch)
 
-    _, _, _, manifest = get_data_loaders_v2(
-        _loader_config("within_event_station")
+    config = _loader_config("within_event_station")
+    config["training"]["event_balanced_sampling"] = False
+    train_loader, validation_loader, test_loader, manifest = (
+        get_data_loaders_v2(config)
     )
 
     assert manifest["protocol"] == "within_event_station"
     assert manifest["train_events"] == ["A", "B", "C", "D", "E"]
+    assert not isinstance(train_loader.sampler, WeightedRandomSampler)
+    key_sets = {
+        name: set(manifest["sample_keys"][name])
+        for name in ("train", "validation", "test")
+    }
+    assert not key_sets["train"] & key_sets["validation"]
+    assert not key_sets["train"] & key_sets["test"]
+    assert not key_sets["validation"] & key_sets["test"]
+    assert len(set.union(*key_sets.values())) == len(_FakeDataset())
+    assert len(manifest["assignment_sha256"]) == 64
+    assert manifest["catalog_mw_summary"]["train"]["count"] == len(
+        train_loader.dataset
+    )
+    assert manifest["catalog_mw_summary"]["validation"]["count"] == len(
+        validation_loader.dataset
+    )
+    assert manifest["catalog_mw_summary"]["test"]["count"] == len(
+        test_loader.dataset
+    )
