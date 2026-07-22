@@ -8,6 +8,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from src.data.manifest import make_manifest_row
 from src.data.records_v2 import (
     NormalizedStationRecord,
     _iter_normalized_station_records,
@@ -120,6 +121,7 @@ class CorrectedEarthquakeDataset(Dataset):
         self.config = config
         self.samples: list[dict[str, Any]] = []
         self.rejections: list[dict[str, Any]] = []
+        self.manifest_rows: list[dict[str, Any]] = []
         dataset_config = config["dataset"]
         stf_config = dataset_config["stf"]
         self.stf_m_ref = stf_m_ref_from_config(config)
@@ -187,6 +189,10 @@ class CorrectedEarthquakeDataset(Dataset):
         record: NormalizedStationRecord,
         reason: str,
         detail: str = "",
+        *,
+        sample: dict[str, Any] | None = None,
+        event_stf: ProcessedSTFMatch | None = None,
+        has_stf: bool | None = None,
     ) -> None:
         rejection = {
             "event": record.event,
@@ -196,6 +202,17 @@ class CorrectedEarthquakeDataset(Dataset):
         if detail:
             rejection["detail"] = detail
         self.rejections.append(rejection)
+        processed_stf = None if event_stf is None else event_stf[0]
+        self.manifest_rows.append(
+            make_manifest_row(
+                record,
+                accepted=False,
+                rejection_reason=reason,
+                sample=sample,
+                processed_stf=processed_stf,
+                has_stf=has_stf,
+            )
+        )
 
     def _consume_record(self, record: NormalizedStationRecord) -> None:
         if record.event in self.blacklist:
@@ -204,10 +221,15 @@ class CorrectedEarthquakeDataset(Dataset):
         try:
             event_stf = self._event_stf(record.event)
         except STFWindowTooShort as exc:
-            self._reject(record, "stf_window_too_short", str(exc))
+            self._reject(
+                record,
+                "stf_window_too_short",
+                str(exc),
+                has_stf=True,
+            )
             return
         if event_stf is None and not self.allow_missing_stf:
-            self._reject(record, "missing_stf")
+            self._reject(record, "missing_stf", has_stf=False)
             return
 
         try:
@@ -221,7 +243,14 @@ class CorrectedEarthquakeDataset(Dataset):
                 ),
             )
         except SampleRejected as exc:
-            self._reject(record, exc.reason, exc.detail)
+            self._reject(
+                record,
+                exc.reason,
+                exc.detail,
+                sample=exc.sample,
+                event_stf=event_stf,
+                has_stf=event_stf is not None,
+            )
             return
 
         if event_stf is None:
@@ -257,6 +286,15 @@ class CorrectedEarthquakeDataset(Dataset):
             }
         )
         self.samples.append(sample)
+        self.manifest_rows.append(
+            make_manifest_row(
+                record,
+                accepted=True,
+                sample=sample,
+                processed_stf=(None if event_stf is None else event_stf[0]),
+                has_stf=has_stf,
+            )
+        )
 
     def __len__(self) -> int:
         return len(self.samples)

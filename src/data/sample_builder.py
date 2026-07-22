@@ -11,10 +11,17 @@ from src.data.waveform import WaveformConfig, preprocess_waveform
 
 
 class SampleRejected(ValueError):
-    def __init__(self, reason: str, detail: str = "") -> None:
+    def __init__(
+        self,
+        reason: str,
+        detail: str = "",
+        *,
+        sample: dict[str, Any] | None = None,
+    ) -> None:
         super().__init__(f"{reason}: {detail}" if detail else reason)
         self.reason = reason
         self.detail = detail
+        self.sample = sample
 
 
 def _compute_phi_slip_deg(
@@ -130,13 +137,7 @@ def build_station_sample(
         raise SampleRejected(reason, detail) from exc
 
     radial_peak_cm = float(np.max(np.abs(radial.values_m)) * 100.0)
-    if radial_peak_cm <= radial_peak_min_cm:
-        raise SampleRejected(
-            "below_radial_peak_threshold",
-            f"{radial_peak_cm:.6f} <= {radial_peak_min_cm:.6f} cm",
-        )
-
-    return {
+    sample = {
         "event": record.event,
         "event_index": record.event_index,
         "station": record.station,
@@ -161,3 +162,10 @@ def build_station_sample(
             record.rake,
         ),
     }
+    if radial_peak_cm <= radial_peak_min_cm:
+        raise SampleRejected(
+            "below_radial_peak_threshold",
+            f"{radial_peak_cm:.6f} <= {radial_peak_min_cm:.6f} cm",
+            sample=sample,
+        )
+    return sample
