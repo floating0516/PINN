@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""批量 unseen 评估脚本 — 对已训练模型执行多阈值 evaluate_unseen
+r"""批量 unseen 评估脚本 — 对已训练模型执行多阈值 evaluate_unseen
 
 功能：
   1. 扫描指定 models 目录下所有已训练模型（含 best_model.pth + config.yaml）

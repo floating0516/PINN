@@ -1,6 +1,8 @@
 import pytest
+import torch
 
 from src.evaluation.bootstrap import bootstrap_event_metrics
+from src.evaluation.evaluate import _evaluation_time_steps, _magnitude_from_rate
 from src.evaluation.metrics import (
     aggregate_event_predictions,
     summarize_predictions,
@@ -66,3 +68,31 @@ def test_bootstrap_rejects_duplicate_event_rows() -> None:
 
     with pytest.raises(ValueError, match="one row per event"):
         bootstrap_event_metrics(rows, n_bootstrap=10)
+
+
+def test_v2_magnitude_conversion_needs_no_legacy_physics_config() -> None:
+    rate = torch.tensor([[1.0e18, 2.0e18]])
+
+    magnitude = _magnitude_from_rate(
+        rate,
+        torch.tensor([1.0]),
+        pipeline_version=2,
+        legacy_criterion=None,
+    )
+
+    expected = (2.0 / 3.0) * (torch.log10(torch.tensor(3.0e18)) - 9.1)
+    assert magnitude[0] == pytest.approx(float(expected))
+
+
+def test_v2_evaluation_keeps_waveform_and_stf_lengths_separate() -> None:
+    config = {
+        "pipeline_version": 2,
+        "dataset": {
+            "sample_rate_hz": 2.0,
+            "waveform": {"duration_sec": 3.0},
+            "stf": {"duration_sec": 5.0},
+        },
+        "training": {},
+    }
+
+    assert _evaluation_time_steps(config) == (6, 10)

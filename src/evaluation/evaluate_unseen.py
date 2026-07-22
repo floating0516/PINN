@@ -44,7 +44,11 @@ from src.data.external_records import record_from_external_bundle
 from src.data.metadata import build_metadata_tensor
 from src.data.sample_builder import SampleRejected, build_station_sample
 from src.data.waveform import WaveformConfig, waveform_config_from_v2
-from src.evaluation.evaluate import _ensure_time_steps, magnitude_series_from_rate
+from src.evaluation.evaluate import (
+    _ensure_time_steps,
+    _magnitude_from_rate,
+    magnitude_series_from_rate,
+)
 from src.evaluation.metrics import (
     aggregate_event_predictions,
     summarize_predictions,
@@ -625,7 +629,10 @@ def evaluate_unseen_events(
     model = PINNModel(config).to(device)
     model.load_state_dict(checkpoint)
     model.eval()
-    criterion = PhysicsLoss(config).to(device)
+    pipeline_version = int(config.get("pipeline_version", 1))
+    criterion = (
+        None if pipeline_version == 2 else PhysicsLoss(config).to(device)
+    )
     time_steps = int(train_cfg.get("time_steps", 200))
     stf_m_ref = float(
         (ds_cfg.get("stf", {}) or {}).get(
@@ -669,7 +676,14 @@ def evaluate_unseen_events(
                 dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
                 dot_m0 = torch.clamp(dot_m0, min=0.0)
                 sample_dt = float(sample["waveform_dt_sec"])
-                mw_pred = float(criterion.utils.magnitude_from_rate(dot_m0, sample_dt)[0].item())
+                mw_pred = float(
+                    _magnitude_from_rate(
+                        dot_m0,
+                        torch.tensor([sample_dt], device=device),
+                        pipeline_version=pipeline_version,
+                        legacy_criterion=criterion,
+                    )[0].item()
+                )
                 predictions.append(mw_pred)
 
                 source_distance_m = float(sample["source_distance_m"])

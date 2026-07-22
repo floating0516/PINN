@@ -36,7 +36,6 @@ import copy
 import csv
 import datetime
 import json
-import math
 import sys
 import traceback
 from pathlib import Path
@@ -47,6 +46,8 @@ import yaml
 # 将项目根目录加入 sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.provenance import write_json
 
 # ── 配置操作工具 ──────────────────────────────────────────────────────────
 
@@ -200,27 +201,100 @@ def _compute_unseen_metrics(unseen_result: dict) -> dict[str, Any]:
     if not event_rows:
         return {}
 
-    errors = [float(r["error"]) for r in event_rows]
-    abs_errors = [abs(e) for e in errors]
+    shared_metrics = unseen_result.get("metrics", {}) or {}
     metrics: dict[str, Any] = {
         "unseen_n_events": len(event_rows),
         "unseen_n_stations": len(station_rows),
-        "unseen_event_mae": sum(abs_errors) / len(abs_errors),
-        "unseen_event_rmse": math.sqrt(sum(e ** 2 for e in errors) / len(errors)),
-        "unseen_event_bias": sum(errors) / len(errors),
+        "unseen_event_mae_catalog": shared_metrics.get(
+            "event_mae", float("nan")
+        ),
+        "unseen_event_rmse_catalog": shared_metrics.get(
+            "event_rmse", float("nan")
+        ),
+        "unseen_event_bias_catalog": shared_metrics.get(
+            "event_bias", float("nan")
+        ),
     }
 
     # 按机制分类统计
     by_mech: dict[str, list[float]] = {}
     for row in event_rows:
         mech = _mechanism_label(row.get("mechanism", "unknown"))
-        by_mech.setdefault(mech, []).append(float(row["error"]))
+        by_mech.setdefault(mech, []).append(
+            float(row["error_vs_catalog"])
+        )
     for mech, errs in sorted(by_mech.items()):
         abs_e = [abs(e) for e in errs]
         metrics[f"unseen_{mech}_mae"] = sum(abs_e) / len(abs_e)
         metrics[f"unseen_{mech}_n"] = len(errs)
 
     return metrics
+
+
+def _artifact_paths(value: Any) -> list[Path]:
+    if isinstance(value, Path):
+        return [value]
+    if isinstance(value, str):
+        path = Path(value)
+        return [path] if path.suffix.lower() in {".csv", ".png", ".pdf"} else []
+    if isinstance(value, dict):
+        paths: list[Path] = []
+        for item in value.values():
+            paths.extend(_artifact_paths(item))
+        return paths
+    if isinstance(value, (list, tuple)):
+        paths = []
+        for item in value:
+            paths.extend(_artifact_paths(item))
+        return paths
+    return []
+
+
+def update_result_registry(
+    *,
+    experiment_name: str,
+    overrides: list[str],
+    eval_result: dict[str, Any] | None,
+    unseen_result: dict[str, Any] | None,
+) -> Path | None:
+    if not eval_result or not eval_result.get("result_registry_path"):
+        return None
+    registry_path = Path(eval_result["result_registry_path"])
+    with registry_path.open("r", encoding="utf-8") as stream:
+        registry = json.load(stream)
+    registry["experiment_name"] = experiment_name
+    registry["overrides"] = list(overrides)
+    if unseen_result:
+        external_artifacts = _artifact_paths(
+            {
+                key: unseen_result.get(key)
+                for key in (
+                    "station_csv",
+                    "event_csv",
+                    "station_scatter",
+                    "event_summary_figure",
+                    "station_panels",
+                    "event_mw_figures",
+                )
+            }
+        )
+        registry["external_evaluation"] = {
+            "metrics": unseen_result.get("metrics", {}),
+            "artifacts": [
+                str(path) for path in external_artifacts if path.is_file()
+            ],
+        }
+        artifacts = registry.setdefault("artifacts", {})
+        csv_paths = artifacts.setdefault("csv", [])
+        figure_paths = artifacts.setdefault("figures", [])
+        for path in external_artifacts:
+            if not path.is_file():
+                continue
+            target = csv_paths if path.suffix.lower() == ".csv" else figure_paths
+            if str(path) not in target:
+                target.append(str(path))
+    write_json(registry_path, registry)
+    return registry_path
 
 
 def collect_summary_row(
@@ -250,11 +324,18 @@ def collect_summary_row(
 
     # 测试集评估指标
     if eval_result:
-        row["test_mae"] = eval_result.get("mae", float("nan"))
-        row["test_rmse"] = eval_result.get("rmse", float("nan"))
+        eval_metrics = eval_result.get("metrics", {}) or {}
+        row["test_event_mae"] = eval_metrics.get("event_mae", float("nan"))
+        row["test_event_rmse"] = eval_metrics.get("event_rmse", float("nan"))
+        row["test_event_bias"] = eval_metrics.get("event_bias", float("nan"))
+        row["test_station_mae"] = eval_metrics.get("station_mae", float("nan"))
+        row["test_station_rmse"] = eval_metrics.get("station_rmse", float("nan"))
         row["test_baseline_mae"] = eval_result.get("baseline_mae", float("nan"))
         row["test_baseline_rmse"] = eval_result.get("baseline_rmse", float("nan"))
         row["test_sample_count"] = eval_result.get("sample_count", 0)
+        row["result_registry_path"] = str(
+            eval_result.get("result_registry_path", "")
+        )
 
     # Unseen 评估指标
     if unseen_result:
@@ -382,6 +463,13 @@ def run_single_experiment(
         print(f"\n✗ 实验 '{experiment_name}' 出错: {error_msg}")
         traceback.print_exc()
 
+    result_registry_path = update_result_registry(
+        experiment_name=experiment_name,
+        overrides=overrides,
+        eval_result=eval_result,
+        unseen_result=unseen_result,
+    )
+
     # 4. 汇总指标
     row = collect_summary_row(
         experiment_name=experiment_name,
@@ -405,9 +493,11 @@ def run_single_experiment(
         print(f"  test_RMSE   : {eval_result.get('rmse', float('nan')):.4f}")
     if unseen_result:
         um = _compute_unseen_metrics(unseen_result)
-        print(f"  unseen_MAE  : {um.get('unseen_event_mae', float('nan')):.4f}")
-        print(f"  unseen_RMSE : {um.get('unseen_event_rmse', float('nan')):.4f}")
-        print(f"  unseen_bias : {um.get('unseen_event_bias', float('nan')):.4f}")
+        print(f"  unseen_MAE  : {um.get('unseen_event_mae_catalog', float('nan')):.4f}")
+        print(f"  unseen_RMSE : {um.get('unseen_event_rmse_catalog', float('nan')):.4f}")
+        print(f"  unseen_bias : {um.get('unseen_event_bias_catalog', float('nan')):.4f}")
+    if result_registry_path:
+        print(f"  registry    : {result_registry_path}")
     if error_msg:
         print(f"  error       : {error_msg}")
     print(f"{'─' * 60}")
@@ -417,6 +507,7 @@ def run_single_experiment(
         "train_result": train_result,
         "eval_result": eval_result,
         "unseen_result": unseen_result,
+        "result_registry_path": result_registry_path,
         "summary_row": row,
     }
 

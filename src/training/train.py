@@ -27,6 +27,16 @@ from src.training.loss_stf_rate_v2 import (
 )
 from src.utils.config_v2 import validate_config_on_startup
 from src.utils.device import configure_runtime, get_preferred_device
+from src.utils.provenance import (
+    RUN_MANIFEST_FIELDS,
+    configured_dataset_manifest_path,
+    current_git_commit,
+    git_is_dirty,
+    sha256_file,
+    sha256_if_file,
+    utc_now_iso,
+    write_json,
+)
 from src.utils.run_dirs import create_run_dir, make_run_id
 
 
@@ -115,6 +125,10 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
 
     validate_config_on_startup(config)
     pipeline_version = int(config.get('pipeline_version', 1))
+    repository_root = Path(__file__).resolve().parents[2]
+    started_at_utc = utc_now_iso()
+    git_commit = current_git_commit(repository_root)
+    git_dirty = git_is_dirty(repository_root)
 
     # 设置全局随机种子，保证实验可复现
     seed = int((config.get('training', {}) or {}).get('random_seed', 42))
@@ -168,6 +182,29 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
                 sort_keys=True,
             )
             stream.write('\n')
+    dataset_manifest_path = configured_dataset_manifest_path(
+        config,
+        root=repository_root,
+    )
+    run_manifest_path = models_dir / 'run_manifest.json'
+    run_manifest = {
+        'pipeline_version': pipeline_version,
+        'git_commit': git_commit,
+        'git_dirty': git_dirty,
+        'config_sha256': sha256_file(config_snapshot_path),
+        'dataset_manifest_sha256': sha256_if_file(dataset_manifest_path),
+        'split_sha256': sha256_if_file(split_manifest_path),
+        'checkpoint_sha256': '',
+        'python_version': sys.version.split()[0],
+        'torch_version': str(torch.__version__),
+        'numpy_version': str(np.__version__),
+        'random_seed': seed,
+        'started_at_utc': started_at_utc,
+        'completed_at_utc': '',
+    }
+    if tuple(run_manifest) != RUN_MANIFEST_FIELDS:
+        raise RuntimeError('run manifest field contract mismatch')
+    write_json(run_manifest_path, run_manifest)
     
     # 数据集检查输出
     try:
@@ -585,6 +622,10 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         n_avg = swa_model.n_averaged.item() if hasattr(swa_model.n_averaged, 'item') else int(swa_model.n_averaged)
         print(f"已保存 SWA 平均模型 ({n_avg} 个快照): {swa_path}")
 
+    run_manifest['checkpoint_sha256'] = sha256_if_file(best_model_path)
+    run_manifest['completed_at_utc'] = utc_now_iso()
+    write_json(run_manifest_path, run_manifest)
+
     train_result = {
         'run_id': run_id,
         'models_dir': models_dir,
@@ -593,6 +634,7 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         'best_model_swa_path': best_model_swa_path,
         'config_snapshot_path': config_snapshot_path,
         'split_manifest_path': split_manifest_path,
+        'run_manifest_path': run_manifest_path,
         'log_file': log_file,
         'best_val_loss': float(best_val_loss),
         'best_mw_mae': float(best_mw_mae),

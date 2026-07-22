@@ -20,10 +20,17 @@ from src.evaluation.metrics import (
     summarize_predictions,
 )
 from src.training.physics import PhysicsLoss
+from src.training.loss_stf_rate_v2 import moment_magnitude_from_rate
 from src.baseline import Baseline
 from src.visualization.visualize import plot_mwg_time_evolution, set_srl_plot_style, maybe_show_plot
 from src.utils.config_v2 import validate_config_on_startup
 from src.utils.device import get_preferred_device
+from src.utils.provenance import (
+    configured_dataset_manifest_path,
+    file_reference,
+    split_protocol_from_manifest,
+    write_json,
+)
 from src.utils.run_dirs import create_run_dir, resolve_model_path
 
 
@@ -45,6 +52,44 @@ def _ensure_time_steps(x: torch.Tensor, time_steps: int) -> torch.Tensor:
     pad_shape[-1] = pad_len
     pad = x.new_zeros(pad_shape)
     return torch.cat([x, pad], dim=-1)
+
+
+def _evaluation_time_steps(config: dict) -> tuple[int, int]:
+    if int(config.get('pipeline_version', 1)) == 2:
+        dataset = config['dataset']
+        sample_rate_hz = float(dataset['sample_rate_hz'])
+        waveform_steps = int(
+            round(float(dataset['waveform']['duration_sec']) * sample_rate_hz)
+        )
+        source_steps = int(
+            round(float(dataset['stf']['duration_sec']) * sample_rate_hz)
+        )
+        return waveform_steps, source_steps
+    legacy_steps = int((config.get('training', {}) or {}).get('time_steps', 250))
+    return legacy_steps, legacy_steps
+
+
+def _magnitude_from_rate(
+    rate_nm_per_s: torch.Tensor,
+    dt_sec,
+    *,
+    pipeline_version: int,
+    legacy_criterion,
+) -> torch.Tensor:
+    if pipeline_version == 2:
+        dt_tensor = torch.as_tensor(
+            dt_sec,
+            dtype=rate_nm_per_s.dtype,
+            device=rate_nm_per_s.device,
+        )
+        return moment_magnitude_from_rate(rate_nm_per_s, dt_tensor)
+    if legacy_criterion is None:
+        raise ValueError("legacy magnitude conversion requires PhysicsLoss")
+    dt_value = float(torch.as_tensor(dt_sec).float().mean().item())
+    return legacy_criterion.utils.magnitude_from_rate(
+        rate_nm_per_s,
+        dt_value,
+    )
 
 def evaluate(
     model_path: str | Path | None = None,
@@ -85,9 +130,8 @@ def evaluate(
             ds_cfg.get('stf_m_ref', 1.0e18),
         )
     )
-    train_cfg = config.get('training', {}) or {}
-    time_steps = int(train_cfg.get('time_steps', 250))
     pipeline_version = int(config.get('pipeline_version', 1))
+    input_time_steps, source_time_steps = _evaluation_time_steps(config)
     
     # 路径设置
     models_dir = Path(config['paths']['models_dir'])
@@ -158,7 +202,9 @@ def evaluate(
     baseline_mags = []
     distances_km = []
     mechanisms = []
-    criterion = PhysicsLoss(config).to(device)
+    criterion = (
+        None if pipeline_version == 2 else PhysicsLoss(config).to(device)
+    )
     baseline = Baseline.from_config(config)
     mwg_items: list[dict[str, object]] = []
     station_rows: list[dict[str, object]] = []
@@ -178,7 +224,7 @@ def evaluate(
     with torch.no_grad():
         for batch in test_loader:
             radial = batch['radial'].to(device)
-            radial = _ensure_time_steps(radial, time_steps)
+            radial = _ensure_time_steps(radial, input_time_steps)
             stf_true = batch.get('stf', None)
             has_stf = batch.get('has_stf', None)
             magnitude = batch.get(
@@ -202,6 +248,11 @@ def evaluate(
             if dt_batch is None:
                 dt_batch = torch.ones(radial.size(0), dtype=radial.dtype)
             dt_val = dt_batch.mean().item()
+            magnitude_dt_batch = (
+                batch.get('stf_dt_sec', dt_batch)
+                if pipeline_version == 2
+                else dt_batch
+            )
             metadata_distance_m = (
                 distance_m.to(device)
                 if distance_m is not None
@@ -211,7 +262,12 @@ def evaluate(
             rate_log = model(radial, meta=meta)
             dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
             dot_m0 = torch.clamp(dot_m0, min=0.0)
-            mw_pred = criterion.utils.magnitude_from_rate(dot_m0, dt_val)
+            mw_pred = _magnitude_from_rate(
+                dot_m0,
+                magnitude_dt_batch,
+                pipeline_version=pipeline_version,
+                legacy_criterion=criterion,
+            )
             mw_pred_values = mw_pred.cpu().numpy().flatten()
             pred_mags.extend(mw_pred_values)
 
@@ -222,7 +278,12 @@ def evaluate(
                 mw_stf_batch = batch['mw_stf_native'].to(device)
             elif stf_true is not None and torch.is_tensor(stf_true):
                 stf_true = stf_true.to(device)
-                mw_stf_batch = criterion.utils.magnitude_from_rate(stf_true, dt_val)
+                mw_stf_batch = _magnitude_from_rate(
+                    stf_true,
+                    dt_batch,
+                    pipeline_version=pipeline_version,
+                    legacy_criterion=criterion,
+                )
 
             B = int(radial.size(0))
             has_mask = None
@@ -364,7 +425,7 @@ def evaluate(
     mwg_plot_path = plot_mwg_time_evolution(
         mwg_items,
         save_path=out_mwg,
-        time_steps=time_steps,
+        time_steps=source_time_steps,
         show=show_plots,
     )
     if mwg_plot_path is not None:
@@ -522,11 +583,15 @@ def evaluate(
     with torch.no_grad():
         sample_batch = next(iter(test_loader))
         radial = sample_batch['radial'].to(device)
-        radial = _ensure_time_steps(radial, time_steps)
+        radial = _ensure_time_steps(radial, input_time_steps)
         stf_true = sample_batch.get('stf', None)
         dt = sample_batch.get(
             'waveform_dt_sec' if pipeline_version == 2 else 'dt',
             None,
+        )
+        source_dt = sample_batch.get(
+            'stf_dt_sec' if pipeline_version == 2 else 'dt',
+            dt,
         )
         distance_m = sample_batch.get('source_distance_m' if pipeline_version == 2 else 'distance', None)
         magnitude_true = sample_batch.get(
@@ -556,6 +621,14 @@ def evaluate(
             dt = torch.ones(radial.size(0), device=device, dtype=radial.dtype)
         else:
             dt = dt.to(device)
+        if source_dt is None:
+            source_dt = torch.ones(
+                radial.size(0),
+                device=device,
+                dtype=radial.dtype,
+            )
+        else:
+            source_dt = source_dt.to(device)
 
         if magnitude_true is not None:
             magnitude_true = magnitude_true.to(device)
@@ -566,7 +639,7 @@ def evaluate(
         if n_show_cfg <= 0:
             n_show_cfg = 4
         n_show = min(n_show_cfg, B)
-        t_len = int(radial.size(-1))
+        waveform_length = int(radial.size(-1))
 
         set_srl_plot_style(base_font_size=9)
         
@@ -592,12 +665,15 @@ def evaluate(
             )
 
         for i in range(n_show):
-            dt_i = float(dt[i].item())
-            t_axis = np.arange(t_len, dtype=np.float32) * dt_i
+            waveform_dt_i = float(dt[i].item())
+            source_dt_i = float(source_dt[i].item())
+            waveform_axis = (
+                np.arange(waveform_length, dtype=np.float32) * waveform_dt_i
+            )
             radial_i = radial[i].squeeze(0).detach().cpu().numpy()
 
             # 左列：径向位移 - 使用更粗的线条
-            axes[i, 0].plot(t_axis, radial_i, color='#0072B2', linewidth=1.1)
+            axes[i, 0].plot(waveform_axis, radial_i, color='#0072B2', linewidth=1.1)
             axes[i, 0].set_ylabel("Radial disp. (mm)")
             axes[i, 0].grid(True, linestyle='--', alpha=0.15, zorder=0)
             axes[i, 0].minorticks_on()
@@ -606,9 +682,11 @@ def evaluate(
             if stf_true is not None:
                 stf_true_i = stf_true[i].detach().cpu().numpy()
                 stf_pred_i = dot_m0_pred[i].detach().cpu().numpy()
-                axes[i, 1].plot(t_axis, stf_true_i, color='black', linewidth=1.1, 
+                stf_true_axis = np.arange(stf_true_i.size) * source_dt_i
+                stf_pred_axis = np.arange(stf_pred_i.size) * source_dt_i
+                axes[i, 1].plot(stf_true_axis, stf_true_i, color='black', linewidth=1.1,
                               linestyle='-', label='True')
-                axes[i, 1].plot(t_axis, stf_pred_i, color='#D55E00', linewidth=1.1, 
+                axes[i, 1].plot(stf_pred_axis, stf_pred_i, color='#D55E00', linewidth=1.1,
                               linestyle='--', label='Predicted')
                 axes[i, 1].set_ylabel("Moment Rate (N·m/s)")
                 axes[i, 1].grid(True, linestyle='--', alpha=0.15, zorder=0)
@@ -621,19 +699,27 @@ def evaluate(
                 axes[i, 1].set_axis_off()
 
             # 右列：Mw(t) - 黑色实线（真实）vs 红色虚线（预测），标注最终震级
-            mw_pred_series = magnitude_series_from_rate(dot_m0_pred[i], dt_i)
+            mw_pred_series = magnitude_series_from_rate(
+                dot_m0_pred[i],
+                source_dt_i,
+            )
             if stf_true is not None:
-                mw_stf_series = magnitude_series_from_rate(stf_true[i], dt_i)
+                mw_stf_series = magnitude_series_from_rate(
+                    stf_true[i],
+                    source_dt_i,
+                )
             else:
                 mw_stf_series = None
 
             if mw_stf_series is not None:
                 final_mw_stf = mw_stf_series[-1]
-                axes[i, 2].plot(t_axis, mw_stf_series, color='black', linewidth=1.1,
+                mw_stf_axis = np.arange(mw_stf_series.size) * source_dt_i
+                axes[i, 2].plot(mw_stf_axis, mw_stf_series, color='black', linewidth=1.1,
                               linestyle='-', label=f'STF native (Final Mw: {final_mw_stf:.2f})')
             
             final_mw_pred = mw_pred_series[-1]
-            axes[i, 2].plot(t_axis, mw_pred_series, color='#D55E00', linewidth=1.1, 
+            mw_pred_axis = np.arange(mw_pred_series.size) * source_dt_i
+            axes[i, 2].plot(mw_pred_axis, mw_pred_series, color='#D55E00', linewidth=1.1,
                           linestyle='--', label=f'Predicted (Final Mw: {final_mw_pred:.2f})')
             axes[i, 2].set_ylabel("Mw(t)")
             axes[i, 2].grid(True, linestyle='--', alpha=0.15, zorder=0)
@@ -670,6 +756,80 @@ def evaluate(
     if sample_grid_path is not None:
         print(f"已保存样本诊断图：{sample_grid_path}")
 
+    metrics_json_path = results_dir / 'metrics.json' if save_metrics else None
+    result_registry_path = (
+        results_dir / 'result_registry.json' if save_metrics else None
+    )
+    if save_metrics:
+        metrics_payload = {
+            **evaluation_metrics,
+            'baseline_station_mae': float(mae_base),
+            'baseline_station_rmse': float(rmse_base),
+        }
+        write_json(metrics_json_path, metrics_payload)
+        repository_root = Path(__file__).resolve().parents[2]
+        config_snapshot_path = resolved_model_path.parent / 'config.yaml'
+        split_manifest_path = resolved_model_path.parent / 'split.json'
+        dataset_manifest_path = configured_dataset_manifest_path(
+            config,
+            root=repository_root,
+        )
+        evaluation_config = config.get('evaluation', {}) or {}
+        csv_artifacts = [
+            str(path)
+            for path in (station_csv_path, event_csv_path)
+            if path is not None and Path(path).is_file()
+        ]
+        figure_artifacts = [
+            str(path)
+            for path in (
+                scatter_path,
+                baseline_scatter_path,
+                sample_grid_path,
+                mwg_plot_path,
+            )
+            if path is not None and Path(path).is_file()
+        ]
+        result_registry = {
+            'checkpoint': file_reference(resolved_model_path),
+            'config': file_reference(config_snapshot_path),
+            'dataset_manifest': file_reference(dataset_manifest_path),
+            'split_manifest': file_reference(split_manifest_path),
+            'split_protocol': split_protocol_from_manifest(
+                split_manifest_path,
+                configured_protocol=str(
+                    (config.get('training', {}) or {}).get(
+                        'split_protocol',
+                        'legacy_random_station',
+                    )
+                ),
+            ),
+            'primary_reference': str(
+                evaluation_config.get('primary_reference', 'catalog')
+            ),
+            'secondary_reference': str(
+                evaluation_config.get('secondary_reference', 'stf_native')
+            ),
+            'station_metrics': {
+                'count': evaluation_metrics['station_count'],
+                'mae': evaluation_metrics['station_mae'],
+                'rmse': evaluation_metrics['station_rmse'],
+                'bias': evaluation_metrics['station_bias'],
+            },
+            'event_metrics': {
+                'count': evaluation_metrics['event_count'],
+                'mae': evaluation_metrics['event_mae'],
+                'rmse': evaluation_metrics['event_rmse'],
+                'bias': evaluation_metrics['event_bias'],
+            },
+            'artifacts': {
+                'csv': csv_artifacts,
+                'figures': figure_artifacts,
+                'metrics': [str(metrics_json_path)],
+            },
+        }
+        write_json(result_registry_path, result_registry)
+
     return {
         'model_path': resolved_model_path,
         'results_dir': results_dir,
@@ -685,6 +845,8 @@ def evaluate(
         'metrics_path': metrics_path,
         'station_csv_path': station_csv_path,
         'event_csv_path': event_csv_path,
+        'metrics_json_path': metrics_json_path,
+        'result_registry_path': result_registry_path,
         'baseline_metrics_path': baseline_metrics_path,
         'scatter_path': scatter_path,
         'baseline_scatter_path': baseline_scatter_path,

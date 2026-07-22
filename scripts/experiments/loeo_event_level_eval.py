@@ -26,6 +26,7 @@ from src.evaluation.metrics import (
     aggregate_event_predictions,
     summarize_predictions,
 )
+from src.evaluation.evaluate import _magnitude_from_rate
 from src.models.model import PINNModel
 from src.training.physics import PhysicsLoss
 from src.utils.device import get_preferred_device
@@ -62,7 +63,9 @@ def eval_fold(fold_dir: Path, ev_idx: int, device) -> list[dict]:
     state = torch.load(run_dir / "best_model.pth", map_location=device)
     model.load_state_dict(state)
     model.eval()
-    criterion = PhysicsLoss(config).to(device)
+    criterion = (
+        None if pipeline_version == 2 else PhysicsLoss(config).to(device)
+    )
 
     rows: list[dict] = []
     with torch.no_grad():
@@ -90,7 +93,12 @@ def eval_fold(fold_dir: Path, ev_idx: int, device) -> list[dict]:
             meta = build_metadata_tensor(metadata_distance_m, theta_deg, azimuth_deg)
             rate_log = model(radial, meta=meta)
             dot_m0 = torch.clamp(stf_m_ref * (torch.pow(10.0, rate_log) - 1.0), min=0.0)
-            mw_pred = criterion.utils.magnitude_from_rate(dot_m0, dt_val).cpu().numpy().flatten()
+            mw_pred = _magnitude_from_rate(
+                dot_m0,
+                dt_batch,
+                pipeline_version=pipeline_version,
+                legacy_criterion=criterion,
+            ).cpu().numpy().flatten()
 
             stf_true = batch.get("stf", None)
             mw_stf = None
@@ -99,7 +107,12 @@ def eval_fold(fold_dir: Path, ev_idx: int, device) -> list[dict]:
             ):
                 mw_stf = batch["mw_stf_native"].cpu().numpy().flatten()
             elif stf_true is not None and torch.is_tensor(stf_true):
-                mw_stf = criterion.utils.magnitude_from_rate(stf_true.to(device), dt_val).cpu().numpy().flatten()
+                mw_stf = _magnitude_from_rate(
+                    stf_true.to(device),
+                    dt_batch,
+                    pipeline_version=pipeline_version,
+                    legacy_criterion=criterion,
+                ).cpu().numpy().flatten()
             has_stf = batch.get("has_stf", None)
             magnitude = batch.get(
                 "magnitude_catalog" if pipeline_version == 2 else "magnitude",
