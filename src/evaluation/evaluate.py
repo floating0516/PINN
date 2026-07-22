@@ -12,6 +12,7 @@ from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 from src.models.model import PINNModel
 from src.data.data_loader import get_data_loaders
+from src.data.metadata import build_metadata_tensor
 from src.training.physics import PhysicsLoss
 from src.baseline import Baseline
 from src.visualization.visualize import plot_mwg_time_evolution, set_srl_plot_style, maybe_show_plot
@@ -75,6 +76,7 @@ def evaluate(
     stf_m_ref = float(ds_cfg.get('stf_m_ref', 1.0e18))
     train_cfg = config.get('training', {}) or {}
     time_steps = int(train_cfg.get('time_steps', 250))
+    pipeline_version = int(config.get('pipeline_version', 1))
     
     # 路径设置
     models_dir = Path(config['paths']['models_dir'])
@@ -154,24 +156,22 @@ def evaluate(
             stf_true = batch.get('stf', None)
             has_stf = batch.get('has_stf', None)
             magnitude = batch.get('magnitude', None)
-            distance_m = batch.get('distance', None)
+            distance_m = batch.get('source_distance_m' if pipeline_version == 2 else 'distance', None)
             mechanism = batch.get('mechanism', None)
             event_names = batch.get('event', None)
             station_names = batch.get('station', None)
-            theta_deg = batch.get('theta_deg', torch.tensor(45.0)).to(device)
-            phi_deg = batch.get('phi_deg', torch.tensor(0.0)).to(device)
+            theta_deg = batch.get('theta_deg', torch.full((radial.size(0),), 45.0)).to(device)
+            azimuth_deg = batch.get(
+                'azimuth_deg' if pipeline_version == 2 else 'phi_deg',
+                torch.zeros(radial.size(0)),
+            ).to(device)
             dt_val = batch['dt'].mean().item()
-            if distance_m is not None:
-                dist_log = torch.log(distance_m.to(device).view(-1).clamp(min=1.0))
-            else:
-                dist_log = torch.zeros(radial.size(0), device=device)
-            theta_r = torch.deg2rad(theta_deg.view(-1))
-            phi_r = torch.deg2rad(phi_deg.view(-1))
-            meta = torch.stack([
-                dist_log,
-                torch.sin(theta_r), torch.cos(theta_r),
-                torch.sin(phi_r),   torch.cos(phi_r),
-            ], dim=1)
+            metadata_distance_m = (
+                distance_m.to(device)
+                if distance_m is not None
+                else torch.ones(radial.size(0), device=device)
+            )
+            meta = build_metadata_tensor(metadata_distance_m, theta_deg, azimuth_deg)
             rate_log = model(radial, meta=meta)
             dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
             dot_m0 = torch.clamp(dot_m0, min=0.0)
@@ -437,20 +437,20 @@ def evaluate(
         radial = _ensure_time_steps(radial, time_steps)
         stf_true = sample_batch.get('stf', None)
         dt = sample_batch.get('dt', None)
-        distance_m = sample_batch.get('distance', None)
+        distance_m = sample_batch.get('source_distance_m' if pipeline_version == 2 else 'distance', None)
         magnitude_true = sample_batch.get('magnitude', None)
 
-        if distance_m is not None:
-            dist_log_s = torch.log(distance_m.to(device).view(-1).clamp(min=1.0))
-        else:
-            dist_log_s = torch.zeros(radial.size(0), device=device)
         theta_deg_s = sample_batch.get('theta_deg', torch.zeros(radial.size(0))).to(device).view(-1)
-        phi_deg_s = sample_batch.get('phi_deg', torch.zeros(radial.size(0))).to(device).view(-1)
-        meta_s = torch.stack([
-            dist_log_s,
-            torch.sin(torch.deg2rad(theta_deg_s)), torch.cos(torch.deg2rad(theta_deg_s)),
-            torch.sin(torch.deg2rad(phi_deg_s)),   torch.cos(torch.deg2rad(phi_deg_s)),
-        ], dim=1)
+        azimuth_deg_s = sample_batch.get(
+            'azimuth_deg' if pipeline_version == 2 else 'phi_deg',
+            torch.zeros(radial.size(0)),
+        ).to(device).view(-1)
+        metadata_distance_m = (
+            distance_m.to(device)
+            if distance_m is not None
+            else torch.ones(radial.size(0), device=device)
+        )
+        meta_s = build_metadata_tensor(metadata_distance_m, theta_deg_s, azimuth_deg_s)
         rate_log = model(radial, meta=meta_s)
         dot_m0_pred = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
         dot_m0_pred = torch.clamp(dot_m0_pred, min=0.0)

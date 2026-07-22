@@ -42,6 +42,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data.data_loader import EarthquakeDataset
+from src.data.geometry import compute_source_station_geometry
+from src.data.metadata import build_metadata_tensor
 from src.evaluation.evaluate import _ensure_time_steps, magnitude_series_from_rate
 from src.evaluation.evaluate_unseen import (
     EventBundle,
@@ -79,11 +81,14 @@ def _station_sample_with_window(
     window_max_sec: float,
 ) -> dict[str, Any] | None:
     """从事件 bundle 中为指定台站构建样本，使用自定义时间窗口"""
-    dist_m, theta_deg, _ = ds_helper._calculate_geodetics(
-        bundle.latitude, bundle.longitude,
-        station.latitude, station.longitude,
+    geometry = compute_source_station_geometry(
+        bundle.latitude,
+        bundle.longitude,
+        bundle.depth_km,
+        station.latitude,
+        station.longitude,
     )
-    radial_m = _compute_radial(station.e_m, station.n_m, theta_deg)
+    radial_m = _compute_radial(station.e_m, station.n_m, geometry.azimuth_deg)
     vertical_m = station.u_m.copy()
 
     t_cut, series_map = _slice_after_origin(
@@ -104,27 +109,26 @@ def _station_sample_with_window(
     vertical_processed, _ = ds_helper._preprocess_waveform(t_win, series_map["vertical"])
     if ds_helper.p_preprocess_enabled:
         radial_processed, vertical_processed = ds_helper._apply_p_baseline(
-            radial_processed, vertical_processed, dist_m, dt,
+            radial_processed, vertical_processed, geometry.source_distance_m, dt,
         )
     max_radial_cm = float(np.nanmax(np.abs(radial_processed)) * 100.0) if len(radial_processed) else 0.0
     if not _passes_radial_peak_threshold(ds_helper, radial_processed):
         return None
 
-    dist_log = math.log(max(dist_m, 1.0))
-    theta_r = math.radians(theta_deg)
-    phi_deg_val = ds_helper.default_phi_deg
-    phi_r = math.radians(phi_deg_val)
-    meta = np.asarray(
-        [dist_log, math.sin(theta_r), math.cos(theta_r), math.sin(phi_r), math.cos(phi_r)],
-        dtype=np.float32,
-    )
+    meta = build_metadata_tensor(
+        torch.tensor([geometry.source_distance_m], dtype=torch.float32),
+        torch.tensor([geometry.takeoff_angle_deg], dtype=torch.float32),
+        torch.tensor([geometry.azimuth_deg], dtype=torch.float32),
+    )[0].numpy()
     return {
         "event": bundle.event_name,
         "station": station.station,
         "radial": radial_processed,
-        "distance_m": dist_m,
-        "theta_deg": theta_deg,
-        "phi_deg": phi_deg_val,
+        "distance_m": geometry.source_distance_m,
+        "source_distance_m": geometry.source_distance_m,
+        "epicentral_distance_m": geometry.epicentral_distance_m,
+        "theta_deg": geometry.takeoff_angle_deg,
+        "azimuth_deg": geometry.azimuth_deg,
         "meta": meta,
         "dt": dt,
         "max_radial_cm": max_radial_cm,

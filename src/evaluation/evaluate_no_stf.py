@@ -16,6 +16,7 @@ from src.baseline import Baseline
 
 from src.models.model import PINNModel
 from src.data.data_loader import get_data_loaders
+from src.data.metadata import build_metadata_tensor
 from src.training.physics import PhysicsLoss
 from src.visualization.visualize import plot_mwg_time_evolution
 from src.utils.device import get_preferred_device
@@ -118,17 +119,12 @@ def evaluate_no_stf() -> None:
             phi_deg = batch.get('phi_deg', torch.zeros(radial.size(0))).to(device)
             dt_val = batch['dt'].mean().item()
 
-            if distance_m is not None:
-                dist_log = torch.log(distance_m.to(device).view(-1).clamp(min=1.0))
-            else:
-                dist_log = torch.zeros(radial.size(0), device=device)
-            theta_r = torch.deg2rad(theta_deg.view(-1))
-            phi_r = torch.deg2rad(phi_deg.view(-1))
-            meta = torch.stack([
-                dist_log,
-                torch.sin(theta_r), torch.cos(theta_r),
-                torch.sin(phi_r),   torch.cos(phi_r),
-            ], dim=1)
+            metadata_distance_m = (
+                distance_m.to(device)
+                if distance_m is not None
+                else torch.ones(radial.size(0), device=device)
+            )
+            meta = build_metadata_tensor(metadata_distance_m, theta_deg, phi_deg)
 
             rate_log = model(radial, meta=meta)
             dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
@@ -268,17 +264,14 @@ def evaluate_no_stf() -> None:
         magnitude_true = sample_batch.get('magnitude', None)
 
         dist_m_s = sample_batch.get('distance', None)
-        if dist_m_s is not None:
-            dist_log_s = torch.log(dist_m_s.to(device).view(-1).clamp(min=1.0))
-        else:
-            dist_log_s = torch.zeros(radial.size(0), device=device)
         theta_deg_s = sample_batch.get('theta_deg', torch.zeros(radial.size(0))).to(device).view(-1)
         phi_deg_s = sample_batch.get('phi_deg', torch.zeros(radial.size(0))).to(device).view(-1)
-        meta_s = torch.stack([
-            dist_log_s,
-            torch.sin(torch.deg2rad(theta_deg_s)), torch.cos(torch.deg2rad(theta_deg_s)),
-            torch.sin(torch.deg2rad(phi_deg_s)),   torch.cos(torch.deg2rad(phi_deg_s)),
-        ], dim=1)
+        metadata_distance_m = (
+            dist_m_s.to(device)
+            if dist_m_s is not None
+            else torch.ones(radial.size(0), device=device)
+        )
+        meta_s = build_metadata_tensor(metadata_distance_m, theta_deg_s, phi_deg_s)
         rate_log = model(radial, meta=meta_s)
         dot_m0_pred = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
         dot_m0_pred = torch.clamp(dot_m0_pred, min=0.0)

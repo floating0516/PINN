@@ -22,6 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data.data_loader import get_data_loaders_loeo, list_event_indices
+from src.data.metadata import build_metadata_tensor
 from src.models.model import PINNModel
 from src.training.physics import PhysicsLoss
 from src.utils.device import get_preferred_device
@@ -45,6 +46,7 @@ def eval_fold(fold_dir: Path, ev_idx: int, device) -> list[dict]:
     ds_cfg = config.get("dataset", {}) or {}
     stf_m_ref = float(ds_cfg.get("stf_m_ref", 1.0e18))
     time_steps = int(config["training"].get("time_steps", 250))
+    pipeline_version = int(config.get("pipeline_version", 1))
 
     _, _, test_loader = get_data_loaders_loeo(config, leave_out_event_index=ev_idx)
 
@@ -59,20 +61,22 @@ def eval_fold(fold_dir: Path, ev_idx: int, device) -> list[dict]:
         for batch in test_loader:
             radial = _ensure_time_steps(batch["radial"].to(device), time_steps)
             B = int(radial.size(0))
-            distance_m = batch.get("distance", None)
-            theta_deg = batch.get("theta_deg", torch.tensor(45.0)).to(device)
-            phi_deg = batch.get("phi_deg", torch.tensor(0.0)).to(device)
-            dt_val = batch["dt"].mean().item()
-            if distance_m is not None:
-                dist_log = torch.log(distance_m.to(device).view(-1).clamp(min=1.0))
-            else:
-                dist_log = torch.zeros(B, device=device)
-            theta_r = torch.deg2rad(theta_deg.view(-1))
-            phi_r = torch.deg2rad(phi_deg.view(-1))
-            meta = torch.stack(
-                [dist_log, torch.sin(theta_r), torch.cos(theta_r), torch.sin(phi_r), torch.cos(phi_r)],
-                dim=1,
+            distance_m = batch.get(
+                "source_distance_m" if pipeline_version == 2 else "distance",
+                None,
             )
+            theta_deg = batch.get("theta_deg", torch.full((B,), 45.0)).to(device)
+            azimuth_deg = batch.get(
+                "azimuth_deg" if pipeline_version == 2 else "phi_deg",
+                torch.zeros(B),
+            ).to(device)
+            dt_val = batch["dt"].mean().item()
+            metadata_distance_m = (
+                distance_m.to(device)
+                if distance_m is not None
+                else torch.ones(B, device=device)
+            )
+            meta = build_metadata_tensor(metadata_distance_m, theta_deg, azimuth_deg)
             rate_log = model(radial, meta=meta)
             dot_m0 = torch.clamp(stf_m_ref * (torch.pow(10.0, rate_log) - 1.0), min=0.0)
             mw_pred = criterion.utils.magnitude_from_rate(dot_m0, dt_val).cpu().numpy().flatten()

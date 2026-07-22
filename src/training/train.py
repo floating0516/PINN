@@ -317,14 +317,7 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
                 if has_stf is not None:
                     has_stf = has_stf.to(device)
                 dt_val = batch['dt'].mean().item()
-                dist_log = torch.log(distance.view(-1).clamp(min=1.0))
-                theta_r = torch.deg2rad(theta_deg.view(-1))
-                phi_r = torch.deg2rad(phi_deg.view(-1))
-                meta = torch.stack([
-                    dist_log,
-                    torch.sin(theta_r), torch.cos(theta_r),
-                    torch.sin(phi_r), torch.cos(phi_r),
-                ], dim=1)
+                meta = build_metadata_tensor(distance, theta_deg, phi_deg)
 
             optimizer.zero_grad()
             
@@ -434,14 +427,7 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
                     if has_stf is not None:
                         has_stf = has_stf.to(device)
                     dt_val = batch['dt'].mean().item()
-                    dist_log = torch.log(distance.view(-1).clamp(min=1.0))
-                    theta_r = torch.deg2rad(theta_deg.view(-1))
-                    phi_r = torch.deg2rad(phi_deg.view(-1))
-                    meta = torch.stack([
-                        dist_log,
-                        torch.sin(theta_r), torch.cos(theta_r),
-                        torch.sin(phi_r), torch.cos(phi_r),
-                    ], dim=1)
+                    meta = build_metadata_tensor(distance, theta_deg, phi_deg)
 
                 pred_log = model(radial, meta=meta)
                 
