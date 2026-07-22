@@ -20,7 +20,7 @@
 - Modify: `configs/config_v2.yaml`
 - Modify: `tests/test_config_v2.py`
 
-- [ ] **Step 1: Write failing config and provider tests**
+- [x] **Step 1: Write failing config and provider tests**
 
 ```python
 def test_constant_velocity_provider_returns_p_s_and_relative_delays() -> None:
@@ -50,13 +50,13 @@ def test_active_station_workflow_requires_fixed_contract() -> None:
     assert stf_output_steps_from_config(config) == 300
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source /home/lihe/.config/pinn/server.env && "$PINN_ENV/bin/python" -m pytest tests/test_config_v2.py tests/test_travel_time_provider.py -q`
 
 Expected: FAIL because the workflow keys and `src.physics.travel_time` do not exist.
 
-- [ ] **Step 3: Implement the provider and strict active-workflow branch**
+- [x] **Step 3: Implement the provider and strict active-workflow branch**
 
 ```python
 @dataclass(frozen=True)
@@ -100,7 +100,7 @@ The active `workflow=station_random_shifted_stf` branch must require exactly the
 approved keys and values. Historical configs without `workflow` retain their
 existing validation semantics for immutable diagnostic compatibility.
 
-- [ ] **Step 4: Verify GREEN and commit**
+- [x] **Step 4: Verify GREEN and commit**
 
 Run the focused command from Step 2. Expected: all focused tests pass.
 

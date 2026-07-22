@@ -48,6 +48,82 @@ def _as_int(config: dict[str, Any], path: tuple[str, ...]) -> int:
     return int(value)
 
 
+def _require_value(
+    config: dict[str, Any],
+    path: tuple[str, ...],
+    expected: Any,
+) -> None:
+    value = _required(config, path)
+    if value != expected or type(value) is not type(expected):
+        raise ValueError(
+            f"第二版配置要求 {'.'.join(path)}={expected!r}"
+        )
+
+
+def _validate_station_random_workflow(config: dict[str, Any]) -> None:
+    station_duration = _as_float(
+        config,
+        ("dataset", "stf", "station_window_duration_sec"),
+    )
+    if station_duration != 300.0:
+        raise ValueError(
+            "dataset.stf.station_window_duration_sec 必须严格等于 300.0"
+        )
+    _require_value(
+        config,
+        ("dataset", "stf", "station_alignment"),
+        "p_arrival",
+    )
+    _require_value(
+        config,
+        ("dataset", "stf", "station_preserve_integral"),
+        False,
+    )
+    _require_value(
+        config,
+        ("dataset", "stf", "magnitude_target"),
+        "stf_native",
+    )
+    _require_value(
+        config,
+        ("physics", "travel_time_model"),
+        "constant_velocity",
+    )
+    _require_value(
+        config,
+        ("physics", "delay_mode"),
+        "p_aligned_relative",
+    )
+    _require_value(
+        config,
+        ("model", "predict_catalog_mw"),
+        True,
+    )
+    _as_float(config, ("model", "catalog_mw_initial_bias"))
+    _require_value(
+        config,
+        ("training", "split_protocol"),
+        "within_event_station",
+    )
+    _require_value(
+        config,
+        ("training", "event_balanced_sampling"),
+        False,
+    )
+    if _as_int(config, ("training", "early_stop_patience")) != 0:
+        raise ValueError("training.early_stop_patience 必须严格等于 0")
+    _require_value(
+        config,
+        ("training", "checkpoint_metric"),
+        "station_mae_catalog",
+    )
+    _require_value(
+        config,
+        ("evaluation", "external_role"),
+        "sanity",
+    )
+
+
 def validate_config_on_startup(config: dict[str, Any]) -> None:
     if not isinstance(config, dict):
         raise ValueError("配置必须是映射")
@@ -130,9 +206,15 @@ def validate_config_v2(config: dict[str, Any]) -> None:
     if distance_mode != "hypocentral":
         raise ValueError("第二版主配置要求 physics.distance_mode=hypocentral")
 
-    delay_mode = _required(config, ("physics", "delay_mode"))
-    if delay_mode != "absolute":
-        raise ValueError("第二版主配置要求 physics.delay_mode=absolute")
+    workflow = config.get("workflow")
+    if workflow is None:
+        delay_mode = _required(config, ("physics", "delay_mode"))
+        if delay_mode != "absolute":
+            raise ValueError("第二版主配置要求 physics.delay_mode=absolute")
+    elif workflow == "station_random_shifted_stf":
+        _validate_station_random_workflow(config)
+    else:
+        raise ValueError(f"不支持的第二版 workflow: {workflow}")
 
 
 def stf_m_ref_from_config(config: dict[str, Any]) -> float:
@@ -143,9 +225,14 @@ def stf_m_ref_from_config(config: dict[str, Any]) -> float:
 def stf_output_steps_from_config(config: dict[str, Any]) -> int:
     validate_config_v2(config)
     dataset = config["dataset"]
+    duration_sec = (
+        dataset["stf"]["station_window_duration_sec"]
+        if config.get("workflow") == "station_random_shifted_stf"
+        else dataset["stf"]["duration_sec"]
+    )
     return int(
         round(
-            float(dataset["stf"]["duration_sec"])
+            float(duration_sec)
             * float(dataset["sample_rate_hz"])
         )
     )

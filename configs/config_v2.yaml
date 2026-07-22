@@ -1,4 +1,5 @@
 pipeline_version: 2
+workflow: station_random_shifted_stf
 project_name: PINN_Earthquake_Magnitude_Prediction_v2
 
 dataset:
@@ -33,6 +34,9 @@ dataset:
     path: data/STF_SCARDEC
     start_sec: 0.0
     duration_sec: 200.0
+    station_window_duration_sec: 300.0
+    station_alignment: p_arrival
+    station_preserve_integral: false
     min_retained_moment_fraction: 0.995
     preserve_integral: true
     m_ref: 1.0e+18
@@ -45,8 +49,9 @@ physics:
   rho: 3400.0
   alpha: 7900.0
   beta: 4533.0
+  travel_time_model: constant_velocity
   distance_mode: hypocentral
-  delay_mode: absolute
+  delay_mode: p_aligned_relative
   amplitude_gain: 1.0
 
 model:
@@ -56,6 +61,8 @@ model:
   transformer_num_layers: 3
   dropout: 0.2
   use_meta: true
+  predict_catalog_mw: true
+  catalog_mw_initial_bias: 8.0
 
 paths:
   data_path: data/gnss_events_matched.gcmt.npz
@@ -73,13 +80,17 @@ training:
   learning_rate: 0.0001
   weight_decay: 1.0e-05
   grad_clip_norm: 1.0
-  split_protocol: grouped_event
+  split_protocol: within_event_station
   validation_event_fraction: 0.15
-  test_event_fraction: 0.0
-  event_balanced_sampling: true
-  early_stop_metric: event_mae_catalog
-  early_stop_patience: 50
+  test_event_fraction: 0.15
+  event_balanced_sampling: false
+  early_stop_metric: mw_mae
+  early_stop_patience: 0
   early_stop_min_delta: 0.0001
+  checkpoint_metric: station_mae_catalog
+  warmup_epochs: 5
+  scheduler_T0: 15
+  scheduler_T_mult: 2
   stf_rate_loss:
     lambda_MSE: 1.0
     lambda_synth: 0.5
@@ -93,4 +104,4 @@ evaluation:
   secondary_reference: stf_native
   aggregation: event_median
   station_thresholds_cm: [0.0, 1.0, 2.0]
-  external_role: validation
+  external_role: sanity

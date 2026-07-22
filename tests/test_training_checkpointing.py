@@ -207,7 +207,7 @@ def _training_config(tmp_path: Path) -> dict:
             "batch_size": 1,
             "learning_rate": 1.0e-4,
             "early_stop_metric": "mw_mae",
-            "early_stop_patience": 5,
+            "early_stop_patience": 0,
             "swa_start": 1,
         }
     )
@@ -221,7 +221,7 @@ def _training_batch() -> dict[str, torch.Tensor]:
         "theta_deg": torch.tensor([40.0]),
         "azimuth_deg": torch.tensor([20.0]),
         "phi_slip_deg": torch.tensor([10.0]),
-        "stf": torch.full((1, 200), 1.0e18),
+        "stf": torch.full((1, 300), 1.0e18),
         "stf_dt_sec": torch.tensor([1.0]),
         "waveform_dt_sec": torch.tensor([1.0]),
         "waveform_valid_mask": torch.ones(1, 200, dtype=torch.bool),

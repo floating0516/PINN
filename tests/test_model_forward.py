@@ -177,10 +177,10 @@ def test_output_positive_linear():
 def test_meta_influences_output():
     """验证：元数据（距离、方位角等）是否真正影响模型预测结果"""
     B, T = 4, 200
+    torch.manual_seed(0)
     config = _make_config(use_meta=True)
     model = PINNModel(config).eval()
 
-    torch.manual_seed(0)
     x = torch.randn(B, 1, T)
 
     meta_a = _make_meta(B, torch.device('cpu'))

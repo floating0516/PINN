@@ -70,8 +70,83 @@ def _minimal_v2() -> dict:
     }
 
 
+def _active_station_v2() -> dict:
+    config = _minimal_v2()
+    config["workflow"] = "station_random_shifted_stf"
+    config["dataset"]["stf"].update(
+        {
+            "station_window_duration_sec": 300.0,
+            "station_alignment": "p_arrival",
+            "station_preserve_integral": False,
+            "magnitude_target": "stf_native",
+        }
+    )
+    config["physics"].update(
+        {
+            "travel_time_model": "constant_velocity",
+            "delay_mode": "p_aligned_relative",
+        }
+    )
+    config["model"] = {
+        "predict_catalog_mw": True,
+        "catalog_mw_initial_bias": 8.0,
+    }
+    config["training"].update(
+        {
+            "split_protocol": "within_event_station",
+            "validation_event_fraction": 0.15,
+            "test_event_fraction": 0.15,
+            "event_balanced_sampling": False,
+            "early_stop_patience": 0,
+            "checkpoint_metric": "station_mae_catalog",
+        }
+    )
+    config["evaluation"]["external_role"] = "sanity"
+    return config
+
+
 def test_valid_v2_config_passes() -> None:
     validate_config_v2(_minimal_v2())
+
+
+def test_active_station_workflow_has_fixed_three_hundred_step_contract() -> None:
+    config = _active_station_v2()
+
+    validate_config_v2(config)
+
+    assert stf_output_steps_from_config(config) == 300
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "message"),
+    [
+        (("dataset", "stf", "station_window_duration_sec"), 299.0, "station_window_duration_sec"),
+        (("dataset", "stf", "station_alignment"), "source", "station_alignment"),
+        (("dataset", "stf", "station_preserve_integral"), True, "station_preserve_integral"),
+        (("dataset", "stf", "magnitude_target"), "catalog", "magnitude_target"),
+        (("physics", "travel_time_model"), "crust1", "travel_time_model"),
+        (("physics", "delay_mode"), "absolute", "delay_mode"),
+        (("model", "predict_catalog_mw"), False, "predict_catalog_mw"),
+        (("training", "split_protocol"), "grouped_event", "split_protocol"),
+        (("training", "event_balanced_sampling"), True, "event_balanced_sampling"),
+        (("training", "early_stop_patience"), 50, "early_stop_patience"),
+        (("training", "checkpoint_metric"), "event_mae_catalog", "checkpoint_metric"),
+        (("evaluation", "external_role"), "validation", "external_role"),
+    ],
+)
+def test_active_station_workflow_rejects_conflicting_values(
+    path: tuple[str, ...],
+    value: object,
+    message: str,
+) -> None:
+    config = _active_station_v2()
+    node = config
+    for key in path[:-1]:
+        node = node[key]
+    node[path[-1]] = value
+
+    with pytest.raises(ValueError, match=message):
+        validate_config_v2(config)
 
 
 @pytest.mark.parametrize(
