@@ -13,11 +13,14 @@ PINNModel 前向传播自动化测试，不依赖真实数据集或配置文件�
 7. transformer_num_layers 配置生效（层数变化导致参数量变化）
 """
 
-import sys
 import math
+from pathlib import Path
+import sys
+
 import torch
 import torch.nn as nn
 import pytest
+import yaml
 
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent.parent))
 
@@ -88,6 +91,35 @@ def test_output_shape(B: int, T: int):
     assert out.shape == (B, T), (
         f"输出形状应为 ({B}, {T})，实际为 {tuple(out.shape)}"
     )
+
+
+def test_output_length_can_differ_from_input_length():
+    config = yaml.safe_load(
+        Path("configs/config_v2.yaml").read_text(encoding="utf-8")
+    )
+    config["dataset"]["stf"]["duration_sec"] = 300.0
+    model = PINNModel(config).eval()
+    x = torch.randn(2, 1, 200)
+    meta = _make_meta(2, torch.device("cpu"))
+
+    with torch.no_grad():
+        output = model(x, meta=meta)
+
+    assert output.shape == (2, 300)
+
+
+def test_debug_forward_uses_v2_output_length():
+    config = yaml.safe_load(
+        Path("configs/config_v2.yaml").read_text(encoding="utf-8")
+    )
+    config["dataset"]["stf"]["duration_sec"] = 300.0
+    model = PINNModel(config).eval()
+
+    with torch.no_grad():
+        report = model.debug_forward(torch.randn(2, 1, 200))
+
+    assert report["output"].shape == (2, 300)
+    assert report["shapes"]["to_time"] == [2, 300, 128]
 
 
 # ---------------------------------------------------------------------------

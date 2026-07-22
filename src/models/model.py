@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from typing import Optional
 
 class PINNModel(nn.Module):
@@ -18,11 +19,35 @@ class PINNModel(nn.Module):
         self.hidden_dim = config['model']['hidden_dim']
         self.dropout_p = config['model']['dropout']
         self.num_layers = config['model']['num_layers']
-        training_cfg = (config.get('training', {}) or {})
-        ds_cfg = (config.get('dataset', {}) or {})
-        rate_representation = str(training_cfg.get('rate_representation', 'auto')).lower()
-        if rate_representation == 'auto':
-            rate_representation = 'log1p' if 'stf_m_ref' in ds_cfg else 'linear'
+        training_cfg = config.get('training', {}) or {}
+        ds_cfg = config.get('dataset', {}) or {}
+        pipeline_version = int(config.get('pipeline_version', 1))
+        if pipeline_version == 2:
+            from src.utils.config_v2 import (
+                stf_output_steps_from_config,
+                validate_config_v2,
+            )
+
+            validate_config_v2(config)
+            rate_representation = str(
+                training_cfg['rate_representation']
+            ).lower()
+            self.output_time_steps: int | None = (
+                stf_output_steps_from_config(config)
+            )
+        else:
+            rate_representation = str(
+                training_cfg.get('rate_representation', 'auto')
+            ).lower()
+            if rate_representation == 'auto':
+                rate_representation = (
+                    'log1p' if 'stf_m_ref' in ds_cfg else 'linear'
+                )
+            self.output_time_steps = None
+        if rate_representation not in {'log1p', 'linear'}:
+            raise ValueError(
+                f'unsupported rate_representation: {rate_representation}'
+            )
 
         self.use_meta = bool(config['model'].get('use_meta', True))
         if self.use_meta:
@@ -81,6 +106,19 @@ class PINNModel(nn.Module):
             rate_head_layers.append(nn.ReLU())
         self.rate_head = nn.Sequential(*rate_head_layers)
 
+    def _resize_source_time(self, seq_time: torch.Tensor) -> torch.Tensor:
+        if (
+            self.output_time_steps is None
+            or seq_time.size(1) == self.output_time_steps
+        ):
+            return seq_time
+        return F.interpolate(
+            seq_time.transpose(1, 2),
+            size=self.output_time_steps,
+            mode='linear',
+            align_corners=False,
+        ).transpose(1, 2)
+
     def forward(self, x: torch.Tensor, meta: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         前向计算：从径向波形（及可选元数据）到矩率序列。
@@ -111,6 +149,7 @@ class PINNModel(nn.Module):
 
         # 逐时刻回归矩率序列
         seq_time = feat.transpose(1, 2)      # (B, T, C)
+        seq_time = self._resize_source_time(seq_time)
         rate = self.rate_head(seq_time)      # (B, T, 1)
         return rate.squeeze(-1)              # (B, T)
 
@@ -131,9 +170,11 @@ class PINNModel(nn.Module):
         if self.transformer is not None:
             seq = self.transformer(seq)
         shapes['transformer'] = list(seq.shape)
+        seq = self.post_transformer_norm(seq)
         feat = seq.transpose(1, 2)
         shapes['to_feat'] = list(feat.shape)
         seq_time = feat.transpose(1, 2)
+        seq_time = self._resize_source_time(seq_time)
         shapes['to_time'] = list(seq_time.shape)
         rate = self.rate_head(seq_time)
         shapes['rate_head'] = list(rate.shape)
