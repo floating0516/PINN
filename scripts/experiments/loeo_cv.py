@@ -38,18 +38,50 @@ def load_config(config_path: Path | None = None) -> dict:
         return yaml.safe_load(f)
 
 
+def _list_events(config: dict) -> list[dict[str, Any]]:
+    if int(config.get("pipeline_version", 1)) == 2:
+        from src.data.loaders_v2 import list_events_v2
+
+        return list_events_v2(config)
+    from src.data.data_loader import list_event_indices
+
+    return list_event_indices(config)
+
+
+def _make_loeo_loaders(
+    config: dict,
+    *,
+    event_index: int,
+    event_name: str,
+):
+    if int(config.get("pipeline_version", 1)) == 2:
+        from src.data.loaders_v2 import get_data_loaders_v2
+
+        loeo_config = {**config, "training": {**config["training"]}}
+        loeo_config["training"]["split_protocol"] = "loeo"
+        return get_data_loaders_v2(
+            loeo_config,
+            leave_out_event=event_name,
+        )
+    from src.data.data_loader import get_data_loaders_loeo
+
+    return get_data_loaders_loeo(
+        config,
+        leave_out_event_index=event_index,
+    )
+
+
 def run_loeo_cv(
     config: dict,
     output_root: Path,
     event_indices: list[int] | None = None,
     dry_run: bool = False,
 ) -> list[dict[str, Any]]:
-    from src.data.data_loader import get_data_loaders_loeo, list_event_indices
     from src.training.train import train
     from src.evaluation.evaluate import evaluate
 
     # 获取事件列表
-    all_events = list_event_indices(config)
+    all_events = _list_events(config)
     if event_indices is not None:
         all_events = [e for e in all_events if e["event_index"] in event_indices]
 
@@ -90,7 +122,11 @@ def run_loeo_cv(
 
         try:
             # LOEO 数据划分
-            loaders = get_data_loaders_loeo(config, leave_out_event_index=ev_idx)
+            loaders = _make_loeo_loaders(
+                fold_config,
+                event_index=ev_idx,
+                event_name=ev_name,
+            )
 
             # 训练
             train_result = train(fold_config, data_loaders=loaders)
@@ -173,8 +209,7 @@ def main() -> None:
     config = load_config(config_path)
 
     if args.list_events:
-        from src.data.data_loader import list_event_indices
-        events = list_event_indices(config)
+        events = _list_events(config)
         print(f"共 {len(events)} 个事件:")
         for e in events:
             print(f"  event_index={e['event_index']:3d}  {e['event']}")

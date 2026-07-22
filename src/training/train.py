@@ -5,6 +5,7 @@ from torch.optim.swa_utils import AveragedModel
 import yaml
 import os
 import csv
+import json
 import random
 import sys
 from pathlib import Path
@@ -113,6 +114,7 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
             config = yaml.safe_load(f)
 
     validate_config_on_startup(config)
+    pipeline_version = int(config.get('pipeline_version', 1))
 
     # 设置全局随机种子，保证实验可复现
     seed = int((config.get('training', {}) or {}).get('random_seed', 42))
@@ -140,10 +142,32 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
     print(f"已保存配置快照: {config_snapshot_path}")
     
     # 加载数据集（训练/验证/测试划分）；data_loaders 不为空时使用注入的加载器（如 LOEO-CV）
+    split_manifest = None
     if data_loaders is not None:
-        train_loader, val_loader, test_loader = data_loaders
+        if len(data_loaders) == 4:
+            train_loader, val_loader, test_loader, split_manifest = data_loaders
+        else:
+            train_loader, val_loader, test_loader = data_loaders
+    elif pipeline_version == 2:
+        from src.data.loaders_v2 import get_data_loaders_v2
+
+        train_loader, val_loader, test_loader, split_manifest = (
+            get_data_loaders_v2(config)
+        )
     else:
         train_loader, val_loader, test_loader = get_data_loaders(config)
+    split_manifest_path = None
+    if split_manifest is not None:
+        split_manifest_path = models_dir / 'split.json'
+        with split_manifest_path.open('w', encoding='utf-8') as stream:
+            json.dump(
+                split_manifest,
+                stream,
+                ensure_ascii=False,
+                indent=2,
+                sort_keys=True,
+            )
+            stream.write('\n')
     
     # 数据集检查输出
     try:
@@ -173,7 +197,6 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
     )
     print(f"调度器: CosineAnnealingWarmRestarts(T_0={scheduler_T0}, T_mult={scheduler_T_mult})")
     
-    pipeline_version = int(config.get('pipeline_version', 1))
     criterion_1 = (
         None if pipeline_version == 2 else PhysicsLoss(config).to(device)
     )
@@ -583,6 +606,7 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         'best_model_path': best_model_path,
         'best_model_swa_path': best_model_swa_path,
         'config_snapshot_path': config_snapshot_path,
+        'split_manifest_path': split_manifest_path,
         'log_file': log_file,
         'best_val_loss': float(best_val_loss),
         'best_mw_mae': float(best_mw_mae),

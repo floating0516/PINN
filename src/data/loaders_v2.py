@@ -1,0 +1,257 @@
+from __future__ import annotations
+
+import copy
+from functools import partial
+import os
+from pathlib import Path
+import random
+from typing import Any
+
+import numpy as np
+import torch
+from torch.utils.data import DataLoader, Subset, WeightedRandomSampler
+
+from src.data.dataset_v2 import CorrectedEarthquakeDataset
+from src.data.splits import (
+    EventGroupSplit,
+    assert_no_event_overlap,
+    make_event_balanced_weights,
+    make_event_group_split,
+)
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+def _resolve_data_path(value: str | Path) -> str:
+    path = Path(value)
+    if path.is_absolute():
+        return str(path)
+    repository_candidate = PROJECT_ROOT / path
+    if repository_candidate.exists():
+        return str(repository_candidate)
+    data_root = os.environ.get("PINN_DATA_ROOT")
+    if data_root:
+        parts = path.parts[1:] if path.parts[:1] == ("data",) else path.parts
+        candidate = Path(data_root).joinpath(*parts)
+        if candidate.exists():
+            return str(candidate)
+    return str(repository_candidate)
+
+
+def _runtime_config(config: dict[str, Any]) -> dict[str, Any]:
+    result = copy.deepcopy(config)
+    if "paths" in result and "data_path" in result["paths"]:
+        result["paths"]["data_path"] = _resolve_data_path(
+            result["paths"]["data_path"]
+        )
+    stf = result.get("dataset", {}).get("stf", {})
+    if "path" in stf:
+        stf["path"] = _resolve_data_path(stf["path"])
+    return result
+
+
+def _within_event_split(
+    events: list[str],
+    *,
+    validation_fraction: float,
+    test_fraction: float,
+    seed: int,
+) -> EventGroupSplit:
+    by_event: dict[str, list[int]] = {}
+    for index, event in enumerate(events):
+        by_event.setdefault(event, []).append(index)
+    rng = np.random.default_rng(seed)
+    train: list[int] = []
+    validation: list[int] = []
+    test: list[int] = []
+    for event in sorted(by_event):
+        indices = np.asarray(by_event[event], dtype=np.int64)
+        shuffled = rng.permutation(indices).tolist()
+        maximum_held_out = max(0, len(shuffled) - 1)
+        validation_count = (
+            0
+            if validation_fraction == 0.0
+            else max(1, int(round(len(shuffled) * validation_fraction)))
+        )
+        test_count = (
+            0
+            if test_fraction == 0.0
+            else max(1, int(round(len(shuffled) * test_fraction)))
+        )
+        while validation_count + test_count > maximum_held_out:
+            if validation_count >= test_count and validation_count > 0:
+                validation_count -= 1
+            elif test_count > 0:
+                test_count -= 1
+        test.extend(shuffled[:test_count])
+        validation.extend(
+            shuffled[test_count : test_count + validation_count]
+        )
+        train.extend(shuffled[test_count + validation_count :])
+    return EventGroupSplit(
+        train_indices=sorted(train),
+        validation_indices=sorted(validation),
+        test_indices=sorted(test),
+    )
+
+
+def _loeo_split(
+    events: list[str],
+    *,
+    leave_out_event: str,
+    validation_fraction: float,
+    seed: int,
+) -> EventGroupSplit:
+    test_indices = [
+        index for index, event in enumerate(events) if event == leave_out_event
+    ]
+    if not test_indices:
+        raise ValueError(f"leave_out_event not found: {leave_out_event}")
+    remaining_indices = [
+        index for index, event in enumerate(events) if event != leave_out_event
+    ]
+    remaining_events = [events[index] for index in remaining_indices]
+    remaining_split = make_event_group_split(
+        remaining_events,
+        validation_fraction=validation_fraction,
+        test_fraction=0.0,
+        seed=seed,
+    )
+    split = EventGroupSplit(
+        train_indices=[remaining_indices[index] for index in remaining_split.train_indices],
+        validation_indices=[
+            remaining_indices[index]
+            for index in remaining_split.validation_indices
+        ],
+        test_indices=test_indices,
+    )
+    assert_no_event_overlap(events, split)
+    return split
+
+
+def _worker_init(worker_id: int, seed: int) -> None:
+    worker_seed = seed + worker_id
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
+    torch.manual_seed(worker_seed)
+
+
+def _split_manifest(
+    protocol: str,
+    seed: int,
+    events: list[str],
+    split: EventGroupSplit,
+) -> dict[str, Any]:
+    return {
+        "protocol": protocol,
+        "seed": seed,
+        "train_events": sorted({events[index] for index in split.train_indices}),
+        "validation_events": sorted(
+            {events[index] for index in split.validation_indices}
+        ),
+        "test_events": sorted({events[index] for index in split.test_indices}),
+        "train_record_count": len(split.train_indices),
+        "validation_record_count": len(split.validation_indices),
+        "test_record_count": len(split.test_indices),
+    }
+
+
+def get_data_loaders_v2(
+    config: dict[str, Any],
+    *,
+    leave_out_event: str | None = None,
+) -> tuple[DataLoader, DataLoader, DataLoader, dict[str, Any]]:
+    dataset = CorrectedEarthquakeDataset(_runtime_config(config))
+    events = [str(sample["event"]) for sample in dataset.samples]
+    training = config["training"]
+    protocol = str(training["split_protocol"])
+    validation_fraction = float(training["validation_event_fraction"])
+    test_fraction = float(training["test_event_fraction"])
+    seed = int(training["random_seed"])
+    if protocol == "grouped_event":
+        split = make_event_group_split(
+            events,
+            validation_fraction,
+            test_fraction,
+            seed,
+        )
+    elif protocol == "within_event_station":
+        split = _within_event_split(
+            events,
+            validation_fraction=validation_fraction,
+            test_fraction=test_fraction,
+            seed=seed,
+        )
+    elif protocol == "loeo":
+        if leave_out_event is None:
+            raise ValueError("loeo protocol requires leave_out_event")
+        split = _loeo_split(
+            events,
+            leave_out_event=leave_out_event,
+            validation_fraction=validation_fraction,
+            seed=seed,
+        )
+    else:
+        raise ValueError(f"unsupported v2 split protocol: {protocol}")
+
+    train_dataset = Subset(dataset, split.train_indices)
+    validation_dataset = Subset(dataset, split.validation_indices)
+    test_dataset = Subset(dataset, split.test_indices)
+    batch_size = int(training["batch_size"])
+    num_workers = int(training.get("num_workers", 0))
+    generator = torch.Generator().manual_seed(seed)
+    worker_init_fn = partial(_worker_init, seed=seed)
+    sampler = None
+    shuffle = True
+    if bool(training.get("event_balanced_sampling", False)):
+        train_events = [events[index] for index in split.train_indices]
+        sampler = WeightedRandomSampler(
+            weights=torch.as_tensor(
+                make_event_balanced_weights(train_events),
+                dtype=torch.double,
+            ),
+            num_samples=len(split.train_indices),
+            replacement=True,
+            generator=generator,
+        )
+        shuffle = False
+    train_loader = DataLoader(
+        train_dataset,
+        batch_size=batch_size,
+        sampler=sampler,
+        shuffle=shuffle if sampler is None else False,
+        num_workers=num_workers,
+        worker_init_fn=worker_init_fn,
+        generator=generator,
+    )
+    validation_loader = DataLoader(
+        validation_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+    )
+    test_loader = DataLoader(
+        test_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+    )
+    return (
+        train_loader,
+        validation_loader,
+        test_loader,
+        _split_manifest(protocol, seed, events, split),
+    )
+
+
+def list_events_v2(config: dict[str, Any]) -> list[dict[str, Any]]:
+    dataset = CorrectedEarthquakeDataset(_runtime_config(config))
+    counts: dict[tuple[int, str], int] = {}
+    for sample in dataset.samples:
+        key = (int(sample["event_index"]), str(sample["event"]))
+        counts[key] = counts.get(key, 0) + 1
+    return [
+        {"event_index": index, "event": event, "n_stations": count}
+        for (index, event), count in sorted(counts.items())
+    ]
