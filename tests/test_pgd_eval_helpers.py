@@ -4,6 +4,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import scripts.evaluation.evaluate_pgd_scaling_laws as pgd_eval
 from scripts.evaluation.evaluate_pgd_scaling_laws import (
     azimuth_deg,
     compute_horizontal_pgd,
@@ -52,6 +53,41 @@ def test_compute_pgd_3d_matches_vector_peak():
     n = np.array([0.0, 4.0, 0.0])
     u = np.array([0.0, 12.0, 0.0])
     assert compute_pgd_3d(e, n, u) == 13.0
+
+
+def test_deep_source_passes_hypocentral_distance_to_scaling_law(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    captured: dict[str, float] = {}
+
+    def fake_predict_mw(**kwargs):
+        captured.update(kwargs)
+        return 7.0
+
+    monkeypatch.setattr(pgd_eval, "predict_mw", fake_predict_mw)
+
+    result = pgd_eval.predict_mw_for_source_geometry(
+        law_name="melgar",
+        pgd_m=0.05,
+        epicentral_distance_km=10.0,
+        depth_km=30.0,
+    )
+
+    assert result == 7.0
+    assert captured["source_distance_km"] == pytest.approx(
+        math.sqrt(10.0**2 + 30.0**2)
+    )
+    assert "distance_km" not in captured
+
+
+def test_unseen_evaluation_reuses_sample_source_distance() -> None:
+    text = Path("src/evaluation/evaluate_unseen.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'source_distance_km = float(sample["source_distance_m"]) / 1000.0' in text
+    assert 'distance_km=epicentral_dist_km' not in text
+    assert 'p_arrival_sec = epicentral_dist_m / 7900.0' not in text
 
 
 def test_parse_law_names_expands_all():

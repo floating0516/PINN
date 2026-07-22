@@ -45,6 +45,21 @@ def compute_pgd_3d(e_m: np.ndarray, n_m: np.ndarray, u_m: np.ndarray) -> float:
     return float(np.max(np.sqrt(e_m ** 2 + n_m ** 2 + u_m ** 2)))
 
 
+def predict_mw_for_source_geometry(
+    *,
+    law_name: str,
+    pgd_m: float,
+    epicentral_distance_km: float,
+    depth_km: float,
+) -> float:
+    source_distance_km = math.hypot(epicentral_distance_km, depth_km)
+    return predict_mw(
+        law_name=law_name,
+        pgd_m=pgd_m,
+        source_distance_km=source_distance_km,
+    )
+
+
 def summarize_event(values: Iterable[float]) -> tuple[float, float, int]:
     vals = np.asarray(list(values), dtype=float)
     if vals.size == 0:
@@ -243,7 +258,11 @@ def evaluate_pgd_scaling_laws(
 
             epicentral_dist_m = haversine_m(event_lat, event_lon, station_lat, station_lon)
             epicentral_dist_km = epicentral_dist_m / 1000.0
-            if epicentral_dist_km > max_dist_km:
+            source_distance_km = math.hypot(
+                epicentral_dist_km,
+                event_depth_km,
+            )
+            if source_distance_km > max_dist_km:
                 continue
 
             traces = extract_station_traces_m(waveforms, max_window_sec=max_window_sec)
@@ -251,7 +270,7 @@ def evaluate_pgd_scaling_laws(
                 continue
             t_win, e_m, n_m, u_m, dt = traces
 
-            p_arrival_sec = epicentral_dist_m / alpha
+            p_arrival_sec = source_distance_km * 1000.0 / alpha
             e_m = baseline_correct(e_m, t_win, p_arrival_sec)
             n_m = baseline_correct(n_m, t_win, p_arrival_sec)
             u_m = baseline_correct(u_m, t_win, p_arrival_sec)
@@ -260,13 +279,12 @@ def evaluate_pgd_scaling_laws(
             if pgd_3d_m * 100.0 < min_pgd_cm:
                 continue
 
-            horizontal_pgd_m = compute_horizontal_pgd(e_m, n_m)
-
             for law_name in selected_laws:
-                mw_pred = predict_mw(
+                mw_pred = predict_mw_for_source_geometry(
                     law_name=law_name,
                     pgd_m=pgd_3d_m,
-                    distance_km=epicentral_dist_km,
+                    epicentral_distance_km=epicentral_dist_km,
+                    depth_km=event_depth_km,
                 )
                 if math.isfinite(mw_pred):
                     per_method_predictions[law_name].append(mw_pred)

@@ -359,7 +359,7 @@ def plot_unseen_station_panels(
         mw_series = np.asarray(row["mw_series"], dtype=float)
         mw_catalog = float(row["mw_catalog"])
         mw_pred = float(row["mw_pred"])
-        dist_km = float(row["distance_km"])
+        dist_km = float(row["source_distance_km"])
 
         ax0, ax1, ax2 = axes[row_idx]
         ax0.plot(t, radial, color=_OKABE_ITO[0], linewidth=1.0)
@@ -409,15 +409,6 @@ def _csv_fieldnames(rows: list[dict[str, Any]]) -> list[str]:
                 seen.add(key)
                 fieldnames.append(key)
     return fieldnames
-
-
-def _haversine_m(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    radius_m = 6371000.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dp = math.radians(lat2 - lat1)
-    dl = math.radians(lon2 - lon1)
-    a = math.sin(dp / 2.0) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dl / 2.0) ** 2
-    return radius_m * 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
 
 
 def _baseline_correct(trace_m: np.ndarray, t_win: np.ndarray, p_arrival_sec: float) -> np.ndarray:
@@ -681,26 +672,25 @@ def evaluate_unseen_events(
                 mw_pred = float(criterion.utils.magnitude_from_rate(dot_m0, sample_dt)[0].item())
                 predictions.append(mw_pred)
 
-                epicentral_dist_m = _haversine_m(
-                    float(bundle.latitude),
-                    float(bundle.longitude),
-                    float(station.latitude),
-                    float(station.longitude),
+                source_distance_m = float(sample["source_distance_m"])
+                source_distance_km = float(sample["source_distance_m"]) / 1000.0
+                epicentral_distance_km = (
+                    float(sample["epicentral_distance_m"]) / 1000.0
                 )
-                p_arrival_sec = epicentral_dist_m / 7900.0
+                p_arrival_sec = source_distance_m / float(
+                    config["physics"]["alpha"]
+                )
                 t_win = np.asarray(station.t, dtype=float)
                 e_corr = _baseline_correct(np.asarray(station.e_m, dtype=float), t_win, p_arrival_sec)
                 n_corr = _baseline_correct(np.asarray(station.n_m, dtype=float), t_win, p_arrival_sec)
                 u_corr = _baseline_correct(np.asarray(station.u_m, dtype=float), t_win, p_arrival_sec)
                 pgd_3d_m = _compute_pgd_3d(e_corr, n_corr, u_corr)
-                epicentral_dist_km = epicentral_dist_m / 1000.0
-
                 pgd_station_values: dict[str, float] = {}
                 for law_name in ("crowell", "ruhl", "melgar"):
                     pgd_mw = predict_mw(
                         law_name=law_name,
                         pgd_m=pgd_3d_m,
-                        distance_km=epicentral_dist_km,
+                        source_distance_km=source_distance_km,
                     )
                     pgd_station_values[law_name] = pgd_mw
                     if math.isfinite(pgd_mw):
@@ -719,14 +709,14 @@ def evaluate_unseen_events(
                     "theta_deg": float(sample["theta_deg"]),
                     "azimuth_deg": float(sample["azimuth_deg"]),
                     "threshold_cm": threshold_cm,
-                    "distance_km": float(sample["source_distance_m"]) / 1000.0,
                     "mechanism": bundle.mechanism,
                     "dt": sample_dt,
                     "max_radial_cm": float(sample["radial_peak_cm"]),
                     "station_lat": float(station.latitude),
                     "station_lon": float(station.longitude),
                     "used_in_event_summary": True,
-                    "pgd_epicentral_distance_km": epicentral_dist_km,
+                    "pgd_source_distance_km": source_distance_km,
+                    "pgd_epicentral_distance_km": epicentral_distance_km,
                     "pgd_3d_m": pgd_3d_m,
                     "pgd_mw_crowell": pgd_station_values["crowell"],
                     "pgd_mw_ruhl": pgd_station_values["ruhl"],
