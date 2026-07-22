@@ -25,6 +25,16 @@ from src.training.loss_stf_rate_v2 import (
     STFRateWaveformLossV2,
     moment_magnitude_from_rate,
 )
+from src.training.checkpointing import (
+    CheckpointValidationError,
+    TrainingSignalState,
+    atomic_torch_save,
+    build_full_checkpoint,
+    install_training_signal_handlers,
+    load_full_checkpoint,
+    restore_training_state,
+    validate_checkpoint_provenance,
+)
 from src.utils.config_v2 import validate_config_on_startup
 from src.utils.device import configure_runtime, get_preferred_device
 from src.utils.provenance import (
@@ -107,7 +117,13 @@ def _prepare_v2_batch(
         metadata=metadata,
     )
 
-def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict[str, object]:
+def _train_impl(
+    config: dict | None = None,
+    data_loaders: tuple | None = None,
+    resume_checkpoint: str | Path | None = None,
+    *,
+    signal_state: TrainingSignalState,
+) -> dict[str, object]:
     """训练 PINN 模型（包含物理约束项）
     参数:
         无（从 configs/config.yaml 读取超参数与路径）
@@ -117,18 +133,29 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         - 组合数据项与物理项的损失，提升模型对地球物理规律的一致性与泛化能力；
         - 统一， I/O 与日志路径，便于复现实验结果与排查问题。
     """
-    # 加载配置
+    resume_path = Path(resume_checkpoint) if resume_checkpoint is not None else None
     if config is None:
-        config_path = Path(__file__).parent.parent.parent / 'configs' / 'config.yaml'
+        config_path = (
+            resume_path.parent / 'config.yaml'
+            if resume_path is not None
+            else Path(__file__).parent.parent.parent / 'configs' / 'config.yaml'
+        )
         with open(config_path, 'r', encoding='utf-8') as f:
             config = yaml.safe_load(f)
 
     validate_config_on_startup(config)
+    pretrain_path = config['training'].get('pretrain_path', None)
+    if resume_path is not None and pretrain_path:
+        raise ValueError('pretrain_path and resume_checkpoint are mutually exclusive')
+
     pipeline_version = int(config.get('pipeline_version', 1))
     repository_root = Path(__file__).resolve().parents[2]
     started_at_utc = utc_now_iso()
     git_commit = current_git_commit(repository_root)
     git_dirty = git_is_dirty(repository_root)
+    resume_payload = (
+        load_full_checkpoint(resume_path) if resume_path is not None else None
+    )
 
     # 设置全局随机种子，保证实验可复现
     seed = int((config.get('training', {}) or {}).get('random_seed', 42))
@@ -139,21 +166,39 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
     # 设置设备
     print(f"使用设备: {device}")
     
-    # 创建输出目录（按本次 run 归档，避免覆盖历史结果）
     models_root = Path(config['paths']['models_dir'])
     logs_dir = Path(config['paths']['logs_dir'])
     results_root = Path(config['paths']['results_dir'])
-    models_root.mkdir(parents=True, exist_ok=True)
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    results_root.mkdir(parents=True, exist_ok=True)
-    run_id = make_run_id()
-    _, models_dir = create_run_dir(models_root, run_id=run_id)
-    _, results_dir = create_run_dir(results_root, run_id=run_id)
-    config_snapshot_path = models_dir / 'config.yaml'
-    with open(config_snapshot_path, 'w', encoding='utf-8') as f:
-        yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
+    if resume_payload is None:
+        models_root.mkdir(parents=True, exist_ok=True)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        results_root.mkdir(parents=True, exist_ok=True)
+        run_id = make_run_id()
+        _, models_dir = create_run_dir(models_root, run_id=run_id)
+        _, results_dir = create_run_dir(results_root, run_id=run_id)
+        config_snapshot_path = models_dir / 'config.yaml'
+        with open(config_snapshot_path, 'w', encoding='utf-8') as f:
+            yaml.safe_dump(config, f, allow_unicode=True, sort_keys=False)
+    else:
+        stored_run_state = resume_payload['run_state']
+        run_id = str(stored_run_state['run_id'])
+        models_dir = Path(stored_run_state['models_dir'])
+        results_dir = Path(stored_run_state['results_dir'])
+        config_snapshot_path = models_dir / 'config.yaml'
+        if resume_path.parent.resolve() != models_dir.resolve():
+            raise CheckpointValidationError(
+                'resume checkpoint is outside its recorded model directory'
+            )
+        with config_snapshot_path.open('r', encoding='utf-8') as stream:
+            frozen_config = yaml.safe_load(stream)
+        if frozen_config != config:
+            raise CheckpointValidationError(
+                'resume config does not match the frozen run config'
+            )
+        if not results_dir.is_dir():
+            raise CheckpointValidationError('recorded results directory is missing')
     print(f"本次训练输出目录: {models_dir}")
-    print(f"已保存配置快照: {config_snapshot_path}")
+    print(f"配置快照: {config_snapshot_path}")
     
     # 加载数据集（训练/验证/测试划分）；data_loaders 不为空时使用注入的加载器（如 LOEO-CV）
     split_manifest = None
@@ -170,41 +215,62 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         )
     else:
         train_loader, val_loader, test_loader = get_data_loaders(config)
-    split_manifest_path = None
-    if split_manifest is not None:
-        split_manifest_path = models_dir / 'split.json'
-        with split_manifest_path.open('w', encoding='utf-8') as stream:
-            json.dump(
-                split_manifest,
-                stream,
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
+    split_manifest_path = models_dir / 'split.json'
+    if resume_payload is None:
+        if split_manifest is not None:
+            with split_manifest_path.open('w', encoding='utf-8') as stream:
+                json.dump(
+                    split_manifest,
+                    stream,
+                    ensure_ascii=False,
+                    indent=2,
+                    sort_keys=True,
+                )
+                stream.write('\n')
+        else:
+            split_manifest_path = None
+    elif split_manifest is not None:
+        if not split_manifest_path.is_file():
+            raise CheckpointValidationError('recorded split manifest is missing')
+        with split_manifest_path.open('r', encoding='utf-8') as stream:
+            frozen_split = json.load(stream)
+        if frozen_split != split_manifest:
+            raise CheckpointValidationError(
+                'resume split does not match the frozen split manifest'
             )
-            stream.write('\n')
+    elif not split_manifest_path.is_file():
+        split_manifest_path = None
     dataset_manifest_path = configured_dataset_manifest_path(
         config,
         root=repository_root,
     )
-    run_manifest_path = models_dir / 'run_manifest.json'
-    run_manifest = {
-        'pipeline_version': pipeline_version,
+    provenance = {
         'git_commit': git_commit,
         'git_dirty': git_dirty,
         'config_sha256': sha256_file(config_snapshot_path),
         'dataset_manifest_sha256': sha256_if_file(dataset_manifest_path),
         'split_sha256': sha256_if_file(split_manifest_path),
-        'checkpoint_sha256': '',
-        'python_version': sys.version.split()[0],
-        'torch_version': str(torch.__version__),
-        'numpy_version': str(np.__version__),
-        'random_seed': seed,
-        'started_at_utc': started_at_utc,
-        'completed_at_utc': '',
     }
-    if tuple(run_manifest) != RUN_MANIFEST_FIELDS:
-        raise RuntimeError('run manifest field contract mismatch')
-    write_json(run_manifest_path, run_manifest)
+    run_manifest_path = models_dir / 'run_manifest.json'
+    if resume_payload is None:
+        run_manifest = {
+            'pipeline_version': pipeline_version,
+            **provenance,
+            'checkpoint_sha256': '',
+            'python_version': sys.version.split()[0],
+            'torch_version': str(torch.__version__),
+            'numpy_version': str(np.__version__),
+            'random_seed': seed,
+            'started_at_utc': started_at_utc,
+            'completed_at_utc': '',
+        }
+        if tuple(run_manifest) != RUN_MANIFEST_FIELDS:
+            raise RuntimeError('run manifest field contract mismatch')
+        write_json(run_manifest_path, run_manifest)
+    else:
+        validate_checkpoint_provenance(resume_payload, provenance)
+        with run_manifest_path.open('r', encoding='utf-8') as stream:
+            run_manifest = json.load(stream)
     
     # 数据集检查输出
     try:
@@ -263,20 +329,131 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         es_metric = 'mw_mae' if use_stf_rate_loss else 'val_loss'
     print(f"早停指标: {es_metric}")
     
-    # # 日志记录（CSV）
-    log_file = logs_dir / f"training_log_{run_id}.csv"
-    with open(log_file, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(['Epoch', 'Train_Loss', 'Train_Data_Loss', 'Train_Phys_Loss', 'Val_Loss', 'Val_MAE', 'LR'])
-
     best_model_path: Path | None = None
     best_model_swa_path: Path | None = None
     best_val_loss = float('inf')
     best_mw_mae = float('inf')
-    epochs = config['training']['epochs']
+    epochs = int(config['training']['epochs'])
     es_patience = int(config['training'].get('early_stop_patience', 0) or 0)
     es_min_delta = float(config['training'].get('early_stop_min_delta', 0.0) or 0.0)
     es_counter = 0
+
+    if resume_payload is None:
+        log_file = logs_dir / f"training_log_{run_id}.csv"
+        with open(log_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(
+                [
+                    'Epoch',
+                    'Train_Loss',
+                    'Train_Data_Loss',
+                    'Train_Phys_Loss',
+                    'Val_Loss',
+                    'Val_MAE',
+                    'LR',
+                ]
+            )
+    else:
+        stored_run_state = resume_payload['run_state']
+        log_file = Path(stored_run_state['log_file'])
+        best_model_value = stored_run_state.get('best_model_path')
+        best_model_swa_value = stored_run_state.get('best_model_swa_path')
+        best_model_path = Path(best_model_value) if best_model_value else None
+        best_model_swa_path = (
+            Path(best_model_swa_value) if best_model_swa_value else None
+        )
+        if not log_file.is_file():
+            raise CheckpointValidationError('recorded training log is missing')
+
+    loader_generator = getattr(train_loader, 'generator', None)
+    last_checkpoint_path = models_dir / 'last_state.pth'
+    emergency_checkpoint_path = models_dir / 'emergency_state.pth'
+    completed_epoch = 0
+
+    def _raise_if_interrupted() -> None:
+        signal_state.checkpoint_and_raise(
+            last_checkpoint_path,
+            emergency_checkpoint_path,
+        )
+
+    def _early_stop_state() -> dict[str, object]:
+        return {
+            'metric': str(es_metric),
+            'best_val_loss': float(best_val_loss),
+            'best_mw_mae': float(best_mw_mae),
+            'counter': int(es_counter),
+            'patience': int(es_patience),
+            'min_delta': float(es_min_delta),
+        }
+
+    def _run_state() -> dict[str, object]:
+        return {
+            'run_id': run_id,
+            'models_dir': str(models_dir),
+            'results_dir': str(results_dir),
+            'log_file': str(log_file),
+            'best_model_path': str(best_model_path) if best_model_path else None,
+            'best_model_swa_path': (
+                str(best_model_swa_path) if best_model_swa_path else None
+            ),
+        }
+
+    def _save_stable_checkpoint(epoch_count: int, reason: str) -> None:
+        payload = build_full_checkpoint(
+            completed_epoch=epoch_count,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            early_stop_state=_early_stop_state(),
+            swa_model=swa_model,
+            loader_generator=loader_generator,
+            run_state=_run_state(),
+            provenance=provenance,
+            reason=reason,
+        )
+        atomic_torch_save(payload, last_checkpoint_path)
+
+    if resume_payload is None:
+        _save_stable_checkpoint(0, 'initial')
+    else:
+        if resume_payload['swa_state_dict'] is not None:
+            swa_model = AveragedModel(model, device=device)
+        restore_training_state(
+            resume_payload,
+            model=model,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            swa_model=swa_model,
+            loader_generator=loader_generator,
+        )
+        completed_epoch = int(resume_payload['completed_epoch'])
+        early_stop = resume_payload['early_stop_state']
+        if str(early_stop['metric']) != str(es_metric):
+            raise CheckpointValidationError('early-stop metric mismatch')
+        best_val_loss = float(early_stop['best_val_loss'])
+        best_mw_mae = float(early_stop['best_mw_mae'])
+        es_counter = int(early_stop['counter'])
+        with log_file.open('r', encoding='utf-8', newline='') as stream:
+            log_rows = list(csv.reader(stream))
+        logged_epochs = [int(row[0]) for row in log_rows[1:] if row]
+        if logged_epochs != list(range(1, completed_epoch + 1)):
+            raise CheckpointValidationError(
+                'training log epochs do not match the resume checkpoint'
+            )
+        resume_history_path = models_dir / 'resume_history.jsonl'
+        with resume_history_path.open('a', encoding='utf-8') as stream:
+            stream.write(
+                json.dumps(
+                    {
+                        'checkpoint_sha256': sha256_file(resume_path),
+                        'completed_epoch': completed_epoch,
+                        'reason': str(resume_payload['reason']),
+                        'resumed_at_utc': utc_now_iso(),
+                    },
+                    sort_keys=True,
+                )
+                + '\n'
+            )
     
     # 课程学习配置（E2.4）
     cl_cfg = (config.get('training', {}) or {}).get('curriculum_learning', {}) or {}
@@ -295,7 +472,7 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
             print(f"  线性过渡 Epoch {cl_linear_start} → {cl_linear_end}")
 
     print("开始训练...")
-    for epoch in range(epochs):
+    for epoch in range(completed_epoch, epochs):
         # 课程学习：动态调整辐射模式
         if cl_enabled and use_stf_rate_loss:
             if cl_strategy == 'switch':
@@ -412,6 +589,7 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
             
             # 反向传播与参数更新
             if not torch.isfinite(loss):
+                _raise_if_interrupted()
                 continue
             loss.backward()
             
@@ -425,6 +603,7 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
             train_loss_total += float(loss.detach().cpu()) * batch_n
             train_data_loss_total += float(data_loss.detach().cpu()) * batch_n
             train_phys_loss_total += float(phys_loss.detach().cpu()) * batch_n
+            _raise_if_interrupted()
             
         # 验证阶段
         model.eval()
@@ -531,6 +710,7 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
                         batch_n = radial.size(0)
                         val_seen += batch_n
                         val_loss_total += float(loss.detach().cpu()) * batch_n
+                    _raise_if_interrupted()
                     continue
                 if stf_true is not None:
                     mag_from_stf = criterion_1.utils.magnitude_from_rate(stf_true, dt_val)
@@ -549,6 +729,7 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
                 pred_log_safe = torch.nan_to_num(pred_log, nan=0.0, posinf=0.0, neginf=0.0)
                 stf_log_safe = torch.nan_to_num(stf_log, nan=0.0, posinf=0.0, neginf=0.0)
                 val_mae_total += torch.mean(torch.abs(pred_log_safe - stf_log_safe), dim=1).sum().item()
+                _raise_if_interrupted()
                 
         # 计算指标
         train_count = max(int(train_seen), 1)
@@ -597,15 +778,9 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
             else:
                 es_counter += 1
         
-        if es_patience > 0 and es_counter >= es_patience:
+        should_stop = es_patience > 0 and es_counter >= es_patience
+        if should_stop:
             print(f"早停触发（连续 {es_counter} 轮无改进，阈值 {es_min_delta}）")
-            # 早停前最后一次 SWA 收集
-            if swa_start > 0 and (epoch + 1) >= swa_start:
-                if swa_model is None:
-                    swa_model = AveragedModel(model, device=device)
-                    print(f"  SWA: 开始收集权重（Epoch {epoch+1}）")
-                swa_model.update_parameters(model)
-            break
 
         # SWA 权重收集（每个 epoch 更新一次平均权重）
         if swa_start > 0 and (epoch + 1) >= swa_start:
@@ -614,6 +789,12 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
                 print(f"  SWA: 开始收集权重（Epoch {epoch+1}）")
             swa_model.update_parameters(model)
 
+        completed_epoch = epoch + 1
+        _save_stable_checkpoint(completed_epoch, 'epoch')
+        _raise_if_interrupted()
+        if should_stop:
+            break
+
     # 保存 SWA 平均模型
     if swa_model is not None:
         swa_path = models_dir / 'best_model_swa.pth'
@@ -621,6 +802,8 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         best_model_swa_path = swa_path
         n_avg = swa_model.n_averaged.item() if hasattr(swa_model.n_averaged, 'item') else int(swa_model.n_averaged)
         print(f"已保存 SWA 平均模型 ({n_avg} 个快照): {swa_path}")
+        _save_stable_checkpoint(completed_epoch, 'final')
+        _raise_if_interrupted()
 
     run_manifest['checkpoint_sha256'] = sha256_if_file(best_model_path)
     run_manifest['completed_at_utc'] = utc_now_iso()
@@ -636,12 +819,31 @@ def train(config: dict | None = None, data_loaders: tuple | None = None) -> dict
         'split_manifest_path': split_manifest_path,
         'run_manifest_path': run_manifest_path,
         'log_file': log_file,
+        'last_checkpoint_path': last_checkpoint_path,
+        'resumed_from_epoch': (
+            int(resume_payload['completed_epoch']) if resume_payload else None
+        ),
         'best_val_loss': float(best_val_loss),
         'best_mw_mae': float(best_mw_mae),
         'device': str(device),
     }
     print("训练完成。")
     return train_result
+
+
+def train(
+    config: dict | None = None,
+    data_loaders: tuple | None = None,
+    resume_checkpoint: str | Path | None = None,
+) -> dict[str, object]:
+    signal_state = TrainingSignalState()
+    with install_training_signal_handlers(signal_state):
+        return _train_impl(
+            config=config,
+            data_loaders=data_loaders,
+            resume_checkpoint=resume_checkpoint,
+            signal_state=signal_state,
+        )
 
 if __name__ == '__main__':
     train()
