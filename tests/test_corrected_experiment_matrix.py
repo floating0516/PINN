@@ -10,10 +10,12 @@ import numpy as np
 import pytest
 import torch
 from torch.utils.data import Dataset
+import yaml
 
 from scripts.experiments.run_corrected_matrix import (
     MATRIX_IDS,
     SEEDS,
+    _assert_backpropagates,
     _completed_row_is_valid,
     _prepare_output_root,
     config_diff_paths,
@@ -86,20 +88,41 @@ def test_fixed_matrix_contains_only_the_eight_declared_variants() -> None:
 
 def _prepared_batch() -> dict[str, torch.Tensor]:
     return {
-        "radial": torch.ones(1, 1, 4),
+        "radial": torch.ones(1, 1, 200),
         "source_distance_m": torch.tensor([5_000.0]),
         "epicentral_distance_m": torch.tensor([3_000.0]),
         "theta_deg": torch.tensor([30.0]),
         "azimuth_deg": torch.tensor([90.0]),
         "phi_slip_deg": torch.tensor([45.0]),
-        "stf": torch.full((1, 4), 1.0e18),
+        "stf": torch.full((1, 300), 1.0e18),
         "stf_dt_sec": torch.tensor([1.0]),
         "waveform_dt_sec": torch.tensor([1.0]),
-        "waveform_valid_mask": torch.ones(1, 4, dtype=torch.bool),
+        "waveform_valid_mask": torch.ones(1, 200, dtype=torch.bool),
         "has_stf": torch.tensor([True]),
         "mw_stf_native": torch.tensor([6.5]),
         "magnitude_catalog": torch.tensor([7.0]),
     }
+
+
+def test_active_smoke_backpropagates_through_both_prediction_heads(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = yaml.safe_load(
+        (PROJECT_ROOT / "configs/config_v2.yaml").read_text(encoding="utf-8")
+    )
+    config["model"].update(
+        hidden_dim=8,
+        num_layers=1,
+        num_tcn_blocks=1,
+        transformer_num_layers=1,
+        dropout=0.0,
+    )
+    monkeypatch.setattr(
+        "scripts.experiments.run_corrected_matrix.get_preferred_device",
+        lambda: torch.device("cpu"),
+    )
+
+    _assert_backpropagates(config, [_prepared_batch()])
 
 
 def test_delta_metadata_changes_only_network_distance() -> None:

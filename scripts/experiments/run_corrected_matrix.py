@@ -313,9 +313,24 @@ def _assert_backpropagates(config: dict[str, Any], train_loader: Any) -> None:
     criterion = _build_stf_rate_criterion(config, device)
     batch = next(iter(train_loader))
     prepared = _prepare_v2_batch(batch, config, device)
-    prediction = model(prepared.radial, meta=prepared.metadata)
+    active_workflow = config.get("workflow") == "station_random_shifted_stf"
+    if active_workflow:
+        heads = model.predict_heads(
+            prepared.radial,
+            meta=prepared.metadata,
+        )
+        prediction = heads.stf_encoded
+        pred_catalog_mw = heads.catalog_mw
+        if prediction.shape[1] != 300:
+            raise ValueError("active smoke requires a 300-step STF output")
+        if not bool(torch.isfinite(pred_catalog_mw).all()):
+            raise FloatingPointError("smoke catalog Mw prediction is non-finite")
+    else:
+        prediction = model(prepared.radial, meta=prepared.metadata)
+        pred_catalog_mw = None
     loss, metrics = criterion(
         prediction,
+        pred_catalog_mw=pred_catalog_mw,
         radial_obs=prepared.radial,
         source_distance_m=prepared.source_distance_m,
         theta_deg=prepared.theta_deg,
@@ -331,12 +346,10 @@ def _assert_backpropagates(config: dict[str, Any], train_loader: Any) -> None:
     if not all(math.isfinite(value) for value in values):
         raise FloatingPointError(f"non-finite smoke loss: {metrics}")
     loss.backward()
-    gradients = [
-        parameter.grad
-        for parameter in model.parameters()
-        if parameter.grad is not None
-    ]
-    if not gradients or not all(
+    gradients = [parameter.grad for parameter in model.parameters()]
+    if not gradients or any(gradient is None for gradient in gradients):
+        raise FloatingPointError("smoke backward missed trainable parameters")
+    if not all(
         bool(torch.isfinite(gradient).all()) for gradient in gradients
     ):
         raise FloatingPointError("smoke backward produced non-finite gradients")
