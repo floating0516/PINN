@@ -542,13 +542,13 @@ git commit -m "feat: train and evaluate station catalog magnitude"
 - Modify: `tests/test_corrected_experiment_matrix.py`
 - Modify: `docs/superpowers/specs/2026-07-23-station-random-shifted-stf-design.md` only if implementation reveals a wording mismatch
 
-- [ ] **Step 1: Add one end-to-end active workflow test**
+- [x] **Step 1: Add one end-to-end active workflow test**
 
 The test builds a small real-contract dataset, freezes a station split, runs one
 CPU epoch, reloads the best checkpoint strictly, evaluates the locked test
 loader, and asserts finite dual-head metrics and complete manifests.
 
-- [ ] **Step 2: Run focused integration and full regression**
+- [x] **Step 2: Run focused integration and full regression**
 
 Run: `source /home/lihe/.config/pinn/server.env && "$PINN_ENV/bin/python" -m pytest tests/test_corrected_pipeline_integration.py tests/test_corrected_experiment_matrix.py -q`
 
@@ -558,7 +558,7 @@ Run: `source /home/lihe/.config/pinn/server.env && "$PINN_ENV/bin/python" -W err
 
 Expected: all tests pass, one existing skip remains, compilation emits no warning.
 
-- [ ] **Step 3: Run real-data preflight**
+- [x] **Step 3: Run real-data preflight**
 
 Build the active dataset and freeze split manifests for seeds 17, 42, and 73
 without training. Require exactly 2,483 accepted samples, seed-42 counts
@@ -566,14 +566,14 @@ without training. Require exactly 2,483 accepted samples, seed-42 counts
 finite `[0,1]` retained fractions, invariant full moment per event, no key
 overlap, and complete config/dataset/split hashes.
 
-- [ ] **Step 4: Run finite single-GPU smoke**
+- [x] **Step 4: Run finite single-GPU smoke**
 
 From a clean commit, train Model A for one epoch on a bounded real-data subset,
 strictly reload `best_model.pth`, and evaluate a bounded locked test subset.
 Require finite loss/components/gradients/scalar Mw/STF, a 300-step STF output,
 loadable full-state checkpoint, `git_dirty=false`, and an idle GPU after exit.
 
-- [ ] **Step 5: Final implementation commit and handoff**
+- [x] **Step 5: Final implementation commit and handoff**
 
 If integration-only fixes were necessary, commit them atomically:
 
