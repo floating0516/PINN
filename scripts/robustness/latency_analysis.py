@@ -29,6 +29,7 @@ import csv
 import json
 import math
 import sys
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -41,20 +42,16 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.data_loader import EarthquakeDataset
-from src.data.geometry import compute_source_station_geometry
+from src.data.external_records import record_from_external_bundle
 from src.data.metadata import build_metadata_tensor
+from src.data.sample_builder import SampleRejected, build_station_sample
+from src.data.waveform import WaveformConfig, waveform_config_from_v2
 from src.evaluation.evaluate import _ensure_time_steps, magnitude_series_from_rate
 from src.evaluation.evaluate_unseen import (
     EventBundle,
     StationWaveform,
     _apply_pub_style,
-    _build_unseen_dataset_helper,
-    _compute_radial,
     _OKABE_ITO,
-    _passes_radial_peak_threshold,
-    _slice_after_origin,
-    _apply_time_window,
     _format_event_display_name,
     load_event_bundle,
 )
@@ -77,62 +74,29 @@ def discover_event_dirs(event_data_root: Path) -> list[Path]:
 def _station_sample_with_window(
     bundle: EventBundle,
     station: StationWaveform,
-    ds_helper: EarthquakeDataset,
+    config: dict[str, Any],
+    waveform_config: WaveformConfig,
     window_max_sec: float,
+    radial_peak_min_cm_override: float | None = None,
 ) -> dict[str, Any] | None:
     """从事件 bundle 中为指定台站构建样本，使用自定义时间窗口"""
-    geometry = compute_source_station_geometry(
-        bundle.latitude,
-        bundle.longitude,
-        bundle.depth_km,
-        station.latitude,
-        station.longitude,
+    threshold_cm = float(config["dataset"]["radial_peak_min_cm"])
+    if radial_peak_min_cm_override is not None:
+        threshold_cm = float(radial_peak_min_cm_override)
+    window_config = replace(
+        waveform_config,
+        duration_sec=float(window_max_sec),
     )
-    radial_m = _compute_radial(station.e_m, station.n_m, geometry.azimuth_deg)
-    vertical_m = station.u_m.copy()
-
-    t_cut, series_map = _slice_after_origin(
-        station.t,
-        {"radial": radial_m, "vertical": vertical_m},
-        origin_val=0.0,
-    )
-    # 使用自定义窗口上限
-    t_win, series_map = _apply_time_window(
-        t_cut, series_map,
-        ds_helper.window_min_sec,
-        window_max_sec,
-    )
-    if len(t_win) == 0:
-        return None
-
-    radial_processed, dt = ds_helper._preprocess_waveform(t_win, series_map["radial"])
-    vertical_processed, _ = ds_helper._preprocess_waveform(t_win, series_map["vertical"])
-    if ds_helper.p_preprocess_enabled:
-        radial_processed, vertical_processed = ds_helper._apply_p_baseline(
-            radial_processed, vertical_processed, geometry.source_distance_m, dt,
+    try:
+        return build_station_sample(
+            record_from_external_bundle(bundle, station),
+            units="m",
+            waveform_config=window_config,
+            alpha_m_per_s=float(config["physics"]["alpha"]),
+            radial_peak_min_cm=threshold_cm,
         )
-    max_radial_cm = float(np.nanmax(np.abs(radial_processed)) * 100.0) if len(radial_processed) else 0.0
-    if not _passes_radial_peak_threshold(ds_helper, radial_processed):
+    except SampleRejected:
         return None
-
-    meta = build_metadata_tensor(
-        torch.tensor([geometry.source_distance_m], dtype=torch.float32),
-        torch.tensor([geometry.takeoff_angle_deg], dtype=torch.float32),
-        torch.tensor([geometry.azimuth_deg], dtype=torch.float32),
-    )[0].numpy()
-    return {
-        "event": bundle.event_name,
-        "station": station.station,
-        "radial": radial_processed,
-        "distance_m": geometry.source_distance_m,
-        "source_distance_m": geometry.source_distance_m,
-        "epicentral_distance_m": geometry.epicentral_distance_m,
-        "theta_deg": geometry.takeoff_angle_deg,
-        "azimuth_deg": geometry.azimuth_deg,
-        "meta": meta,
-        "dt": dt,
-        "max_radial_cm": max_radial_cm,
-    }
 
 
 def run_latency_analysis(
@@ -151,7 +115,7 @@ def run_latency_analysis(
 
     ds_cfg = config.get("dataset", {}) or {}
     train_cfg = config.get("training", {}) or {}
-    ds_helper = _build_unseen_dataset_helper(config, radial_peak_min_cm_override=radial_peak_min_cm_override)
+    waveform_config = waveform_config_from_v2(config)
 
     device = get_preferred_device()
     checkpoint = torch.load(model_path, map_location=device)
@@ -185,7 +149,12 @@ def run_latency_analysis(
 
                 for station in bundle.stations:
                     sample = _station_sample_with_window(
-                        bundle, station, ds_helper, window_sec,
+                        bundle,
+                        station,
+                        config,
+                        waveform_config,
+                        window_sec,
+                        radial_peak_min_cm_override,
                     )
                     if sample is None:
                         continue
@@ -194,15 +163,17 @@ def run_latency_analysis(
                         sample["radial"], dtype=torch.float32, device=device,
                     ).unsqueeze(0).unsqueeze(0)
                     radial = _ensure_time_steps(radial, time_steps)
-                    meta = torch.tensor(
-                        sample["meta"], dtype=torch.float32, device=device,
-                    ).unsqueeze(0)
+                    meta = build_metadata_tensor(
+                        torch.tensor([sample["source_distance_m"]], dtype=torch.float32, device=device),
+                        torch.tensor([sample["theta_deg"]], dtype=torch.float32, device=device),
+                        torch.tensor([sample["azimuth_deg"]], dtype=torch.float32, device=device),
+                    )
 
                     rate_log = model(radial, meta=meta)
                     dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
                     dot_m0 = torch.clamp(dot_m0, min=0.0)
                     mw_pred = float(criterion.utils.magnitude_from_rate(
-                        dot_m0, float(sample["dt"]),
+                        dot_m0, float(sample["waveform_dt_sec"]),
                     )[0].item())
                     preds.append(mw_pred)
 

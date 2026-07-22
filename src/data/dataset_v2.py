@@ -15,7 +15,7 @@ from src.data.records_v2 import (
 )
 from src.data.sample_builder import SampleRejected, build_station_sample
 from src.data.stf import ProcessedSTF, STFWindowTooShort, resample_source_stf
-from src.data.waveform import WaveformConfig
+from src.data.waveform import waveform_config_from_v2
 from src.utils.config_v2 import (
     stf_m_ref_from_config,
     stf_output_steps_from_config,
@@ -89,32 +89,6 @@ def _match_stf(
     return None
 
 
-def _waveform_config(config: dict[str, Any]) -> WaveformConfig:
-    dataset = config["dataset"]
-    waveform = dataset["waveform"]
-    baseline = dataset["baseline"]
-    filter_config = dataset["filter"]
-    return WaveformConfig(
-        sample_rate_hz=float(dataset["sample_rate_hz"]),
-        start_sec=float(waveform["start_sec"]),
-        duration_sec=float(waveform["duration_sec"]),
-        min_valid_fraction=float(waveform["min_valid_fraction"]),
-        max_interpolation_gap_sec=float(
-            waveform["max_interpolation_gap_sec"]
-        ),
-        baseline_method=str(baseline["method"]),
-        pre_event_start_sec=float(baseline["pre_event_start_sec"]),
-        pre_event_end_sec=float(baseline["pre_event_end_sec"]),
-        baseline_fallback=str(baseline["fallback"]),
-        baseline_fallback_max_sec=float(baseline["fallback_max_sec"]),
-        baseline_min_samples=int(baseline["min_samples"]),
-        filter_type=str(filter_config["type"]),
-        cutoff_hz=float(filter_config["cutoff_hz"]),
-        num_taps=int(filter_config["num_taps"]),
-        filter_window=str(filter_config["window"]),
-    )
-
-
 class CorrectedEarthquakeDataset(Dataset):
     def __init__(self, config: dict[str, Any]) -> None:
         validate_config_v2(config)
@@ -126,7 +100,7 @@ class CorrectedEarthquakeDataset(Dataset):
         stf_config = dataset_config["stf"]
         self.stf_m_ref = stf_m_ref_from_config(config)
         self.stf_output_steps = stf_output_steps_from_config(config)
-        self.waveform_config = _waveform_config(config)
+        self.waveform_config = waveform_config_from_v2(config)
         self.blacklist = {
             str(value)
             for value in dataset_config.get("blacklist_events", [])

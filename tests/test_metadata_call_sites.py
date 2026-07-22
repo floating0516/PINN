@@ -21,11 +21,12 @@ def test_production_metadata_uses_the_shared_builder() -> None:
         assert "phi_deg_val = ds_helper.default_phi_deg" not in text, name
 
 
-def test_external_geometry_uses_the_shared_source_station_primitive() -> None:
+def test_external_geometry_uses_the_shared_v2_sample_builder() -> None:
     for name in (
         "src/evaluation/evaluate_unseen.py",
         "scripts/robustness/latency_analysis.py",
     ):
         text = Path(name).read_text(encoding="utf-8")
-        assert "compute_source_station_geometry(" in text, name
+        assert "build_station_sample(" in text, name
         assert "_calculate_geodetics(" not in text, name
+        assert "_build_unseen_dataset_helper" not in text, name

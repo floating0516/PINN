@@ -40,9 +40,10 @@ def _apply_pub_style() -> None:
 # ───────────────────────────────────────────────────────────────────────────
 
 from src.baseline.scaling_laws import predict_mw
-from src.data.data_loader import EarthquakeDataset
-from src.data.geometry import compute_source_station_geometry
+from src.data.external_records import record_from_external_bundle
 from src.data.metadata import build_metadata_tensor
+from src.data.sample_builder import SampleRejected, build_station_sample
+from src.data.waveform import WaveformConfig, waveform_config_from_v2
 from src.evaluation.evaluate import _ensure_time_steps, magnitude_series_from_rate
 from src.models.model import PINNModel
 from src.training.physics import PhysicsLoss
@@ -576,130 +577,29 @@ def write_unseen_event_outputs(
     }
 
 
-def _compute_radial(e_m: np.ndarray, n_m: np.ndarray, azimuth_deg: float) -> np.ndarray:
-    az_rad = math.radians(azimuth_deg)
-    return e_m * math.sin(az_rad) + n_m * math.cos(az_rad)
-
-
-def _slice_after_origin(
-    t_vec: np.ndarray,
-    series_map: dict[str, np.ndarray],
-    origin_val: float | None,
-) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    if origin_val is not None:
-        mask = t_vec >= origin_val
-    else:
-        mask = np.ones_like(t_vec, dtype=bool)
-    return t_vec[mask], {key: value[mask] for key, value in series_map.items()}
-
-
-def _apply_time_window(
-    t_vec: np.ndarray,
-    series_map: dict[str, np.ndarray],
-    tmin: float,
-    tmax: float,
-) -> tuple[np.ndarray, dict[str, np.ndarray]]:
-    mask = (t_vec >= tmin) & (t_vec <= tmax)
-    return t_vec[mask], {key: value[mask] for key, value in series_map.items()}
-
-
-def _passes_radial_peak_threshold(ds_helper: EarthquakeDataset, radial_processed: np.ndarray) -> bool:
-    threshold_cm = float(getattr(ds_helper, "radial_peak_min_cm", 0.0))
-    if threshold_cm <= 0.0:
-        return True
-    if radial_processed is None or len(radial_processed) == 0:
-        return False
-    radial_peak_val = float(np.nanmax(np.abs(radial_processed)))
-    return math.isfinite(radial_peak_val) and radial_peak_val > (threshold_cm / 100.0)
-
-
-def _station_sample_from_bundle(bundle: EventBundle, station: StationWaveform, ds_helper: EarthquakeDataset) -> dict[str, Any] | None:
-    geometry = compute_source_station_geometry(
-        bundle.latitude,
-        bundle.longitude,
-        bundle.depth_km,
-        station.latitude,
-        station.longitude,
-    )
-    radial_m = _compute_radial(station.e_m, station.n_m, geometry.azimuth_deg)
-    vertical_m = station.u_m.copy()
-
-    t_cut, series_map = _slice_after_origin(
-        station.t,
-        {"radial": radial_m, "vertical": vertical_m},
-        origin_val=0.0,
-    )
-    t_win, series_map = _apply_time_window(
-        t_cut,
-        series_map,
-        ds_helper.window_min_sec,
-        ds_helper.window_max_sec,
-    )
-    if len(t_win) == 0:
-        return None
-
-    radial_processed, dt = ds_helper._preprocess_waveform(t_win, series_map["radial"])
-    vertical_processed, _ = ds_helper._preprocess_waveform(t_win, series_map["vertical"])
-    if ds_helper.p_preprocess_enabled:
-        radial_processed, vertical_processed = ds_helper._apply_p_baseline(
-            radial_processed,
-            vertical_processed,
-            geometry.source_distance_m,
-            dt,
-        )
-    max_radial_cm = float(np.nanmax(np.abs(radial_processed)) * 100.0) if len(radial_processed) else 0.0
-    if not _passes_radial_peak_threshold(ds_helper, radial_processed):
-        return None
-
-    meta = build_metadata_tensor(
-        torch.tensor([geometry.source_distance_m], dtype=torch.float32),
-        torch.tensor([geometry.takeoff_angle_deg], dtype=torch.float32),
-        torch.tensor([geometry.azimuth_deg], dtype=torch.float32),
-    )[0].numpy()
-    return {
-        "event": bundle.event_name,
-        "station": station.station,
-        "radial": radial_processed,
-        "distance_m": geometry.source_distance_m,
-        "source_distance_m": geometry.source_distance_m,
-        "epicentral_distance_m": geometry.epicentral_distance_m,
-        "theta_deg": geometry.takeoff_angle_deg,
-        "azimuth_deg": geometry.azimuth_deg,
-        "meta": meta,
-        "dt": dt,
-        "max_radial_cm": max_radial_cm,
-    }
-
-
-def _build_unseen_dataset_helper(
+def _station_sample_from_bundle(
+    bundle: EventBundle,
+    station: StationWaveform,
     config: dict[str, Any],
+    *,
+    waveform_config: WaveformConfig | None = None,
     radial_peak_min_cm_override: float | None = None,
-) -> EarthquakeDataset:
-    ds_cfg = config.get("dataset", {}) or {}
-    train_cfg = config.get("training", {}) or {}
-    radial_peak_min_cm = float(ds_cfg.get("radial_peak_min_cm", 0.0))
+) -> dict[str, Any] | None:
+    radial_peak_min_cm = float(config["dataset"]["radial_peak_min_cm"])
     if radial_peak_min_cm_override is not None:
         radial_peak_min_cm = float(radial_peak_min_cm_override)
-    return EarthquakeDataset(
-        npz_path=config["paths"]["data_path"],
-        time_steps=int(train_cfg.get("time_steps", 200)),
-        blacklist=ds_cfg.get("blacklist_events", []),
-        units="m",
-        center_mode=ds_cfg.get("center_mode", "median"),
-        window_min_sec=float(ds_cfg.get("window_min_sec", 0.0)),
-        window_max_sec=float(ds_cfg.get("window_max_sec", 600.0)),
-        stf_path=ds_cfg.get("stf_path"),
-        stf_m_ref=float(ds_cfg.get("stf_m_ref", 1.0e18)),
-        default_theta_deg=float(ds_cfg.get("default_theta_deg", 45.0)),
-        default_phi_deg=float(ds_cfg.get("default_phi_deg", 0.0)),
-        filter_cfg=ds_cfg.get("filter", {}),
-        p_preprocess_enabled=bool(ds_cfg.get("p_preprocess_enabled", False)),
-        p_velocity_mps=float(ds_cfg.get("p_velocity_mps", 4500.0)),
-        p_arrival_offset_sec=float(ds_cfg.get("p_arrival_offset_sec", 0.0)),
-        p_baseline_mode=str(ds_cfg.get("p_baseline_mode", "mean")),
-        allow_missing_stf=True,
-        radial_peak_min_cm=radial_peak_min_cm,
-    )
+    if waveform_config is None:
+        waveform_config = waveform_config_from_v2(config)
+    try:
+        return build_station_sample(
+            record_from_external_bundle(bundle, station),
+            units="m",
+            waveform_config=waveform_config,
+            alpha_m_per_s=float(config["physics"]["alpha"]),
+            radial_peak_min_cm=radial_peak_min_cm,
+        )
+    except SampleRejected:
+        return None
 
 
 def evaluate_unseen_events(
@@ -718,10 +618,7 @@ def evaluate_unseen_events(
 
     ds_cfg = config.get("dataset", {}) or {}
     train_cfg = config.get("training", {}) or {}
-    ds_helper = _build_unseen_dataset_helper(
-        config,
-        radial_peak_min_cm_override=radial_peak_min_cm_override,
-    )
+    waveform_config = waveform_config_from_v2(config)
 
     device = get_preferred_device()
     checkpoint = torch.load(model_path, map_location=device)
@@ -730,7 +627,12 @@ def evaluate_unseen_events(
     model.eval()
     criterion = PhysicsLoss(config).to(device)
     time_steps = int(train_cfg.get("time_steps", 200))
-    stf_m_ref = float(ds_cfg.get("stf_m_ref", 1.0e18))
+    stf_m_ref = float(
+        (ds_cfg.get("stf", {}) or {}).get(
+            "m_ref",
+            ds_cfg.get("stf_m_ref", 1.0e18),
+        )
+    )
 
     station_rows: list[dict[str, Any]] = []
     event_rows: list[dict[str, Any]] = []
@@ -747,16 +649,27 @@ def evaluate_unseen_events(
             predictions: list[float] = []
             pgd_predictions: dict[str, list[float]] = {"crowell": [], "ruhl": [], "melgar": []}
             for station in bundle.stations:
-                sample = _station_sample_from_bundle(bundle, station, ds_helper)
+                sample = _station_sample_from_bundle(
+                    bundle,
+                    station,
+                    config,
+                    waveform_config=waveform_config,
+                    radial_peak_min_cm_override=radial_peak_min_cm_override,
+                )
                 if sample is None:
                     continue
                 radial = torch.tensor(sample["radial"], dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
                 radial = _ensure_time_steps(radial, time_steps)
-                meta = torch.tensor(sample["meta"], dtype=torch.float32, device=device).unsqueeze(0)
+                meta = build_metadata_tensor(
+                    torch.tensor([sample["source_distance_m"]], dtype=torch.float32, device=device),
+                    torch.tensor([sample["theta_deg"]], dtype=torch.float32, device=device),
+                    torch.tensor([sample["azimuth_deg"]], dtype=torch.float32, device=device),
+                )
                 rate_log = model(radial, meta=meta)
                 dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
                 dot_m0 = torch.clamp(dot_m0, min=0.0)
-                mw_pred = float(criterion.utils.magnitude_from_rate(dot_m0, float(sample["dt"]))[0].item())
+                sample_dt = float(sample["waveform_dt_sec"])
+                mw_pred = float(criterion.utils.magnitude_from_rate(dot_m0, sample_dt)[0].item())
                 predictions.append(mw_pred)
 
                 epicentral_dist_m = _haversine_m(
@@ -790,10 +703,10 @@ def evaluate_unseen_events(
                     "mw_true": bundle.magnitude,
                     "mw_pred": mw_pred,
                     "error": mw_pred - bundle.magnitude,
-                    "distance_km": float(sample["distance_m"]) / 1000.0,
+                    "distance_km": float(sample["source_distance_m"]) / 1000.0,
                     "mechanism": bundle.mechanism,
-                    "dt": float(sample["dt"]),
-                    "max_radial_cm": float(sample["max_radial_cm"]),
+                    "dt": sample_dt,
+                    "max_radial_cm": float(sample["radial_peak_cm"]),
                     "station_lat": float(station.latitude),
                     "station_lon": float(station.longitude),
                     "used_in_event_summary": True,
@@ -806,7 +719,7 @@ def evaluate_unseen_events(
                     "pgd_error_ruhl": pgd_station_values["ruhl"] - bundle.magnitude,
                     "pgd_error_melgar": pgd_station_values["melgar"] - bundle.magnitude,
                 }
-                mw_series = magnitude_series_from_rate(dot_m0[0].view(-1), float(sample["dt"]))
+                mw_series = magnitude_series_from_rate(dot_m0[0].view(-1), sample_dt)
                 station_rows.append(row)
                 panel_rows.append(
                     {
@@ -814,7 +727,7 @@ def evaluate_unseen_events(
                         "radial": np.asarray(sample["radial"], dtype=float),
                         "pred_rate": dot_m0[0].detach().cpu().numpy(),
                         "mw_series": mw_series,
-                        "time_axis": np.arange(dot_m0.shape[-1], dtype=float) * float(sample["dt"]),
+                        "time_axis": np.arange(dot_m0.shape[-1], dtype=float) * sample_dt,
                     }
                 )
             if predictions:

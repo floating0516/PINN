@@ -9,10 +9,13 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from src.data.external_records import record_from_external_bundle
+from src.data.records_v2 import _iter_normalized_station_records
+from src.data.sample_builder import build_station_sample
+from src.data.waveform import waveform_config_from_v2
 from src.evaluation.evaluate_unseen import (
     EventBundle,
     StationWaveform,
-    _build_unseen_dataset_helper,
     _format_event_display_name,
     _station_sample_from_bundle,
     load_event_bundle,
@@ -71,6 +74,36 @@ def _write_event_dir(base_dir: Path, event_name: str = "xizang-test") -> Path:
         writer.writerow(["Station", "Time_UTC", "Time_Offset_s", "Component", "Value_m", "Sampling_Hz", "Source_File"])
         writer.writerows(rows)
     return event_dir
+
+
+def _external_v2_config(*, radial_peak_min_cm: float = 0.0) -> dict:
+    return {
+        "dataset": {
+            "sample_rate_hz": 1.0,
+            "radial_peak_min_cm": radial_peak_min_cm,
+            "waveform": {
+                "start_sec": 0.0,
+                "duration_sec": 3.0,
+                "min_valid_fraction": 1.0,
+                "max_interpolation_gap_sec": 2.5,
+            },
+            "baseline": {
+                "method": "median",
+                "pre_event_start_sec": -1.0,
+                "pre_event_end_sec": 0.0,
+                "fallback": "pre_p",
+                "fallback_max_sec": 30.0,
+                "min_samples": 1,
+            },
+            "filter": {
+                "type": "none",
+                "cutoff_hz": 0.1,
+                "num_taps": 7,
+                "window": "hamming",
+            },
+        },
+        "physics": {"alpha": 7900.0},
+    }
 
 
 def test_load_event_bundle_reads_station_waveforms(tmp_path: Path):
@@ -208,126 +241,112 @@ def test_summarize_event_predictions_returns_median_and_spread():
     assert summary["pred_iqr"] == pytest.approx(0.2)
 
 
-def test_build_unseen_dataset_helper_forces_meter_input(tmp_path: Path):
-    """验证：外部未见事件评估固定按米输入，避免复用训练 mm 配置导致幅值缩小"""
-    config = {
-        "paths": {"data_path": str(tmp_path / "mock.npz")},
-        "training": {"time_steps": 200},
-        "dataset": {
-            "blacklist_events": [],
-            "units": "mm",
-            "center_mode": "median",
-            "window_min_sec": 0.0,
-            "window_max_sec": 600.0,
-            "stf_path": None,
-            "stf_m_ref": 1.0e18,
-            "default_theta_deg": 45.0,
-            "default_phi_deg": 0.0,
-            "filter": {"type": "none"},
-            "p_preprocess_enabled": False,
-            "p_velocity_mps": 4500.0,
-            "p_arrival_offset_sec": 0.0,
-            "p_baseline_mode": "mean",
-            "radial_peak_min_cm": 2.0,
-        },
-    }
-    np.savez(
-        tmp_path / "mock.npz",
-        events=np.array(["MockEvent"], dtype=object),
-        magnitude=np.array([7.0]),
-        latitude=np.array([35.0]),
-        longitude=np.array([140.0]),
-        depth_km=np.array([10.0]),
-        stations=np.array([[]], dtype=object),
-    )
-
-    ds = _build_unseen_dataset_helper(config)
-
-    assert ds.units == "m"
-    assert ds.radial_peak_min_cm == pytest.approx(2.0)
-
-
-def test_build_unseen_dataset_helper_allows_overriding_peak_threshold(tmp_path: Path):
-    """验证：未见地震评估可临时关闭径向峰值筛选，以支持全台站分析"""
-    config = {
-        "paths": {"data_path": str(tmp_path / "mock.npz")},
-        "training": {"time_steps": 200},
-        "dataset": {
-            "blacklist_events": [],
-            "units": "mm",
-            "center_mode": "median",
-            "window_min_sec": 0.0,
-            "window_max_sec": 600.0,
-            "stf_path": None,
-            "stf_m_ref": 1.0e18,
-            "default_theta_deg": 45.0,
-            "default_phi_deg": 0.0,
-            "filter": {"type": "none"},
-            "p_preprocess_enabled": False,
-            "p_velocity_mps": 4500.0,
-            "p_arrival_offset_sec": 0.0,
-            "p_baseline_mode": "mean",
-            "radial_peak_min_cm": 2.0,
-        },
-    }
-    np.savez(
-        tmp_path / "mock.npz",
-        events=np.array(["MockEvent"], dtype=object),
-        magnitude=np.array([7.0]),
-        latitude=np.array([35.0]),
-        longitude=np.array([140.0]),
-        depth_km=np.array([10.0]),
-        stations=np.array([[]], dtype=object),
-    )
-
-    ds = _build_unseen_dataset_helper(config, radial_peak_min_cm_override=0.0)
-
-    assert ds.units == "m"
-    assert ds.radial_peak_min_cm == pytest.approx(0.0)
-
-
 def test_station_sample_exposes_max_radial_cm(tmp_path: Path):
     """验证：单台站评估样本会暴露最大径向位移，供结果表格输出"""
     event_dir = _write_event_dir(tmp_path)
     bundle = load_event_bundle(event_dir)
 
-    config = {
-        "paths": {"data_path": str(tmp_path / "mock.npz")},
-        "training": {"time_steps": 200},
-        "dataset": {
-            "blacklist_events": [],
-            "units": "mm",
-            "center_mode": "none",
-            "window_min_sec": 0.0,
-            "window_max_sec": 600.0,
-            "stf_path": None,
-            "stf_m_ref": 1.0e18,
-            "default_theta_deg": 45.0,
-            "default_phi_deg": 0.0,
-            "filter": {"type": "none"},
-            "p_preprocess_enabled": False,
-            "p_velocity_mps": 4500.0,
-            "p_arrival_offset_sec": 0.0,
-            "p_baseline_mode": "mean",
-            "radial_peak_min_cm": 0.0,
-        },
+    sample = _station_sample_from_bundle(
+        bundle,
+        bundle.stations[0],
+        _external_v2_config(),
+    )
+
+    assert sample is not None
+    assert "radial_peak_cm" in sample
+    assert float(sample["radial_peak_cm"]) > 0.0
+
+
+def test_external_adapter_matches_training_npz_preprocessing(tmp_path: Path):
+    time_sec = np.arange(-2.0, 6.0)
+    east = 0.01 * time_sec**2
+    north = 0.02 * time_sec
+    vertical = -0.005 * time_sec
+    station_payload = {
+        "name": "STA",
+        "lat": 35.2,
+        "lon": 140.1,
+        "t": time_sec,
+        "E": east,
+        "N": north,
+        "U": vertical,
     }
+    stations = np.empty(1, dtype=object)
+    stations[0] = [station_payload]
+    npz_path = tmp_path / "training.npz"
     np.savez(
-        tmp_path / "mock.npz",
-        events=np.array(["MockEvent"], dtype=object),
+        npz_path,
+        events=np.array(["Event A"], dtype=object),
         magnitude=np.array([7.0]),
         latitude=np.array([35.0]),
         longitude=np.array([140.0]),
-        depth_km=np.array([10.0]),
-        stations=np.array([[]], dtype=object),
+        depth_km=np.array([20.0]),
+        strike=np.array([30.0]),
+        dip=np.array([45.0]),
+        rake=np.array([90.0]),
+        mechanism=np.array(["reverse"], dtype=object),
+        stations=stations,
     )
-    ds = _build_unseen_dataset_helper(config)
+    config = _external_v2_config()
+    config["dataset"]["waveform"].update(
+        {"duration_sec": 5.0, "min_valid_fraction": 1.0}
+    )
+    config["dataset"]["baseline"].update(
+        {
+            "pre_event_start_sec": -2.0,
+            "pre_event_end_sec": 0.0,
+            "min_samples": 2,
+        }
+    )
+    waveform_config = waveform_config_from_v2(config)
 
-    sample = _station_sample_from_bundle(bundle, bundle.stations[0], ds)
+    with np.load(npz_path, allow_pickle=True) as data:
+        training_record = next(_iter_normalized_station_records(data))
+    training_sample = build_station_sample(
+        training_record,
+        units="m",
+        waveform_config=waveform_config,
+        alpha_m_per_s=7900.0,
+        radial_peak_min_cm=0.0,
+    )
+    bundle = EventBundle(
+        event_name="Event A",
+        magnitude=7.0,
+        latitude=35.0,
+        longitude=140.0,
+        depth_km=20.0,
+        mechanism="reverse",
+        strike=30.0,
+        dip=45.0,
+        rake=90.0,
+        stations=[],
+    )
+    station = StationWaveform(
+        station="STA",
+        latitude=35.2,
+        longitude=140.1,
+        t=time_sec,
+        e_m=east,
+        n_m=north,
+        u_m=vertical,
+        dt=1.0,
+    )
+    external_record = record_from_external_bundle(bundle, station)
+    external_sample = build_station_sample(
+        external_record,
+        units="m",
+        waveform_config=waveform_config,
+        alpha_m_per_s=7900.0,
+        radial_peak_min_cm=0.0,
+    )
 
-    assert sample is not None
-    assert "max_radial_cm" in sample
-    assert float(sample["max_radial_cm"]) > 0.0
+    assert np.allclose(training_sample["radial"], external_sample["radial"])
+    assert np.array_equal(
+        training_sample["waveform_valid_mask"],
+        external_sample["waveform_valid_mask"],
+    )
+    for key in ("source_distance_m", "theta_deg", "azimuth_deg"):
+        assert training_sample[key] == pytest.approx(external_sample[key])
 
 
 def test_plot_event_station_waveforms_creates_waveform_figure(tmp_path: Path):

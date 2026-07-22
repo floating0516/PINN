@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from typing import Any
 
 import numpy as np
 
@@ -23,6 +24,32 @@ class WaveformConfig:
     cutoff_hz: float
     num_taps: int
     filter_window: str
+
+
+def waveform_config_from_v2(config: dict[str, Any]) -> WaveformConfig:
+    dataset = config["dataset"]
+    waveform = dataset["waveform"]
+    baseline = dataset["baseline"]
+    filter_config = dataset["filter"]
+    return WaveformConfig(
+        sample_rate_hz=float(dataset["sample_rate_hz"]),
+        start_sec=float(waveform["start_sec"]),
+        duration_sec=float(waveform["duration_sec"]),
+        min_valid_fraction=float(waveform["min_valid_fraction"]),
+        max_interpolation_gap_sec=float(
+            waveform["max_interpolation_gap_sec"]
+        ),
+        baseline_method=str(baseline["method"]),
+        pre_event_start_sec=float(baseline["pre_event_start_sec"]),
+        pre_event_end_sec=float(baseline["pre_event_end_sec"]),
+        baseline_fallback=str(baseline["fallback"]),
+        baseline_fallback_max_sec=float(baseline["fallback_max_sec"]),
+        baseline_min_samples=int(baseline["min_samples"]),
+        filter_type=str(filter_config["type"]),
+        cutoff_hz=float(filter_config["cutoff_hz"]),
+        num_taps=int(filter_config["num_taps"]),
+        filter_window=str(filter_config["window"]),
+    )
 
 
 @dataclass(frozen=True)

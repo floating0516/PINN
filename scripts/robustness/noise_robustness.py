@@ -41,13 +41,13 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.data_loader import EarthquakeDataset
+from src.data.metadata import build_metadata_tensor
+from src.data.waveform import waveform_config_from_v2
 from src.evaluation.evaluate import _ensure_time_steps, magnitude_series_from_rate
 from src.evaluation.evaluate_unseen import (
     EventBundle,
     StationWaveform,
     _apply_pub_style,
-    _build_unseen_dataset_helper,
     _format_event_display_name,
     _OKABE_ITO,
     _station_sample_from_bundle,
@@ -131,7 +131,7 @@ def run_noise_robustness(
 
     ds_cfg = config.get("dataset", {}) or {}
     train_cfg = config.get("training", {}) or {}
-    ds_helper = _build_unseen_dataset_helper(config, radial_peak_min_cm_override=radial_peak_min_cm_override)
+    waveform_config = waveform_config_from_v2(config)
 
     device = get_preferred_device()
     checkpoint = torch.load(model_path, map_location=device)
@@ -153,7 +153,13 @@ def run_noise_robustness(
             magnitude=bundle.magnitude,
         )
         for station in bundle.stations:
-            sample = _station_sample_from_bundle(bundle, station, ds_helper)
+            sample = _station_sample_from_bundle(
+                bundle,
+                station,
+                config,
+                waveform_config=waveform_config,
+                radial_peak_min_cm_override=radial_peak_min_cm_override,
+            )
             if sample is None:
                 continue
             sample["event_label"] = event_label
@@ -179,7 +185,7 @@ def run_noise_robustness(
 
                 for sample in clean_samples:
                     radial_clean = np.array(sample["radial"], dtype=np.float32)
-                    dt = float(sample["dt"])
+                    dt = float(sample["waveform_dt_sec"])
 
                     # 添加噪声
                     if sigma_m > 0:
@@ -192,9 +198,11 @@ def run_noise_robustness(
                         radial_noisy, dtype=torch.float32, device=device,
                     ).unsqueeze(0).unsqueeze(0)
                     radial_t = _ensure_time_steps(radial_t, time_steps)
-                    meta_t = torch.tensor(
-                        sample["meta"], dtype=torch.float32, device=device,
-                    ).unsqueeze(0)
+                    meta_t = build_metadata_tensor(
+                        torch.tensor([sample["source_distance_m"]], dtype=torch.float32, device=device),
+                        torch.tensor([sample["theta_deg"]], dtype=torch.float32, device=device),
+                        torch.tensor([sample["azimuth_deg"]], dtype=torch.float32, device=device),
+                    )
 
                     rate_log = model(radial_t, meta=meta_t)
                     dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)

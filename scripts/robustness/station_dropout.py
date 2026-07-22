@@ -40,12 +40,12 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.data.data_loader import EarthquakeDataset
+from src.data.metadata import build_metadata_tensor
+from src.data.waveform import waveform_config_from_v2
 from src.evaluation.evaluate import _ensure_time_steps
 from src.evaluation.evaluate_unseen import (
     EventBundle,
     _apply_pub_style,
-    _build_unseen_dataset_helper,
     _format_event_display_name,
     _OKABE_ITO,
     _station_sample_from_bundle,
@@ -85,7 +85,7 @@ def run_station_dropout(
 
     ds_cfg = config.get("dataset", {}) or {}
     train_cfg = config.get("training", {}) or {}
-    ds_helper = _build_unseen_dataset_helper(config, radial_peak_min_cm_override=radial_peak_min_cm_override)
+    waveform_config = waveform_config_from_v2(config)
 
     device = get_preferred_device()
     checkpoint = torch.load(model_path, map_location=device)
@@ -111,7 +111,13 @@ def run_station_dropout(
             station_mw: list[float] = []
 
             for station in bundle.stations:
-                sample = _station_sample_from_bundle(bundle, station, ds_helper)
+                sample = _station_sample_from_bundle(
+                    bundle,
+                    station,
+                    config,
+                    waveform_config=waveform_config,
+                    radial_peak_min_cm_override=radial_peak_min_cm_override,
+                )
                 if sample is None:
                     continue
 
@@ -119,15 +125,17 @@ def run_station_dropout(
                     sample["radial"], dtype=torch.float32, device=device,
                 ).unsqueeze(0).unsqueeze(0)
                 radial = _ensure_time_steps(radial, time_steps)
-                meta = torch.tensor(
-                    sample["meta"], dtype=torch.float32, device=device,
-                ).unsqueeze(0)
+                meta = build_metadata_tensor(
+                    torch.tensor([sample["source_distance_m"]], dtype=torch.float32, device=device),
+                    torch.tensor([sample["theta_deg"]], dtype=torch.float32, device=device),
+                    torch.tensor([sample["azimuth_deg"]], dtype=torch.float32, device=device),
+                )
 
                 rate_log = model(radial, meta=meta)
                 dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
                 dot_m0 = torch.clamp(dot_m0, min=0.0)
                 mw_pred = float(criterion.utils.magnitude_from_rate(
-                    dot_m0, float(sample["dt"]),
+                    dot_m0, float(sample["waveform_dt_sec"]),
                 )[0].item())
                 station_mw.append(mw_pred)
 

@@ -30,10 +30,11 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from src.evaluation.evaluate_unseen import (  # noqa: E402
-    _build_unseen_dataset_helper,
     _station_sample_from_bundle,
     load_event_bundle,
 )
+from src.data.metadata import build_metadata_tensor  # noqa: E402
+from src.data.waveform import waveform_config_from_v2  # noqa: E402
 from src.evaluation.evaluate import _ensure_time_steps  # noqa: E402
 from src.models.model import PINNModel  # noqa: E402
 from src.training.physics import PhysicsLoss  # noqa: E402
@@ -86,7 +87,7 @@ def mini_axes(figsize=(2.2, 1.2)):
 def main() -> None:
     with (MODEL_DIR / "config.yaml").open() as f:
         config = yaml.safe_load(f)
-    ds_helper = _build_unseen_dataset_helper(config)
+    waveform_config = waveform_config_from_v2(config)
     device = get_preferred_device()
     model = PINNModel(config).to(device)
     model.load_state_dict(torch.load(MODEL_DIR / "best_model.pth", map_location=device))
@@ -94,7 +95,13 @@ def main() -> None:
     criterion = PhysicsLoss(config).to(device)
     synth_loss = STFRateWaveformLoss(config).to(device)
     time_steps = int(config.get("training", {}).get("time_steps", 200))
-    stf_m_ref = float(config.get("dataset", {}).get("stf_m_ref", 1.0e18))
+    dataset_config = config.get("dataset", {}) or {}
+    stf_m_ref = float(
+        (dataset_config.get("stf", {}) or {}).get(
+            "m_ref",
+            dataset_config.get("stf_m_ref", 1.0e18),
+        )
+    )
 
     bundle = load_event_bundle(EVENT_DIR)
     print(f"Event: {bundle.event_name}  Mw={bundle.magnitude}  stations={len(bundle.stations)}")
@@ -102,18 +109,28 @@ def main() -> None:
     results = []
     with torch.no_grad():
         for st in bundle.stations:
-            sample = _station_sample_from_bundle(bundle, st, ds_helper)
+            sample = _station_sample_from_bundle(
+                bundle,
+                st,
+                config,
+                waveform_config=waveform_config,
+            )
             if sample is None:
                 continue
             radial = torch.tensor(sample["radial"], dtype=torch.float32, device=device)[None, None, :]
             radial = _ensure_time_steps(radial, time_steps)
-            meta = torch.tensor(sample["meta"], dtype=torch.float32, device=device)[None, :]
+            meta = build_metadata_tensor(
+                torch.tensor([sample["source_distance_m"]], dtype=torch.float32, device=device),
+                torch.tensor([sample["theta_deg"]], dtype=torch.float32, device=device),
+                torch.tensor([sample["azimuth_deg"]], dtype=torch.float32, device=device),
+            )
             rate_log = model(radial, meta=meta)
             dot_m0 = torch.clamp(stf_m_ref * (torch.pow(10.0, rate_log) - 1.0), min=0.0)
-            mw_pred = float(criterion.utils.magnitude_from_rate(dot_m0, float(sample["dt"]))[0].item())
-            r_m = torch.tensor([sample["distance_m"]], dtype=torch.float32, device=device)
+            sample_dt = float(sample["waveform_dt_sec"])
+            mw_pred = float(criterion.utils.magnitude_from_rate(dot_m0, sample_dt)[0].item())
+            r_m = torch.tensor([sample["source_distance_m"]], dtype=torch.float32, device=device)
             th = torch.tensor([sample["theta_deg"]], dtype=torch.float32, device=device)
-            ph = torch.tensor([sample["phi_deg"]], dtype=torch.float32, device=device)
+            ph = torch.tensor([sample["phi_slip_deg"]], dtype=torch.float32, device=device)
             a_ip, a_is, a_fp, a_fs = compute_radiation_coefficients(
                 th, ph, mode=synth_loss.radiation_mode
             )
@@ -124,7 +141,7 @@ def main() -> None:
                 free_surface=synth_loss.free_surface,
                 attenuation=synth_loss.attenuation,
             )
-            dt_b = torch.tensor([float(sample["dt"])], dtype=torch.float32, device=device)
+            dt_b = torch.tensor([sample_dt], dtype=torch.float32, device=device)
             synth = forward_displacement_from_rate(
                 dot_m0.view(1, -1), dt_b, r_m,
                 synth_loss.alpha, synth_loss.beta,
@@ -146,8 +163,8 @@ def main() -> None:
                     synth=synth,
                 )
             )
-            print(f"  {st.station}: dist={sample['distance_m']/1e3:.0f} km  "
-                  f"peak={sample['max_radial_cm']:.1f} cm  Mw_pred={mw_pred:.2f}")
+            print(f"  {st.station}: dist={sample['source_distance_m']/1e3:.0f} km  "
+                  f"peak={sample['radial_peak_cm']:.1f} cm  Mw_pred={mw_pred:.2f}")
 
     if not results:
         raise SystemExit("no usable stations")
@@ -158,7 +175,7 @@ def main() -> None:
           f"catalog = {bundle.magnitude}")
 
     # representative station: largest radial peak
-    rep = max(results, key=lambda r: r["sample"]["max_radial_cm"])
+    rep = max(results, key=lambda r: r["sample"]["radial_peak_cm"])
     print(f"Representative station: {rep['station']}")
 
     # best physics-fit station: highest correlation between obs and synth
@@ -188,7 +205,7 @@ def main() -> None:
     axs[0].legend(fontsize=7, loc="upper right")
 
     # (b) processed radial
-    dt = float(rep["sample"]["dt"])
+    dt = float(rep["sample"]["waveform_dt_sec"])
     rr = rep["sample"]["radial"]
     tr = np.arange(len(rr)) * dt
     axs[1].plot(tr, rr * 100.0, color=C_BLUE, lw=1.1)
@@ -218,7 +235,7 @@ def main() -> None:
     # (e) observed vs physics-synth radial
     obs = np.asarray(fit["sample"]["radial"], dtype=float)
     syn = np.asarray(fit["synth"], dtype=float)[: len(obs)]
-    dt_fit = float(fit["sample"]["dt"])
+    dt_fit = float(fit["sample"]["waveform_dt_sec"])
     t_fit = np.arange(len(obs)) * dt_fit
     obs_n = obs / (np.nanmax(np.abs(obs)) + 1e-12)
     syn_n = syn / (np.nanmax(np.abs(syn)) + 1e-12)
