@@ -178,6 +178,8 @@ def test_catalog_scaled_stf_is_event_invariant_and_conserves_catalog_moment(
     }
     dataset.stf_m_ref = 1.0e18
     dataset.stf_output_steps = 4
+    dataset.station_aligned = False
+    dataset.travel_time = None
     dataset.waveform_config = object()
     dataset.blacklist = set()
     dataset.allow_missing_stf = False

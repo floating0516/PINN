@@ -23,6 +23,7 @@ from src.data.manifest import (
 def _config(npz_path: Path, stf_dir: Path) -> dict[str, Any]:
     return {
         "pipeline_version": 2,
+        "workflow": "station_random_shifted_stf",
         "dataset": {
             "blacklist_events": [],
             "units": "m",
@@ -53,24 +54,40 @@ def _config(npz_path: Path, stf_dir: Path) -> dict[str, Any]:
                 "path": str(stf_dir),
                 "start_sec": 0.0,
                 "duration_sec": 200.0,
+                "station_window_duration_sec": 300.0,
+                "station_alignment": "p_arrival",
+                "station_preserve_integral": False,
                 "min_retained_moment_fraction": 0.995,
                 "preserve_integral": True,
                 "m_ref": 1.0e18,
+                "magnitude_target": "stf_native",
             },
         },
         "physics": {
             "rho": 3400.0,
             "alpha": 7900.0,
             "beta": 4533.0,
+            "travel_time_model": "constant_velocity",
             "distance_mode": "hypocentral",
-            "delay_mode": "absolute",
+            "delay_mode": "p_aligned_relative",
             "amplitude_gain": 1.0,
         },
+        "model": {
+            "predict_catalog_mw": True,
+            "catalog_mw_initial_bias": 8.0,
+        },
         "paths": {"data_path": str(npz_path)},
-        "training": {"rate_representation": "log1p"},
+        "training": {
+            "rate_representation": "log1p",
+            "split_protocol": "within_event_station",
+            "event_balanced_sampling": False,
+            "early_stop_patience": 0,
+            "checkpoint_metric": "station_mae_catalog",
+        },
         "evaluation": {
             "primary_reference": "catalog",
             "aggregation": "event_median",
+            "external_role": "sanity",
         },
     }
 
@@ -139,7 +156,6 @@ def test_manifest_contains_every_accepted_and_rejected_candidate(
         dataset,
         manifest_path=manifest_path,
         summary_path=summary_path,
-        minimum_stf_retained_fraction=0.995,
     )
 
     with manifest_path.open(newline="", encoding="utf-8") as stream:
@@ -169,10 +185,12 @@ def test_manifest_contains_every_accepted_and_rejected_candidate(
     assert summary["events"]["Audit Event"]["candidate_station_count"] == 2
     assert summary["events"]["Audit Event"]["accepted_station_count"] == 1
     assert summary["invariants"]["all_waveform_dt_equal_1s"] is True
-    assert summary["invariants"]["one_stf_per_event"] is True
-    assert summary["invariants"]["one_stf_mw_per_event"] is True
-    assert summary["invariants"]["min_stf_retained_fraction"] >= 0.995
-    assert audit_passes(summary, minimum_stf_retained_fraction=0.995)
+    assert summary["invariants"]["full_event_moment_constant_per_event"] is True
+    assert summary["invariants"]["retained_fraction_count"] == 1
+    assert 0.0 <= summary["invariants"]["min_stf_retained_fraction"] <= 1.0
+    assert 0.0 <= summary["invariants"]["mean_stf_retained_fraction"] <= 1.0
+    assert 0.0 <= summary["invariants"]["max_stf_retained_fraction"] <= 1.0
+    assert audit_passes(summary)
 
 
 def test_manifest_rejection_reasons_are_a_closed_enum(tmp_path: Path) -> None:
@@ -207,23 +225,22 @@ def test_empty_accepted_dataset_fails_invariant_gate(tmp_path: Path) -> None:
     assert summary["accepted_station_count"] == 0
     assert not audit_passes(
         summary,
-        minimum_stf_retained_fraction=0.995,
     )
 
 
-def test_writer_rejects_invalid_minimum_retained_fraction(
+def test_audit_does_not_require_a_minimum_retained_fraction(
     tmp_path: Path,
 ) -> None:
     config = _write_fixture(tmp_path)
     dataset = CorrectedEarthquakeDataset(config)
 
-    with pytest.raises(ValueError, match="minimum_stf_retained_fraction"):
-        write_dataset_audit(
-            dataset,
-            manifest_path=tmp_path / "manifest.csv",
-            summary_path=tmp_path / "summary.json",
-            minimum_stf_retained_fraction=0.0,
-        )
+    summary = write_dataset_audit(
+        dataset,
+        manifest_path=tmp_path / "manifest.csv",
+        summary_path=tmp_path / "summary.json",
+    )
+
+    assert audit_passes(summary)
 
 
 def test_audit_cli_writes_outputs_and_returns_success(tmp_path: Path) -> None:

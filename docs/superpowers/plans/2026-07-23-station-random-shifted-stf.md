@@ -120,7 +120,7 @@ git commit -m "feat: define station-aligned travel-time contract"
 - Modify: `tests/test_corrected_pipeline_integration.py`
 - Modify: `tests/test_dataset_manifest.py`
 
-- [ ] **Step 1: Write failing station-shift tests**
+- [x] **Step 1: Write failing station-shift tests**
 
 ```python
 def test_station_window_shifts_fractionally_and_truncates_without_rescaling() -> None:
@@ -153,13 +153,13 @@ def test_dataset_same_event_stations_share_full_moment_but_not_shifted_stf(tmp_p
     assert first["stf"].shape == second["stf"].shape == (300,)
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source /home/lihe/.config/pinn/server.env && "$PINN_ENV/bin/python" -m pytest tests/test_stf_targets.py tests/test_corrected_pipeline_integration.py tests/test_dataset_manifest.py -q`
 
 Expected: FAIL because station-window STF types, fields, and audit semantics are absent.
 
-- [ ] **Step 3: Implement the station-window derivation**
+- [x] **Step 3: Implement the station-window derivation**
 
 ```python
 @dataclass(frozen=True)
@@ -223,7 +223,7 @@ Dataset processing must build waveform/geometry first, obtain P/S delays from
 `travel_time_from_config`, then shift the cached canonical STF. Do not cache the
 station target and do not scale it to catalog magnitude.
 
-- [ ] **Step 4: Replace audit semantics**
+- [x] **Step 4: Replace audit semantics**
 
 Manifest rows add `p_arrival_sec`, `s_arrival_sec`,
 `full_event_moment_nm`, `station_window_moment_nm`, and `mw_stf_window`.
@@ -231,7 +231,7 @@ Manifest rows add `p_arrival_sec`, `s_arrival_sec`,
 event moment equality within each event. `audit_passes(summary)` must not accept
 or compare a minimum retained fraction.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run the focused command from Step 2. Expected: all focused tests pass.
 

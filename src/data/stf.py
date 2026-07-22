@@ -22,6 +22,17 @@ class ProcessedSTF:
     mw_native: float
 
 
+@dataclass(frozen=True)
+class StationWindowSTF:
+    time_sec: np.ndarray
+    rate_nm_per_s: np.ndarray
+    dt_sec: float
+    full_event_moment_nm: float
+    window_moment_nm: float
+    retained_moment_fraction: float
+    mw_window: float
+
+
 def moment_to_mw(moment_nm: float) -> float:
     if (
         isinstance(moment_nm, bool)
@@ -72,6 +83,70 @@ def _finite_real(value: object, name: str) -> float:
     ):
         raise ValueError(f"{name} must be finite")
     return float(value)
+
+
+def shift_source_stf_to_station_window(
+    source: ProcessedSTF,
+    *,
+    p_delay_sec: float,
+    duration_sec: float,
+    sample_rate_hz: float,
+) -> StationWindowSTF:
+    delay = _finite_real(p_delay_sec, "p_delay_sec")
+    duration = _finite_real(duration_sec, "duration_sec")
+    sample_rate = _finite_real(sample_rate_hz, "sample_rate_hz")
+    if delay < 0.0:
+        raise ValueError("p_delay_sec must be nonnegative")
+    if duration <= 0.0:
+        raise ValueError("duration_sec must be positive")
+    if sample_rate <= 0.0:
+        raise ValueError("sample_rate_hz must be positive")
+
+    dt_sec = 1.0 / sample_rate
+    sample_count = int(round(duration * sample_rate))
+    if sample_count < 1:
+        raise ValueError("station STF grid must contain at least one sample")
+    time_sec = np.arange(sample_count, dtype=np.float64) * dt_sec
+    rate_nm_per_s = np.interp(
+        time_sec - delay,
+        source.time_sec,
+        source.rate_nm_per_s,
+        left=0.0,
+        right=0.0,
+    )
+    full_event_moment_nm = float(
+        np.sum(source.rate_nm_per_s) * source.dt_sec
+    )
+    window_moment_nm = float(np.sum(rate_nm_per_s) * dt_sec)
+    if (
+        not math.isfinite(full_event_moment_nm)
+        or full_event_moment_nm <= 0.0
+    ):
+        raise ValueError("full event moment must be positive and finite")
+    if not math.isfinite(window_moment_nm) or window_moment_nm < 0.0:
+        raise ValueError("station window moment must be finite and nonnegative")
+    retained_fraction = window_moment_nm / full_event_moment_nm
+    tolerance = 1.0e-10
+    if (
+        retained_fraction < -tolerance
+        or retained_fraction > 1.0 + tolerance
+    ):
+        raise ValueError("station retained moment fraction is outside [0, 1]")
+    retained_fraction = min(1.0, max(0.0, retained_fraction))
+    mw_window = (
+        moment_to_mw(window_moment_nm)
+        if window_moment_nm > 0.0
+        else float("nan")
+    )
+    return StationWindowSTF(
+        time_sec=time_sec,
+        rate_nm_per_s=rate_nm_per_s,
+        dt_sec=dt_sec,
+        full_event_moment_nm=full_event_moment_nm,
+        window_moment_nm=window_moment_nm,
+        retained_moment_fraction=retained_fraction,
+        mw_window=mw_window,
+    )
 
 
 def _sort_and_average_duplicates(

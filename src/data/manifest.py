@@ -31,6 +31,11 @@ MANIFEST_FIELDS = [
     "valid_fraction",
     "baseline_source",
     "radial_peak_cm",
+    "p_arrival_sec",
+    "s_arrival_sec",
+    "full_event_moment_nm",
+    "station_window_moment_nm",
+    "mw_stf_window",
     "stf_retained_moment_fraction",
 ]
 
@@ -89,9 +94,14 @@ def make_manifest_row(
     retained_fraction = _finite_or_none(
         _sample_value(sample, "stf_retained_moment_fraction")
     )
+    full_event_moment_nm = _finite_or_none(
+        _sample_value(sample, "full_event_moment_nm")
+    )
     if processed_stf is not None:
-        mw_stf_native = processed_stf.mw_native
-        retained_fraction = processed_stf.retained_moment_fraction
+        if mw_stf_native is None:
+            mw_stf_native = processed_stf.mw_native
+        if full_event_moment_nm is None:
+            full_event_moment_nm = processed_stf.native_moment_nm
     if has_stf is None and processed_stf is not None:
         has_stf = True
 
@@ -128,6 +138,19 @@ def make_manifest_row(
         "baseline_source": _sample_value(sample, "baseline_source") or "",
         "radial_peak_cm": _finite_or_none(
             _sample_value(sample, "radial_peak_cm")
+        ),
+        "p_arrival_sec": _finite_or_none(
+            _sample_value(sample, "p_arrival_sec")
+        ),
+        "s_arrival_sec": _finite_or_none(
+            _sample_value(sample, "s_arrival_sec")
+        ),
+        "full_event_moment_nm": full_event_moment_nm,
+        "station_window_moment_nm": _finite_or_none(
+            _sample_value(sample, "station_window_moment_nm")
+        ),
+        "mw_stf_window": _finite_or_none(
+            _sample_value(sample, "mw_stf_window")
         ),
         "stf_retained_moment_fraction": retained_fraction,
     }
@@ -169,30 +192,26 @@ def _event_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _one_stf_per_event(samples: list[dict[str, Any]]) -> bool:
-    if not samples or not all(bool(sample["has_stf"]) for sample in samples):
-        return False
-    by_event: dict[str, list[np.ndarray]] = {}
-    for sample in samples:
-        by_event.setdefault(str(sample["event"]), []).append(sample["stf"])
-    return all(
-        all(np.array_equal(values[0], value) for value in values[1:])
-        for values in by_event.values()
-    )
-
-
-def _one_stf_mw_per_event(samples: list[dict[str, Any]]) -> bool:
-    if not samples or not all(bool(sample["has_stf"]) for sample in samples):
+def _full_event_moment_constant_per_event(
+    samples: list[dict[str, Any]],
+) -> bool:
+    with_stf = [sample for sample in samples if bool(sample["has_stf"])]
+    if not with_stf:
         return False
     by_event: dict[str, list[float]] = {}
-    for sample in samples:
+    for sample in with_stf:
         by_event.setdefault(str(sample["event"]), []).append(
-            float(sample["mw_stf_native"])
+            float(sample["full_event_moment_nm"])
         )
     return all(
         all(
             math.isfinite(value)
-            and math.isclose(value, values[0], rel_tol=0.0, abs_tol=0.0)
+            and math.isclose(
+                value,
+                values[0],
+                rel_tol=1.0e-12,
+                abs_tol=0.0,
+            )
             for value in values
         )
         for values in by_event.values()
@@ -214,6 +233,13 @@ def build_dataset_summary(dataset: Any) -> dict[str, Any]:
         if bool(sample["has_stf"])
         and math.isfinite(float(sample["stf_retained_moment_fraction"]))
     ]
+    expected_retained_count = sum(
+        bool(sample["has_stf"]) for sample in samples
+    )
+    retained_fractions_bounded = (
+        len(retained_fractions) == expected_retained_count
+        and all(0.0 <= value <= 1.0 for value in retained_fractions)
+    )
     all_waveform_dt_equal_1s = bool(samples) and all(
         math.isclose(
             float(sample["waveform_dt_sec"]),
@@ -242,10 +268,21 @@ def build_dataset_summary(dataset: Any) -> dict[str, Any]:
         },
         "invariants": {
             "all_waveform_dt_equal_1s": all_waveform_dt_equal_1s,
-            "one_stf_per_event": _one_stf_per_event(samples),
-            "one_stf_mw_per_event": _one_stf_mw_per_event(samples),
+            "full_event_moment_constant_per_event": (
+                _full_event_moment_constant_per_event(samples)
+            ),
+            "retained_fractions_bounded": retained_fractions_bounded,
+            "retained_fraction_count": len(retained_fractions),
             "min_stf_retained_fraction": (
                 min(retained_fractions) if retained_fractions else 0.0
+            ),
+            "mean_stf_retained_fraction": (
+                float(np.mean(retained_fractions))
+                if retained_fractions
+                else 0.0
+            ),
+            "max_stf_retained_fraction": (
+                max(retained_fractions) if retained_fractions else 0.0
             ),
         },
     }
@@ -253,17 +290,14 @@ def build_dataset_summary(dataset: Any) -> dict[str, Any]:
 
 def audit_passes(
     summary: dict[str, Any],
-    *,
-    minimum_stf_retained_fraction: float,
 ) -> bool:
     invariants = summary["invariants"]
     return (
-        invariants["all_waveform_dt_equal_1s"] is True
-        and invariants["one_stf_per_event"] is True
-        and invariants["one_stf_mw_per_event"] is True
-        and math.isfinite(float(invariants["min_stf_retained_fraction"]))
-        and float(invariants["min_stf_retained_fraction"])
-        >= minimum_stf_retained_fraction
+        int(summary["accepted_station_count"]) > 0
+        and invariants["all_waveform_dt_equal_1s"] is True
+        and invariants["full_event_moment_constant_per_event"] is True
+        and invariants["retained_fractions_bounded"] is True
+        and int(invariants["retained_fraction_count"]) > 0
     )
 
 
@@ -272,15 +306,7 @@ def write_dataset_audit(
     *,
     manifest_path: str | Path,
     summary_path: str | Path,
-    minimum_stf_retained_fraction: float,
 ) -> dict[str, Any]:
-    if (
-        not math.isfinite(minimum_stf_retained_fraction)
-        or not 0.0 < minimum_stf_retained_fraction <= 1.0
-    ):
-        raise ValueError(
-            "minimum_stf_retained_fraction must be finite and in (0, 1]"
-        )
     rows = list(dataset.manifest_rows)
     validate_manifest_rows(rows)
     manifest = Path(manifest_path)

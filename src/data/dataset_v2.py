@@ -17,10 +17,13 @@ from src.data.sample_builder import SampleRejected, build_station_sample
 from src.data.stf import (
     ProcessedSTF,
     STFWindowTooShort,
+    moment_to_mw,
     resample_source_stf,
     scale_stf_to_catalog_magnitude,
+    shift_source_stf_to_station_window,
 )
 from src.data.waveform import waveform_config_from_v2
+from src.physics.travel_time import travel_time_from_config
 from src.utils.config_v2 import (
     stf_m_ref_from_config,
     stf_output_steps_from_config,
@@ -105,6 +108,14 @@ class CorrectedEarthquakeDataset(Dataset):
         stf_config = dataset_config["stf"]
         self.stf_m_ref = stf_m_ref_from_config(config)
         self.stf_output_steps = stf_output_steps_from_config(config)
+        self.station_aligned = (
+            config.get("workflow") == "station_random_shifted_stf"
+        )
+        self.travel_time = (
+            travel_time_from_config(config)
+            if self.station_aligned
+            else None
+        )
         self.waveform_config = waveform_config_from_v2(config)
         self.blacklist = {
             str(value)
@@ -232,44 +243,85 @@ class CorrectedEarthquakeDataset(Dataset):
             )
             return
 
+        p_arrival_sec = float("nan")
+        s_arrival_sec = float("nan")
+        s_after_p_sec = float("nan")
+        if self.travel_time is not None:
+            delays = self.travel_time.delays(
+                float(sample["source_distance_m"])
+            )
+            p_arrival_sec = float(delays.p_sec)
+            s_arrival_sec = float(delays.s_sec)
+            s_after_p_sec = float(delays.s_after_p_sec)
+
         if event_stf is None:
             stf = np.zeros(self.stf_output_steps, dtype=np.float32)
-            stf_log = np.zeros(self.stf_output_steps, dtype=np.float32)
             stf_dt_sec = 1.0 / float(
                 self.config["dataset"]["sample_rate_hz"]
             )
             mw_stf_native = float("nan")
+            mw_stf_window = float("nan")
+            full_event_moment_nm = float("nan")
+            station_window_moment_nm = float("nan")
             retained_fraction = float("nan")
             stf_path = ""
             has_stf = False
         else:
             processed_stf, stf_path = event_stf
-            magnitude_target = str(
-                self.config["dataset"]["stf"].get(
-                    "magnitude_target",
-                    "stf_native",
+            if self.station_aligned:
+                stf_config = self.config["dataset"]["stf"]
+                station_stf = shift_source_stf_to_station_window(
+                    processed_stf,
+                    p_delay_sec=p_arrival_sec,
+                    duration_sec=float(
+                        stf_config["station_window_duration_sec"]
+                    ),
+                    sample_rate_hz=float(
+                        self.config["dataset"]["sample_rate_hz"]
+                    ),
                 )
-            )
-            if magnitude_target == "stf_native":
-                target_rate = processed_stf.rate_nm_per_s
-            elif magnitude_target == "catalog":
-                target_rate = scale_stf_to_catalog_magnitude(
-                    processed_stf.rate_nm_per_s,
-                    dt_sec=processed_stf.dt_sec,
-                    magnitude_catalog=record.magnitude_catalog,
-                )
+                target_rate = station_stf.rate_nm_per_s
+                stf_dt_sec = station_stf.dt_sec
+                full_event_moment_nm = station_stf.full_event_moment_nm
+                station_window_moment_nm = station_stf.window_moment_nm
+                retained_fraction = station_stf.retained_moment_fraction
+                mw_stf_window = station_stf.mw_window
             else:
-                raise ValueError(
-                    f"unknown magnitude_target: {magnitude_target}"
+                magnitude_target = str(
+                    self.config["dataset"]["stf"].get(
+                        "magnitude_target",
+                        "stf_native",
+                    )
                 )
+                if magnitude_target == "stf_native":
+                    target_rate = processed_stf.rate_nm_per_s
+                elif magnitude_target == "catalog":
+                    target_rate = scale_stf_to_catalog_magnitude(
+                        processed_stf.rate_nm_per_s,
+                        dt_sec=processed_stf.dt_sec,
+                        magnitude_catalog=record.magnitude_catalog,
+                    )
+                else:
+                    raise ValueError(
+                        f"unknown magnitude_target: {magnitude_target}"
+                    )
+                stf_dt_sec = processed_stf.dt_sec
+                full_event_moment_nm = float(
+                    np.sum(processed_stf.rate_nm_per_s)
+                    * processed_stf.dt_sec
+                )
+                station_window_moment_nm = float(
+                    np.sum(target_rate) * stf_dt_sec
+                )
+                retained_fraction = processed_stf.retained_moment_fraction
+                mw_stf_window = moment_to_mw(station_window_moment_nm)
             stf = target_rate.astype(np.float32)
-            stf_log = np.log10(
-                1.0 + stf / self.stf_m_ref
-            ).astype(np.float32)
-            stf_dt_sec = processed_stf.dt_sec
             mw_stf_native = processed_stf.mw_native
-            retained_fraction = processed_stf.retained_moment_fraction
             has_stf = True
+
+        stf_log = np.log10(
+            1.0 + stf / self.stf_m_ref
+        ).astype(np.float32)
 
         sample.update(
             {
@@ -277,7 +329,15 @@ class CorrectedEarthquakeDataset(Dataset):
                 "stf_log": stf_log,
                 "stf_dt_sec": float(stf_dt_sec),
                 "mw_stf_native": float(mw_stf_native),
+                "mw_stf_window": float(mw_stf_window),
+                "full_event_moment_nm": float(full_event_moment_nm),
+                "station_window_moment_nm": float(
+                    station_window_moment_nm
+                ),
                 "stf_retained_moment_fraction": float(retained_fraction),
+                "p_arrival_sec": p_arrival_sec,
+                "s_arrival_sec": s_arrival_sec,
+                "s_after_p_sec": s_after_p_sec,
                 "stf_path": stf_path,
                 "has_stf": has_stf,
             }
@@ -344,9 +404,27 @@ class CorrectedEarthquakeDataset(Dataset):
             "mw_stf_native": torch.tensor(
                 sample["mw_stf_native"], dtype=torch.float32
             ),
+            "mw_stf_window": torch.tensor(
+                sample["mw_stf_window"], dtype=torch.float32
+            ),
+            "full_event_moment_nm": torch.tensor(
+                sample["full_event_moment_nm"], dtype=torch.float64
+            ),
+            "station_window_moment_nm": torch.tensor(
+                sample["station_window_moment_nm"], dtype=torch.float64
+            ),
             "stf_retained_moment_fraction": torch.tensor(
                 sample["stf_retained_moment_fraction"],
                 dtype=torch.float32,
+            ),
+            "p_arrival_sec": torch.tensor(
+                sample["p_arrival_sec"], dtype=torch.float32
+            ),
+            "s_arrival_sec": torch.tensor(
+                sample["s_arrival_sec"], dtype=torch.float32
+            ),
+            "s_after_p_sec": torch.tensor(
+                sample["s_after_p_sec"], dtype=torch.float32
             ),
             "has_stf": torch.tensor(sample["has_stf"], dtype=torch.bool),
             "valid_fraction": torch.tensor(

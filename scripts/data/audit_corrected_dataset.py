@@ -65,19 +65,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     config = _load_runtime_config(args.config.resolve())
     dataset = CorrectedEarthquakeDataset(config)
-    minimum_fraction = float(
-        config["dataset"]["stf"]["min_retained_moment_fraction"]
-    )
     summary = write_dataset_audit(
         dataset,
         manifest_path=args.manifest,
         summary_path=args.summary,
-        minimum_stf_retained_fraction=minimum_fraction,
     )
-    passed = audit_passes(
-        summary,
-        minimum_stf_retained_fraction=minimum_fraction,
-    )
+    passed = audit_passes(summary)
     print(
         json.dumps(
             {

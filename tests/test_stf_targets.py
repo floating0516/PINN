@@ -4,7 +4,9 @@ import math
 import numpy as np
 import pytest
 
+from src.data import stf as stf_module
 from src.data.stf import (
+    ProcessedSTF,
     STFWindowTooShort,
     moment_to_mw,
     resample_source_stf,
@@ -60,6 +62,78 @@ def test_source_stf_has_fixed_two_hundred_step_output() -> None:
     assert result.time_sec.shape == (200,)
     assert result.rate_nm_per_s.shape == (200,)
     np.testing.assert_array_equal(result.time_sec, np.arange(200.0))
+
+
+def test_station_window_shifts_fractionally_and_truncates_without_rescaling() -> None:
+    source = ProcessedSTF(
+        time_sec=np.arange(4.0),
+        rate_nm_per_s=np.array([0.0, 1.0, 2.0, 1.0]),
+        dt_sec=1.0,
+        native_moment_nm=4.0,
+        grid_moment_before_rescale_nm=4.0,
+        retained_moment_fraction=1.0,
+        mw_native=moment_to_mw(4.0),
+    )
+
+    shifted = stf_module.shift_source_stf_to_station_window(
+        source,
+        p_delay_sec=2.5,
+        duration_sec=5.0,
+        sample_rate_hz=1.0,
+    )
+
+    np.testing.assert_allclose(
+        shifted.rate_nm_per_s,
+        [0.0, 0.0, 0.0, 0.5, 1.5],
+    )
+    assert shifted.window_moment_nm == pytest.approx(2.0)
+    assert shifted.full_event_moment_nm == pytest.approx(4.0)
+    assert shifted.retained_moment_fraction == pytest.approx(0.5)
+
+
+def test_station_window_allows_complete_tail_loss() -> None:
+    source = ProcessedSTF(
+        time_sec=np.arange(3.0),
+        rate_nm_per_s=np.array([1.0, 1.0, 1.0]),
+        dt_sec=1.0,
+        native_moment_nm=3.0,
+        grid_moment_before_rescale_nm=3.0,
+        retained_moment_fraction=1.0,
+        mw_native=moment_to_mw(3.0),
+    )
+
+    shifted = stf_module.shift_source_stf_to_station_window(
+        source,
+        p_delay_sec=10.0,
+        duration_sec=3.0,
+        sample_rate_hz=1.0,
+    )
+
+    assert np.count_nonzero(shifted.rate_nm_per_s) == 0
+    assert shifted.window_moment_nm == 0.0
+    assert shifted.retained_moment_fraction == 0.0
+    assert math.isnan(shifted.mw_window)
+
+
+@pytest.mark.parametrize("delay", [-1.0, math.nan, math.inf])
+def test_station_window_rejects_invalid_p_delay(delay: float) -> None:
+    source = ProcessedSTF(
+        time_sec=np.arange(3.0),
+        rate_nm_per_s=np.ones(3),
+        dt_sec=1.0,
+        native_moment_nm=3.0,
+        grid_moment_before_rescale_nm=3.0,
+        retained_moment_fraction=1.0,
+        mw_native=moment_to_mw(3.0),
+    )
+
+    with pytest.raises(ValueError, match="p_delay_sec"):
+        stf_module.shift_source_stf_to_station_window(
+            source,
+            p_delay_sec=delay,
+            duration_sec=300.0,
+            sample_rate_hz=1.0,
+        )
 
 
 def test_source_stf_api_has_no_station_dependent_parameter() -> None:

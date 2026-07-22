@@ -73,6 +73,46 @@ def make_v2_dataset_config(
     }
 
 
+def make_station_window_config(
+    *,
+    npz_path: Path,
+    stf_dir: Path,
+) -> dict[str, Any]:
+    config = make_v2_dataset_config(
+        npz_path=npz_path,
+        stf_dir=stf_dir,
+    )
+    config["workflow"] = "station_random_shifted_stf"
+    config["dataset"]["stf"].update(
+        {
+            "station_window_duration_sec": 300.0,
+            "station_alignment": "p_arrival",
+            "station_preserve_integral": False,
+            "magnitude_target": "stf_native",
+        }
+    )
+    config["physics"].update(
+        {
+            "travel_time_model": "constant_velocity",
+            "delay_mode": "p_aligned_relative",
+        }
+    )
+    config["model"] = {
+        "predict_catalog_mw": True,
+        "catalog_mw_initial_bias": 8.0,
+    }
+    config["training"].update(
+        {
+            "split_protocol": "within_event_station",
+            "event_balanced_sampling": False,
+            "early_stop_patience": 0,
+            "checkpoint_metric": "station_mae_catalog",
+        }
+    )
+    config["evaluation"]["external_role"] = "sanity"
+    return config
+
+
 def _relative_time() -> np.ndarray:
     return np.arange(-20.0, 210.0, dtype=np.float64)
 
@@ -235,6 +275,37 @@ def test_same_event_has_one_stf_and_one_reference_mw(
     assert item["stf"].shape == (200,)
     assert item["waveform_valid_mask"].dtype == torch.bool
     assert item["has_stf"].item() is True
+
+
+def test_station_workflow_shifts_same_event_stf_by_station_p_arrival(
+    tmp_path: Path,
+) -> None:
+    npz_path = tmp_path / "events.npz"
+    _write_stations_npz(npz_path)
+    stf_dir = tmp_path / "stf"
+    _write_stf(stf_dir, "eventa")
+
+    dataset = CorrectedEarthquakeDataset(
+        make_station_window_config(npz_path=npz_path, stf_dir=stf_dir)
+    )
+
+    first, second = dataset.samples
+    assert first["stf"].shape == second["stf"].shape == (300,)
+    assert not np.array_equal(first["stf"], second["stf"])
+    assert first["p_arrival_sec"] != second["p_arrival_sec"]
+    assert first["s_arrival_sec"] != second["s_arrival_sec"]
+    assert first["full_event_moment_nm"] == pytest.approx(
+        second["full_event_moment_nm"]
+    )
+    assert first["station_window_moment_nm"] <= first["full_event_moment_nm"]
+    assert second["station_window_moment_nm"] <= second["full_event_moment_nm"]
+    assert 0.0 <= first["stf_retained_moment_fraction"] <= 1.0
+    assert 0.0 <= second["stf_retained_moment_fraction"] <= 1.0
+
+    item = dataset[0]
+    assert item["stf"].shape == (300,)
+    assert item["p_arrival_sec"].ndim == 0
+    assert item["mw_stf_window"].ndim == 0
 
 
 def test_stations_layout_converts_absolute_timestamps_to_origin_time(
