@@ -1,0 +1,56 @@
+pipeline_version: 2
+project_name: PINN_Earthquake_Magnitude_Prediction_v2
+dataset:
+  blacklist_events: [N.Honshu2011, N.Honshu2012, N.Honshu2013, E.Fukushima2011, Iwate2011]
+  units: mm
+  sample_rate_hz: 1.0
+  radial_peak_min_cm: 2.0
+  allow_missing_stf: false
+  waveform: {start_sec: 0.0, duration_sec: 200.0, min_valid_fraction: 0.99, max_interpolation_gap_sec: 2.5}
+  baseline: {method: median, pre_event_start_sec: -60.0, pre_event_end_sec: 0.0, fallback: pre_p, fallback_max_sec: 30.0, min_samples: 10}
+  filter: {type: lowpass, cutoff_hz: 0.1, num_taps: 7, window: hamming}
+  stf:
+    path: data/STF_SCARDEC
+    start_sec: 0.0
+    duration_sec: 200.0
+    min_retained_moment_fraction: 0.995
+    preserve_integral: true
+    m_ref: 1.0e+18
+    magnitude_target: stf_native
+geometry: {network_distance: hypocentral}
+physics: {rho: 3400.0, alpha: 7900.0, beta: 4533.0, distance_mode: hypocentral, delay_mode: absolute, amplitude_gain: 1.44}
+model: {hidden_dim: 128, num_layers: 3, num_tcn_blocks: 6, transformer_num_layers: 3, dropout: 0.2, use_meta: true}
+paths:
+  data_path: data/gnss_events_matched.gcmt.npz
+  output_dir: outputs_experiments_v2
+  logs_dir: outputs_experiments_v2/logs
+  models_dir: outputs_experiments_v2/models
+  results_dir: outputs_experiments_v2/results
+training:
+  loss_name: stf_rate
+  rate_representation: log1p
+  random_seed: 42
+  batch_size: 64
+  epochs: 200
+  learning_rate: 0.0001
+  weight_decay: 1.0e-05
+  grad_clip_norm: 1.0
+  split_protocol: grouped_event
+  validation_event_fraction: 0.15
+  test_event_fraction: 0.0
+  event_balanced_sampling: true
+  early_stop_metric: event_mae_catalog
+  early_stop_patience: 50
+  early_stop_min_delta: 0.0001
+  stf_rate_loss:
+    lambda_MSE: 1.0
+    lambda_synth: 0.5
+    lambda_mag: 1.0
+    lambda_shape: 0.1
+    include_intermediate_field: false
+    include_far_field_P: true
+    include_far_field_S: true
+    include_intermediate_field_P: true
+    include_intermediate_field_S: true
+    radiation_pattern_mode: full
+evaluation: {primary_reference: catalog, secondary_reference: stf_native, aggregation: event_median, station_thresholds_cm: [0.0, 1.0, 2.0], external_role: validation}

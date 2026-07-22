@@ -14,7 +14,12 @@ from src.data.records_v2 import (
     _iter_normalized_station_records,
 )
 from src.data.sample_builder import SampleRejected, build_station_sample
-from src.data.stf import ProcessedSTF, STFWindowTooShort, resample_source_stf
+from src.data.stf import (
+    ProcessedSTF,
+    STFWindowTooShort,
+    resample_source_stf,
+    scale_stf_to_catalog_magnitude,
+)
 from src.data.waveform import waveform_config_from_v2
 from src.utils.config_v2 import (
     stf_m_ref_from_config,
@@ -239,9 +244,27 @@ class CorrectedEarthquakeDataset(Dataset):
             has_stf = False
         else:
             processed_stf, stf_path = event_stf
-            stf = processed_stf.rate_nm_per_s.astype(np.float32)
+            magnitude_target = str(
+                self.config["dataset"]["stf"].get(
+                    "magnitude_target",
+                    "stf_native",
+                )
+            )
+            if magnitude_target == "stf_native":
+                target_rate = processed_stf.rate_nm_per_s
+            elif magnitude_target == "catalog":
+                target_rate = scale_stf_to_catalog_magnitude(
+                    processed_stf.rate_nm_per_s,
+                    dt_sec=processed_stf.dt_sec,
+                    magnitude_catalog=record.magnitude_catalog,
+                )
+            else:
+                raise ValueError(
+                    f"unknown magnitude_target: {magnitude_target}"
+                )
+            stf = target_rate.astype(np.float32)
             stf_log = np.log10(
-                1.0 + processed_stf.rate_nm_per_s / self.stf_m_ref
+                1.0 + stf / self.stf_m_ref
             ).astype(np.float32)
             stf_dt_sec = processed_stf.dt_sec
             mw_stf_native = processed_stf.mw_native

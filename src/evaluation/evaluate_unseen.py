@@ -42,6 +42,7 @@ def _apply_pub_style() -> None:
 from src.baseline.scaling_laws import predict_mw
 from src.data.external_records import record_from_external_bundle
 from src.data.metadata import build_metadata_tensor
+from src.data.metadata import metadata_distance_from_config
 from src.data.sample_builder import SampleRejected, build_station_sample
 from src.data.waveform import WaveformConfig, waveform_config_from_v2
 from src.evaluation.evaluate import (
@@ -454,6 +455,7 @@ def write_unseen_event_outputs(
     event_rows: list[dict[str, Any]],
     panel_rows: list[dict[str, Any]] | None = None,
     panel_top_n: int = 4,
+    save_plots: bool = True,
 ) -> dict[str, Any]:
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -475,7 +477,7 @@ def write_unseen_event_outputs(
             writer.writeheader()
             writer.writerows(event_rows)
 
-    if station_rows:
+    if save_plots and station_rows:
         _apply_pub_style()
         fig, ax = plt.subplots(figsize=(5.5, 5.0))
         palette = _OKABE_ITO
@@ -506,7 +508,7 @@ def write_unseen_event_outputs(
         fig.savefig(station_scatter, dpi=300, bbox_inches="tight")
         plt.close(fig)
 
-    if event_rows:
+    if save_plots and event_rows:
         _apply_pub_style()
         labels = [str(row["event"]) for row in event_rows]
         x = np.arange(len(labels), dtype=float)
@@ -531,7 +533,7 @@ def write_unseen_event_outputs(
 
     station_panels: dict[str, list[Path]] = {}
     event_mw_figures: dict[str, Path] = {}
-    if panel_rows:
+    if save_plots and panel_rows:
         station_panels_dir.mkdir(parents=True, exist_ok=True)
         event_mw_dir = output_path / "event_mw_figures"
         event_mw_dir.mkdir(parents=True, exist_ok=True)
@@ -609,6 +611,7 @@ def evaluate_unseen_events(
     model_dir: str | Path,
     output_dir: str | Path,
     radial_peak_min_cm_override: float | None = None,
+    save_plots: bool = True,
 ) -> dict[str, Any]:
     model_path = Path(model_dir) / "best_model.pth"
     config_path = Path(model_dir) / "config.yaml"
@@ -667,8 +670,23 @@ def evaluate_unseen_events(
                     continue
                 radial = torch.tensor(sample["radial"], dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
                 radial = _ensure_time_steps(radial, time_steps)
+                source_distance_tensor = torch.tensor(
+                    [sample["source_distance_m"]],
+                    dtype=torch.float32,
+                    device=device,
+                )
+                epicentral_distance_tensor = torch.tensor(
+                    [sample["epicentral_distance_m"]],
+                    dtype=torch.float32,
+                    device=device,
+                )
+                metadata_distance = metadata_distance_from_config(
+                    config,
+                    source_distance_m=source_distance_tensor,
+                    epicentral_distance_m=epicentral_distance_tensor,
+                )
                 meta = build_metadata_tensor(
-                    torch.tensor([sample["source_distance_m"]], dtype=torch.float32, device=device),
+                    metadata_distance,
                     torch.tensor([sample["theta_deg"]], dtype=torch.float32, device=device),
                     torch.tensor([sample["azimuth_deg"]], dtype=torch.float32, device=device),
                 )
@@ -775,6 +793,7 @@ def evaluate_unseen_events(
         station_rows=station_rows,
         event_rows=event_rows,
         panel_rows=panel_rows,
+        save_plots=save_plots,
     )
     metrics = summarize_predictions(
         station_rows,
@@ -795,6 +814,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--event-dir", action="append", required=True, help="外部事件目录，可重复传入")
     parser.add_argument("--output-dir", required=True, help="结果输出目录")
     parser.add_argument("--radial-peak-min-cm", type=float, default=None, help="可选，覆盖径向峰值阈值；设为 0 可保留全部台站")
+    parser.add_argument("--no-plots", action="store_true", help="仅写 CSV 和指标，不生成图件")
     return parser
 
 
@@ -805,6 +825,7 @@ def main() -> None:
         model_dir=args.model_dir,
         output_dir=args.output_dir,
         radial_peak_min_cm_override=args.radial_peak_min_cm,
+        save_plots=not args.no_plots,
     )
     print(f"台站级结果: {result['station_csv']}")
     print(f"事件级结果: {result['event_csv']}")

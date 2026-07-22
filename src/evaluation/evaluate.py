@@ -15,6 +15,7 @@ from src.models.model import PINNModel
 from src.data.data_loader import get_data_loaders
 from src.data.loaders_v2 import get_data_loaders_v2
 from src.data.metadata import build_metadata_tensor
+from src.data.metadata import metadata_distance_from_config
 from src.evaluation.metrics import (
     aggregate_event_predictions,
     summarize_predictions,
@@ -253,11 +254,23 @@ def evaluate(
                 if pipeline_version == 2
                 else dt_batch
             )
-            metadata_distance_m = (
+            source_metadata_distance_m = (
                 distance_m.to(device)
                 if distance_m is not None
                 else torch.ones(radial.size(0), device=device)
             )
+            if pipeline_version == 2:
+                if epicentral_distance_m is None:
+                    raise ValueError(
+                        "v2 evaluation requires epicentral_distance_m"
+                    )
+                metadata_distance_m = metadata_distance_from_config(
+                    config,
+                    source_distance_m=source_metadata_distance_m,
+                    epicentral_distance_m=epicentral_distance_m.to(device),
+                )
+            else:
+                metadata_distance_m = source_metadata_distance_m
             meta = build_metadata_tensor(metadata_distance_m, theta_deg, azimuth_deg)
             rate_log = model(radial, meta=meta)
             dot_m0 = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)
@@ -594,6 +607,10 @@ def evaluate(
             dt,
         )
         distance_m = sample_batch.get('source_distance_m' if pipeline_version == 2 else 'distance', None)
+        epicentral_distance_m = sample_batch.get(
+            'epicentral_distance_m',
+            None,
+        )
         magnitude_true = sample_batch.get(
             'magnitude_catalog' if pipeline_version == 2 else 'magnitude',
             None,
@@ -604,11 +621,23 @@ def evaluate(
             'azimuth_deg' if pipeline_version == 2 else 'phi_deg',
             torch.zeros(radial.size(0)),
         ).to(device).view(-1)
-        metadata_distance_m = (
+        source_metadata_distance_m = (
             distance_m.to(device)
             if distance_m is not None
             else torch.ones(radial.size(0), device=device)
         )
+        if pipeline_version == 2:
+            if epicentral_distance_m is None:
+                raise ValueError(
+                    "v2 evaluation requires epicentral_distance_m"
+                )
+            metadata_distance_m = metadata_distance_from_config(
+                config,
+                source_distance_m=source_metadata_distance_m,
+                epicentral_distance_m=epicentral_distance_m.to(device),
+            )
+        else:
+            metadata_distance_m = source_metadata_distance_m
         meta_s = build_metadata_tensor(metadata_distance_m, theta_deg_s, azimuth_deg_s)
         rate_log = model(radial, meta=meta_s)
         dot_m0_pred = stf_m_ref * (torch.pow(10.0, rate_log) - 1.0)

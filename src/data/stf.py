@@ -33,6 +33,37 @@ def moment_to_mw(moment_nm: float) -> float:
     return (2.0 / 3.0) * (math.log10(float(moment_nm)) - 9.1)
 
 
+def mw_to_moment(magnitude: float) -> float:
+    if (
+        isinstance(magnitude, bool)
+        or not isinstance(magnitude, Real)
+        or not math.isfinite(float(magnitude))
+    ):
+        raise ValueError("magnitude must be finite")
+    return 10.0 ** (1.5 * float(magnitude) + 9.1)
+
+
+def scale_stf_to_catalog_magnitude(
+    rate_nm_per_s: np.ndarray,
+    *,
+    dt_sec: float,
+    magnitude_catalog: float,
+) -> np.ndarray:
+    rate = np.asarray(rate_nm_per_s, dtype=np.float64)
+    dt = _finite_real(dt_sec, "dt_sec")
+    if rate.ndim != 1 or rate.size == 0:
+        raise ValueError("rate_nm_per_s must be a nonempty one-dimensional array")
+    if not np.all(np.isfinite(rate)) or np.any(rate < 0.0):
+        raise ValueError("rate_nm_per_s must be finite and nonnegative")
+    if dt <= 0.0:
+        raise ValueError("dt_sec must be positive")
+    grid_moment = float(np.sum(rate) * dt)
+    if not math.isfinite(grid_moment) or grid_moment <= 0.0:
+        raise ValueError("STF grid moment must be positive and finite")
+    target_moment = mw_to_moment(magnitude_catalog)
+    return rate * (target_moment / grid_moment)
+
+
 def _finite_real(value: object, name: str) -> float:
     if (
         isinstance(value, bool)

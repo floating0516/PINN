@@ -3,6 +3,25 @@ from __future__ import annotations
 import torch
 
 
+def metadata_distance_from_config(
+    config: dict,
+    *,
+    source_distance_m: torch.Tensor,
+    epicentral_distance_m: torch.Tensor,
+) -> torch.Tensor:
+    mode = str(
+        (config.get("geometry", {}) or {}).get(
+            "network_distance",
+            "hypocentral",
+        )
+    ).lower()
+    if mode == "hypocentral":
+        return source_distance_m
+    if mode == "epicentral":
+        return epicentral_distance_m
+    raise ValueError(f"unsupported geometry.network_distance: {mode}")
+
+
 def build_metadata_tensor(
     source_distance_m: torch.Tensor,
     takeoff_angle_deg: torch.Tensor,

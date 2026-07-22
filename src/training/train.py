@@ -6,6 +6,7 @@ import yaml
 import os
 import csv
 import json
+import math
 import random
 import sys
 from pathlib import Path
@@ -19,6 +20,11 @@ sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 from src.models.model import PINNModel
 from src.data.data_loader import get_data_loaders
 from src.data.metadata import build_metadata_tensor
+from src.data.metadata import metadata_distance_from_config
+from src.evaluation.metrics import (
+    aggregate_event_predictions,
+    summarize_predictions,
+)
 from src.training.physics import PhysicsLoss
 from src.training.loss_stf_rate import STFRateWaveformLoss
 from src.training.loss_stf_rate_v2 import (
@@ -74,6 +80,23 @@ def _build_stf_rate_criterion(
     return STFRateWaveformLoss(config).to(device)
 
 
+def _select_early_stop_value(
+    metric: str,
+    *,
+    val_loss: float,
+    station_mw_mae: float,
+    event_mae_catalog: float,
+) -> float:
+    values = {
+        "val_loss": val_loss,
+        "mw_mae": station_mw_mae,
+        "event_mae_catalog": event_mae_catalog,
+    }
+    if metric not in values:
+        raise ValueError(f"unsupported training.early_stop_metric: {metric}")
+    return float(values[metric])
+
+
 def _prepare_v2_batch(
     batch: dict,
     config: dict,
@@ -81,6 +104,10 @@ def _prepare_v2_batch(
 ) -> _PreparedV2Batch:
     radial = batch["radial"].to(device)
     source_distance_m = batch["source_distance_m"].to(device)
+    epicentral_distance_m = batch.get(
+        "epicentral_distance_m",
+        batch["source_distance_m"],
+    ).to(device)
     theta_deg = batch["theta_deg"].to(device)
     azimuth_deg = batch["azimuth_deg"].to(device)
     phi_slip_deg = batch["phi_slip_deg"].to(device)
@@ -98,8 +125,13 @@ def _prepare_v2_batch(
         true_mag = batch["magnitude_catalog"].to(device)
     else:
         raise ValueError(f"unknown magnitude_target: {magnitude_target}")
+    metadata_distance_m = metadata_distance_from_config(
+        config,
+        source_distance_m=source_distance_m,
+        epicentral_distance_m=epicentral_distance_m,
+    )
     metadata = build_metadata_tensor(
-        source_distance_m,
+        metadata_distance_m,
         theta_deg,
         azimuth_deg,
     )
@@ -350,6 +382,7 @@ def _train_impl(
                     'Train_Phys_Loss',
                     'Val_Loss',
                     'Val_MAE',
+                    'Val_Event_MAE_Catalog',
                     'LR',
                 ]
             )
@@ -612,6 +645,7 @@ def _train_impl(
         val_mw_mae_total = 0.0
         val_seen = 0
         val_mw_seen = 0
+        val_event_station_rows: list[dict[str, object]] = []
         
         with torch.no_grad():
             for batch in val_loader:
@@ -698,6 +732,32 @@ def _train_impl(
                     if mw_diff.numel() > 0:
                         val_mw_mae_total += mw_diff.sum().item()
                         val_mw_seen += mw_diff.numel()
+                    if pipeline_version == 2:
+                        event_names = batch.get('event')
+                        catalog_magnitude = batch.get('magnitude_catalog')
+                        if event_names is not None and torch.is_tensor(
+                            catalog_magnitude
+                        ):
+                            catalog_values = catalog_magnitude.view(-1)
+                            for index, predicted_value in enumerate(
+                                pred_mw.view(-1)
+                            ):
+                                event_name = (
+                                    event_names[index]
+                                    if isinstance(event_names, (list, tuple))
+                                    else str(event_names)
+                                )
+                                val_event_station_rows.append(
+                                    {
+                                        'event': str(event_name),
+                                        'mw_pred': float(
+                                            predicted_value.detach().cpu()
+                                        ),
+                                        'mw_catalog': float(
+                                            catalog_values[index].detach().cpu()
+                                        ),
+                                    }
+                                )
 
                     if stf_true is not None:
                         if has_stf is None:
@@ -741,35 +801,67 @@ def _train_impl(
         avg_val_loss = val_loss_total / val_count
         avg_val_mae = val_mae_total / val_count
         avg_mw_mae = val_mw_mae_total / max(val_mw_seen, 1) if val_mw_seen > 0 else float('nan')
+        if val_event_station_rows:
+            validation_event_rows = aggregate_event_predictions(
+                val_event_station_rows,
+                reference_key='mw_catalog',
+            )
+            validation_event_metrics = summarize_predictions(
+                val_event_station_rows,
+                validation_event_rows,
+                reference_key='mw_catalog',
+            )
+            avg_event_mae_catalog = float(
+                validation_event_metrics['event_mae']
+            )
+        else:
+            avg_event_mae_catalog = float('nan')
         current_lr = optimizer.param_groups[0]['lr']
         
         mw_str = f" | Mw_MAE: {avg_mw_mae:.4f}" if val_mw_seen > 0 else ""
-        print(f"Epoch {epoch+1}/{epochs} | LR: {current_lr:.2e} | 训练损失: {avg_train_loss:.4f} (数据: {avg_train_data:.4f}, 物理: {avg_train_phys:.4f}) | 验证损失: {avg_val_loss:.4f}{mw_str}")
+        event_mw_str = (
+            f" | Event_MAE_Catalog: {avg_event_mae_catalog:.4f}"
+            if math.isfinite(avg_event_mae_catalog)
+            else ""
+        )
+        print(f"Epoch {epoch+1}/{epochs} | LR: {current_lr:.2e} | 训练损失: {avg_train_loss:.4f} (数据: {avg_train_data:.4f}, 物理: {avg_train_phys:.4f}) | 验证损失: {avg_val_loss:.4f}{mw_str}{event_mw_str}")
         
         # 追加日志
         with open(log_file, 'a', newline='') as f:
             writer = csv.writer(f)
-            writer.writerow([epoch+1, avg_train_loss, avg_train_data, avg_train_phys, avg_val_loss, avg_val_mae, current_lr])
+            writer.writerow([epoch+1, avg_train_loss, avg_train_data, avg_train_phys, avg_val_loss, avg_val_mae, avg_event_mae_catalog, current_lr])
         
         # 更新学习率（Warmup 后启用调度器）
         if epoch >= warmup_epochs:
             scheduler.step()
             
         # 保存最佳模型/早停计数
-        if es_metric == 'mw_mae' and val_mw_seen > 0:
-            # 使用 Mw MAE 作为早停指标
-            if avg_mw_mae < best_mw_mae - es_min_delta:
-                best_mw_mae = avg_mw_mae
+        early_stop_value = _select_early_stop_value(
+            str(es_metric),
+            val_loss=avg_val_loss,
+            station_mw_mae=avg_mw_mae,
+            event_mae_catalog=avg_event_mae_catalog,
+        )
+        if not math.isfinite(early_stop_value):
+            raise FloatingPointError(
+                f"non-finite early-stop metric {es_metric}"
+            )
+        if es_metric in {'mw_mae', 'event_mae_catalog'}:
+            if early_stop_value < best_mw_mae - es_min_delta:
+                best_mw_mae = early_stop_value
                 best_val_loss = avg_val_loss
                 best_model_path = models_dir / 'best_model.pth'
                 torch.save(model.state_dict(), best_model_path)
-                print(f"  已保存新的最佳模型权重！(Mw_MAE={avg_mw_mae:.4f})")
+                print(
+                    "  已保存新的最佳模型权重！"
+                    f"({es_metric}={early_stop_value:.4f})"
+                )
                 es_counter = 0
             else:
                 es_counter += 1
         else:
             # 使用 val_loss 作为早停指标
-            if avg_val_loss < best_val_loss - es_min_delta:
+            if early_stop_value < best_val_loss - es_min_delta:
                 best_val_loss = avg_val_loss
                 best_model_path = models_dir / 'best_model.pth'
                 torch.save(model.state_dict(), best_model_path)

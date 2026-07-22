@@ -9,7 +9,7 @@ from typing import Any
 
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Subset, WeightedRandomSampler
+from torch.utils.data import DataLoader, Dataset, Subset, WeightedRandomSampler
 
 from src.data.dataset_v2 import CorrectedEarthquakeDataset
 from src.data.splits import (
@@ -161,9 +161,25 @@ def get_data_loaders_v2(
     config: dict[str, Any],
     *,
     leave_out_event: str | None = None,
+    max_events: int | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader, dict[str, Any]]:
-    dataset = CorrectedEarthquakeDataset(_runtime_config(config))
-    events = [str(sample["event"]) for sample in dataset.samples]
+    full_dataset = CorrectedEarthquakeDataset(_runtime_config(config))
+    full_events = [str(sample["event"]) for sample in full_dataset.samples]
+    dataset: Dataset = full_dataset
+    events = full_events
+    if max_events is not None:
+        if isinstance(max_events, bool) or int(max_events) != max_events or max_events < 2:
+            raise ValueError("max_events must be an integer of at least 2")
+        selected_events = set(sorted(set(full_events))[: int(max_events)])
+        selected_indices = [
+            index
+            for index, event in enumerate(full_events)
+            if event in selected_events
+        ]
+        if len(selected_events) < 2:
+            raise ValueError("max_events retained fewer than two events")
+        dataset = Subset(full_dataset, selected_indices)
+        events = [full_events[index] for index in selected_indices]
     training = config["training"]
     protocol = str(training["split_protocol"])
     validation_fraction = float(training["validation_event_fraction"])
