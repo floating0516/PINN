@@ -2,6 +2,7 @@ import copy
 import inspect
 from pathlib import Path
 
+import pytest
 import torch
 import yaml
 
@@ -63,12 +64,14 @@ def test_v2_loss_is_finite_differentiable_and_has_no_nonnegative_term() -> None:
     config = _v2_config()
     criterion = STFRateWaveformLossV2(config)
     pred_rate = torch.full((2, 4), 0.3, requires_grad=True)
+    pred_catalog_mw = torch.tensor([7.0, 8.0], requires_grad=True)
     stf_true = torch.ones(2, 4) * 1.0e18
     source_dt = torch.tensor([1.0, 2.0])
     true_magnitude = moment_magnitude_from_rate(stf_true, source_dt)
 
     loss, metrics = criterion(
         pred_rate,
+        pred_catalog_mw=pred_catalog_mw,
         radial_obs=torch.zeros(2, 1, 6),
         source_distance_m=torch.tensor([1000.0, 2000.0]),
         theta_deg=torch.tensor([30.0, 45.0]),
@@ -90,15 +93,80 @@ def test_v2_loss_is_finite_differentiable_and_has_no_nonnegative_term() -> None:
     assert torch.isfinite(loss)
     assert pred_rate.grad is not None
     assert torch.isfinite(pred_rate.grad).all()
+    assert pred_catalog_mw.grad is not None
+    assert torch.isfinite(pred_catalog_mw.grad).all()
     assert set(metrics) == {
         "L_total",
         "L_MSE",
         "L_synth",
         "L_mag",
         "L_shape",
+        "window_mw_mean",
     }
     assert not hasattr(criterion, "lambda_nonneg")
     assert criterion.amplitude_gain == 1.0
+
+
+def test_magnitude_loss_uses_scalar_head_not_window_integral() -> None:
+    criterion = STFRateWaveformLossV2(_v2_config())
+    pred_stf = torch.zeros(2, 300, requires_grad=True)
+    pred_catalog_mw = torch.tensor([7.0, 8.0], requires_grad=True)
+
+    loss, metrics = criterion(
+        pred_stf,
+        pred_catalog_mw=pred_catalog_mw,
+        radial_obs=torch.zeros(2, 1, 200),
+        source_distance_m=torch.tensor([1000.0, 2000.0]),
+        theta_deg=torch.tensor([30.0, 45.0]),
+        phi_slip_deg=torch.tensor([10.0, 20.0]),
+        source_dt_sec=torch.ones(2),
+        observation_dt_sec=torch.ones(2),
+        waveform_valid_mask=torch.ones(2, 200, dtype=torch.bool),
+        stf_true=torch.zeros(2, 300),
+        has_stf=torch.tensor([True, True]),
+        true_mag=torch.tensor([7.5, 8.5]),
+    )
+    loss.backward()
+
+    assert pred_catalog_mw.grad is not None
+    assert metrics["L_mag"] == pytest.approx(0.25)
+    assert metrics["window_mw_mean"] == pytest.approx(
+        float(
+            moment_magnitude_from_rate(pred_stf, torch.ones(2))
+            .mean()
+            .detach()
+        )
+    )
+
+
+def test_legacy_v2_integral_magnitude_loss_keeps_rate_gradient() -> None:
+    config = _v2_config()
+    config.pop("workflow")
+    config["physics"]["delay_mode"] = "absolute"
+    config["training"]["stf_rate_loss"].update(
+        lambda_MSE=0.0,
+        lambda_synth=0.0,
+        lambda_mag=1.0,
+        lambda_shape=0.0,
+    )
+    criterion = STFRateWaveformLossV2(config)
+    pred_stf = torch.full((1, 4), 0.3, requires_grad=True)
+
+    loss, _ = criterion(
+        pred_stf,
+        radial_obs=torch.zeros(1, 1, 6),
+        source_distance_m=torch.tensor([1000.0]),
+        theta_deg=torch.tensor([30.0]),
+        phi_slip_deg=torch.tensor([10.0]),
+        source_dt_sec=torch.ones(1),
+        observation_dt_sec=torch.ones(1),
+        waveform_valid_mask=torch.ones(1, 6, dtype=torch.bool),
+        true_mag=torch.tensor([7.5]),
+    )
+    loss.backward()
+
+    assert pred_stf.grad is not None
+    assert torch.count_nonzero(pred_stf.grad) > 0
 
 
 def test_v2_batch_preparation_uses_explicit_fields() -> None:

@@ -346,7 +346,7 @@ git commit -m "feat: freeze within-event station splits"
 - Modify: `tests/test_forward_operator.py`
 - Modify: `tests/test_stf_rate_loss_v2.py`
 
-- [ ] **Step 1: Write failing dual-head and loss tests**
+- [x] **Step 1: Write failing dual-head and loss tests**
 
 ```python
 def _active_config() -> dict:
@@ -415,13 +415,13 @@ def test_p_aligned_forward_uses_zero_p_and_relative_s_delay() -> None:
     )
 ```
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run: `source /home/lihe/.config/pinn/server.env && "$PINN_ENV/bin/python" -m pytest tests/test_model_forward.py tests/test_forward_operator.py tests/test_stf_rate_loss_v2.py -q`
 
 Expected: FAIL because `predict_heads`, the scalar head, and P-aligned loss are absent.
 
-- [ ] **Step 3: Implement the shared encoder and dual heads**
+- [x] **Step 3: Implement the shared encoder and dual heads**
 
 ```python
 @dataclass(frozen=True)
@@ -452,13 +452,13 @@ initialized from `model.catalog_mw_initial_bias=8.0`; it remains unconstrained
 after initialization. Legacy models without `predict_catalog_mw` do not create
 the head, preserving historical state-dict compatibility.
 
-- [ ] **Step 4: Implement P-zero/S-relative synthesis and scalar magnitude loss**
+- [x] **Step 4: Implement P-zero/S-relative synthesis and scalar magnitude loss**
 
 `STFRateWaveformLossV2.forward` receives required `pred_catalog_mw` in the active
 workflow. `L_mag` is MSE against finite catalog Mw. The detached window integral
 is returned as `window_mw_mean`; it never enters `L_mag`.
 
-- [ ] **Step 5: Verify GREEN and commit**
+- [x] **Step 5: Verify GREEN and commit**
 
 Run the focused command from Step 2. Expected: all focused tests pass and every
 active model parameter receives gradient from the combined loss.

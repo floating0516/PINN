@@ -1,7 +1,15 @@
+from dataclasses import dataclass
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
+
+
+@dataclass(frozen=True)
+class PINNPrediction:
+    stf_encoded: torch.Tensor
+    catalog_mw: torch.Tensor
+
 
 class PINNModel(nn.Module):
     """
@@ -105,6 +113,20 @@ class PINNModel(nn.Module):
         elif rate_representation == 'log1p':
             rate_head_layers.append(nn.ReLU())
         self.rate_head = nn.Sequential(*rate_head_layers)
+        if bool(config['model'].get('predict_catalog_mw', False)):
+            magnitude_hidden = max(16, self.hidden_dim // 4)
+            self.magnitude_head: nn.Sequential | None = nn.Sequential(
+                nn.Linear(self.hidden_dim, magnitude_hidden),
+                nn.GELU(),
+                nn.Dropout(self.dropout_p),
+                nn.Linear(magnitude_hidden, 1),
+            )
+            nn.init.constant_(
+                self.magnitude_head[-1].bias,
+                float(config['model'].get('catalog_mw_initial_bias', 8.0)),
+            )
+        else:
+            self.magnitude_head = None
 
     def _resize_source_time(self, seq_time: torch.Tensor) -> torch.Tensor:
         if (
@@ -119,18 +141,11 @@ class PINNModel(nn.Module):
             align_corners=False,
         ).transpose(1, 2)
 
-    def forward(self, x: torch.Tensor, meta: Optional[torch.Tensor] = None) -> torch.Tensor:
-        """
-        前向计算：从径向波形（及可选元数据）到矩率序列。
-
-        参数
-        - x:    (B, 1, T) 归一或尺度调整后的径向分量
-        - meta: (B, 5) 可选元数据 [log(dist), sin(θ), cos(θ), sin(φ), cos(φ)]
-
-        返回
-        - (B, T) 预测矩率序列（log1p 或 linear 编码）
-        """
-        # 特征嵌入
+    def _encode_sequence(
+        self,
+        x: torch.Tensor,
+        meta: Optional[torch.Tensor],
+    ) -> torch.Tensor:
         feat = self.embed(x)                 # (B, C, T)
         for block in self.tcn_blocks:
             feat = block(feat)               # (B, C, T)
@@ -145,13 +160,37 @@ class PINNModel(nn.Module):
         if self.transformer is not None:
             seq = self.transformer(seq)      # (B, T, C)
         seq = self.post_transformer_norm(seq)  # LayerNorm 稳定输出
-        feat = seq.transpose(1, 2)           # (B, C, T)
+        return seq
 
-        # 逐时刻回归矩率序列
-        seq_time = feat.transpose(1, 2)      # (B, T, C)
-        seq_time = self._resize_source_time(seq_time)
-        rate = self.rate_head(seq_time)      # (B, T, 1)
-        return rate.squeeze(-1)              # (B, T)
+    def _predict_stf(self, sequence: torch.Tensor) -> torch.Tensor:
+        sequence = self._resize_source_time(sequence)
+        return self.rate_head(sequence).squeeze(-1)
+
+    def predict_heads(
+        self,
+        x: torch.Tensor,
+        meta: Optional[torch.Tensor] = None,
+    ) -> PINNPrediction:
+        if self.magnitude_head is None:
+            raise RuntimeError("catalog magnitude head is disabled")
+        sequence = self._encode_sequence(x, meta)
+        return PINNPrediction(
+            stf_encoded=self._predict_stf(sequence),
+            catalog_mw=self.magnitude_head(sequence.mean(dim=1)).squeeze(-1),
+        )
+
+    def forward(self, x: torch.Tensor, meta: Optional[torch.Tensor] = None) -> torch.Tensor:
+        """
+        前向计算：从径向波形（及可选元数据）到矩率序列。
+
+        参数
+        - x:    (B, 1, T) 归一或尺度调整后的径向分量
+        - meta: (B, 5) 可选元数据 [log(dist), sin(θ), cos(θ), sin(φ), cos(φ)]
+
+        返回
+        - (B, T) 预测矩率序列（log1p 或 linear 编码）
+        """
+        return self._predict_stf(self._encode_sequence(x, meta))
 
     def debug_forward(self, x: torch.Tensor) -> dict:
         shapes = {}

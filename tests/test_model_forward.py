@@ -108,6 +108,54 @@ def test_output_length_can_differ_from_input_length():
     assert output.shape == (2, 300)
 
 
+def test_predict_heads_returns_station_stf_and_catalog_magnitude() -> None:
+    config = yaml.safe_load(
+        Path("configs/config_v2.yaml").read_text(encoding="utf-8")
+    )
+    model = PINNModel(config).eval()
+    waveform = torch.randn(3, 1, 200)
+    metadata = _make_meta(3, torch.device("cpu"))
+
+    with torch.no_grad():
+        prediction = model.predict_heads(waveform, meta=metadata)
+        legacy_output = model(waveform, meta=metadata)
+
+    assert prediction.stf_encoded.shape == (3, 300)
+    assert prediction.catalog_mw.shape == (3,)
+    assert torch.equal(prediction.stf_encoded, legacy_output)
+
+
+def test_catalog_magnitude_head_bias_and_gradient_flow() -> None:
+    config = yaml.safe_load(
+        Path("configs/config_v2.yaml").read_text(encoding="utf-8")
+    )
+    model = PINNModel(config).train()
+    final_linear = model.magnitude_head[-1]
+
+    assert torch.equal(final_linear.bias, torch.tensor([8.0]))
+
+    prediction = model.predict_heads(
+        torch.randn(2, 1, 200),
+        meta=_make_meta(2, torch.device("cpu")),
+    )
+    (prediction.stf_encoded.mean() + prediction.catalog_mw.mean()).backward()
+
+    missing = [
+        name
+        for name, parameter in model.named_parameters()
+        if parameter.requires_grad and parameter.grad is None
+    ]
+    assert missing == []
+
+
+def test_legacy_model_has_no_catalog_magnitude_head() -> None:
+    model = PINNModel(_make_config())
+
+    assert model.magnitude_head is None
+    with pytest.raises(RuntimeError, match="disabled"):
+        model.predict_heads(torch.randn(1, 1, 20))
+
+
 def test_debug_forward_uses_v2_output_length():
     config = yaml.safe_load(
         Path("configs/config_v2.yaml").read_text(encoding="utf-8")

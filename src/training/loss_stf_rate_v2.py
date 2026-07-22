@@ -7,6 +7,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.physics.travel_time import (
+    ConstantVelocityTravelTime,
+    travel_time_from_config,
+)
 from src.training.time_sampling import sample_source_history
 from src.utils.config_v2 import stf_m_ref_from_config, validate_config_v2
 
@@ -60,8 +64,7 @@ def forward_displacement_from_rate(
     observation_dt_sec: torch.Tensor,
     observation_steps: int,
     source_distance_m: torch.Tensor,
-    alpha: float,
-    beta: float,
+    travel_time: ConstantVelocityTravelTime,
     C_int_P: torch.Tensor,
     C_int_S: torch.Tensor,
     C_far_P: torch.Tensor,
@@ -75,8 +78,6 @@ def forward_displacement_from_rate(
 ) -> torch.Tensor:
     if rate_hat.ndim != 2 or not rate_hat.is_floating_point():
         raise ValueError("rate_hat must have shape (batch, source_time)")
-    if alpha <= 0.0 or beta <= 0.0:
-        raise ValueError("alpha and beta must be positive")
     batch_size = rate_hat.shape[0]
     source_dt = _batch_vector(
         source_dt_sec,
@@ -103,8 +104,9 @@ def forward_displacement_from_rate(
         rate_hat * source_dt.reshape(-1, 1),
         dim=1,
     )
-    p_delay_sec = source_distance / float(alpha)
-    s_delay_sec = source_distance / float(beta)
+    delays = travel_time.delays(source_distance)
+    p_delay_sec = torch.zeros_like(delays.p_sec)
+    s_delay_sec = delays.s_after_p_sec
     rate_p = sample_source_history(
         rate_hat,
         source_dt,
@@ -271,8 +273,7 @@ def pinn_loss_stf_rate_v2(
     observation_dt_sec: torch.Tensor,
     source_distance_m: torch.Tensor,
     waveform_valid_mask: torch.Tensor,
-    alpha: float,
-    beta: float,
+    travel_time: ConstantVelocityTravelTime,
     rho: float,
     theta_deg: torch.Tensor,
     phi_slip_deg: torch.Tensor,
@@ -283,6 +284,7 @@ def pinn_loss_stf_rate_v2(
     lambda_shape: float,
     has_ref: torch.Tensor | None,
     true_mag: torch.Tensor | None,
+    pred_catalog_mw: torch.Tensor | None,
     include_intermediate: bool,
     radiation_mode: str,
     include_far_P: bool,
@@ -320,8 +322,8 @@ def pinn_loss_stf_rate_v2(
             name="source_distance_m",
         ),
         rho,
-        alpha,
-        beta,
+        travel_time.alpha_m_per_s,
+        travel_time.beta_m_per_s,
         *radiation,
         amplitude_gain=amplitude_gain,
     )
@@ -331,8 +333,7 @@ def pinn_loss_stf_rate_v2(
         observation_dt_sec,
         u_obs.shape[1],
         source_distance_m,
-        alpha,
-        beta,
+        travel_time,
         *coefficients,
         include_intermediate=include_intermediate,
         include_far_P=include_far_P,
@@ -364,11 +365,21 @@ def pinn_loss_stf_rate_v2(
             rate_ref_physical[reference_mask],
         )
 
+    window_magnitude = moment_magnitude_from_rate(
+        rate_hat,
+        source_dt_sec,
+    )
     L_mag = rate_hat.new_tensor(0.0)
     if true_mag is not None:
-        predicted_magnitude = moment_magnitude_from_rate(
-            rate_hat,
-            source_dt_sec,
+        predicted_magnitude = (
+            window_magnitude
+            if pred_catalog_mw is None
+            else _batch_vector(
+                pred_catalog_mw,
+                batch_size=batch_size,
+                reference=rate_hat,
+                name="pred_catalog_mw",
+            )
         )
         finite = torch.isfinite(true_mag.reshape(-1))
         if torch.any(finite):
@@ -389,6 +400,7 @@ def pinn_loss_stf_rate_v2(
         "L_synth": float(L_synth.detach().cpu()),
         "L_mag": float(L_mag.detach().cpu()),
         "L_shape": float(L_shape.detach().cpu()),
+        "window_mw_mean": float(window_magnitude.detach().mean().cpu()),
     }
     return total_loss, metrics
 
@@ -411,6 +423,11 @@ class STFRateWaveformLossV2(nn.Module):
         self.rho = float(physics["rho"])
         self.alpha = float(physics["alpha"])
         self.beta = float(physics["beta"])
+        self.travel_time = (
+            travel_time_from_config(config)
+            if physics.get("travel_time_model") == "constant_velocity"
+            else ConstantVelocityTravelTime(self.alpha, self.beta)
+        )
         self.amplitude_gain = float(physics["amplitude_gain"])
         self.include_intermediate = bool(
             loss_config.get("include_intermediate_field", True)
@@ -450,6 +467,7 @@ class STFRateWaveformLossV2(nn.Module):
         self,
         pred_rate: torch.Tensor,
         *,
+        pred_catalog_mw: torch.Tensor | None = None,
         radial_obs: torch.Tensor,
         source_distance_m: torch.Tensor,
         theta_deg: torch.Tensor,
@@ -483,8 +501,7 @@ class STFRateWaveformLossV2(nn.Module):
             observation_dt_sec=observation_dt_sec,
             source_distance_m=source_distance_m,
             waveform_valid_mask=waveform_valid_mask,
-            alpha=self.alpha,
-            beta=self.beta,
+            travel_time=self.travel_time,
             rho=self.rho,
             theta_deg=theta_deg,
             phi_slip_deg=phi_slip_deg,
@@ -495,6 +512,7 @@ class STFRateWaveformLossV2(nn.Module):
             lambda_shape=self.lambda_shape,
             has_ref=has_stf,
             true_mag=true_mag,
+            pred_catalog_mw=pred_catalog_mw,
             include_intermediate=self.include_intermediate,
             radiation_mode=self.radiation_mode,
             include_far_P=self.include_far_P,

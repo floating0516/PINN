@@ -2,6 +2,7 @@ import inspect
 
 import torch
 
+from src.physics.travel_time import ConstantVelocityTravelTime
 from src.training.loss_stf_rate_v2 import (
     compute_physical_coefficients,
     forward_displacement_from_rate,
@@ -68,7 +69,7 @@ def test_fractional_sampling_preserves_source_gradient() -> None:
     assert torch.count_nonzero(source.grad) > 0
 
 
-def test_forward_operator_applies_absolute_fractional_p_delay() -> None:
+def test_p_aligned_forward_uses_zero_p_and_relative_s_delay() -> None:
     rate = torch.tensor([[0.0, 1.0, 0.0, 0.0]])
     zeros = torch.zeros(1)
     ones = torch.ones(1)
@@ -79,23 +80,24 @@ def test_forward_operator_applies_absolute_fractional_p_delay() -> None:
         observation_dt_sec=torch.tensor([1.0]),
         observation_steps=5,
         source_distance_m=torch.tensor([3.0]),
-        alpha=2.0,
-        beta=1.0,
+        travel_time=ConstantVelocityTravelTime(
+            alpha_m_per_s=3.0,
+            beta_m_per_s=1.5,
+        ),
         C_int_P=zeros,
         C_int_S=zeros,
         C_far_P=ones,
-        C_far_S=zeros,
+        C_far_S=ones,
         include_intermediate=False,
         include_far_P=True,
-        include_far_S=False,
+        include_far_S=True,
         include_intermediate_P=False,
         include_intermediate_S=False,
     )
 
-    assert torch.allclose(
+    assert torch.equal(
         displacement,
-        torch.tensor([[0.0, 0.0, 0.5, 0.5, 0.0]]),
-        atol=1.0e-6,
+        torch.tensor([[0.0, 1.0, 1.0, 0.0, 0.0]]),
     )
 
 
@@ -109,5 +111,8 @@ def test_v2_forward_signatures_use_source_distance_and_no_skip_branch() -> None:
 
     assert "source_distance_m" in forward_parameters
     assert "source_distance_m" in coefficient_parameters
+    assert "travel_time" in forward_parameters
+    assert "alpha" not in forward_parameters
+    assert "beta" not in forward_parameters
     assert "r_m" not in forward_parameters | coefficient_parameters
     assert "skip_delays" not in forward_parameters
