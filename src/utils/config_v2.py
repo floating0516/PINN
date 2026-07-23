@@ -105,11 +105,12 @@ def _validate_station_random_workflow(config: dict[str, Any]) -> None:
         ("training", "split_protocol"),
         "within_event_station",
     )
-    _require_value(
+    event_balanced_sampling = _required(
         config,
         ("training", "event_balanced_sampling"),
-        False,
     )
+    if not isinstance(event_balanced_sampling, bool):
+        raise ValueError("training.event_balanced_sampling must be boolean")
     if _as_int(config, ("training", "early_stop_patience")) != 0:
         raise ValueError("training.early_stop_patience 必须严格等于 0")
     checkpoint_metric = _required(

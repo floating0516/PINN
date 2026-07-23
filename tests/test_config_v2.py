@@ -167,6 +167,13 @@ def test_active_station_workflow_accepts_event_checkpoint_metric() -> None:
     validate_config_v2(config)
 
 
+def test_active_station_workflow_accepts_event_balanced_sampling() -> None:
+    config = _active_station_v2()
+    config["training"]["event_balanced_sampling"] = True
+
+    validate_config_v2(config)
+
+
 @pytest.mark.parametrize(
     ("path", "value", "message"),
     [
@@ -178,7 +185,7 @@ def test_active_station_workflow_accepts_event_checkpoint_metric() -> None:
         (("physics", "delay_mode"), "absolute", "delay_mode"),
         (("model", "predict_catalog_mw"), False, "predict_catalog_mw"),
         (("training", "split_protocol"), "grouped_event", "split_protocol"),
-        (("training", "event_balanced_sampling"), True, "event_balanced_sampling"),
+        (("training", "event_balanced_sampling"), "true", "event_balanced_sampling"),
         (("training", "early_stop_patience"), 50, "early_stop_patience"),
         (("training", "checkpoint_metric"), "val_loss", "checkpoint_metric"),
         (("evaluation", "external_role"), "validation", "external_role"),

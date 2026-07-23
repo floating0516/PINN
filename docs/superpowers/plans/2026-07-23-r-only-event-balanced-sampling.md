@@ -16,19 +16,19 @@
 - Modify: `tests/test_config_v2.py`
 - Modify: `src/utils/config_v2.py`
 
-- [ ] **Step 1: Write the focused failing test**
+- [x] **Step 1: Write the focused failing test**
 
 Add `test_active_station_workflow_accepts_event_balanced_sampling`, set the active workflow switch to `True`, and call `validate_config_v2`. Change the conflicting-value parametrization to reject the string `"true"` instead of the accepted boolean.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run the new test with the project environment loaded. Expected: FAIL because the active workflow currently requires `False` exactly.
 
-- [ ] **Step 3: Implement the minimal validator change**
+- [x] **Step 3: Implement the minimal validator change**
 
 Require `training.event_balanced_sampling` to be a boolean, accepting both `False` and `True`; preserve every other active-workflow invariant.
 
-- [ ] **Step 4: Verify GREEN narrowly**
+- [x] **Step 4: Verify GREEN narrowly**
 
 Run `tests/test_config_v2.py`, `test_event_balanced_weights_sum_equally_per_event`, and `test_grouped_loader_uses_balanced_sampler_and_manifest`. Expected: all selected tests pass.
 
@@ -37,11 +37,11 @@ Run `tests/test_config_v2.py`, `test_event_balanced_weights_sum_equally_per_even
 **Files:**
 - Create: `configs/experiments_v2/V2-USGS-EVENT-BALANCED.yaml`
 
-- [ ] **Step 1: Add the full USGS configuration**
+- [x] **Step 1: Add the full USGS configuration**
 
 Copy the verified phase-9 R-only config, keep `checkpoint_metric: station_mae_catalog`, and set only `event_balanced_sampling: true`.
 
-- [ ] **Step 2: Audit the scientific diff**
+- [x] **Step 2: Audit the scientific diff**
 
 Validate the YAML, compare it structurally with the phase-9 config, and assert that the only difference is `training.event_balanced_sampling`.
 
