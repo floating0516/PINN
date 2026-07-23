@@ -15,6 +15,10 @@ from scripts.data.build_usgs_magnitude_labels import (
     load_or_fetch_json,
     validate_publication_rows,
 )
+from scripts.evaluation.recompute_relabel_metrics import (
+    pair_prediction_rows,
+    summarize_paired_rows,
+)
 from src.data.magnitude_relabel import (
     AmbiguousUSGSMatch,
     LocalEvent,
@@ -675,3 +679,114 @@ def test_snapshot_blocks_unreviewed_conflict_then_accepts_versioned_review(tmp_p
         ),
     )
     assert result["source_counts"] == {"usgs_preferred": 1}
+
+
+def _comparison_labels() -> list[dict[str, object]]:
+    return [
+        {
+            "event": "A",
+            "mw_selected": 7.2,
+            "mw_source": "usgs_preferred",
+            "mw_source_rank": 1,
+            "mw_type": "mww",
+            "usgs_event_id": "us-a",
+        },
+        {
+            "event": "B",
+            "mw_selected": 7.1,
+            "mw_source": "gcmt",
+            "mw_source_rank": 3,
+            "mw_type": "Mw",
+            "usgs_event_id": "",
+        },
+    ]
+
+
+def test_prediction_pairing_preserves_rows_predictions_and_order() -> None:
+    predictions = [
+        {
+            "event": "B",
+            "station": "B1",
+            "mw_pred": "7.4",
+            "mw_catalog": "7.0",
+            "extra": "first",
+        },
+        {
+            "event": "A",
+            "station": "A1",
+            "mw_pred": "7.0",
+            "mw_catalog": "7.1",
+            "extra": "second",
+        },
+    ]
+
+    paired = pair_prediction_rows(
+        predictions,
+        _comparison_labels(),
+        prediction_key="mw_pred",
+        old_reference_key="mw_catalog",
+    )
+
+    assert [row["event"] for row in paired] == ["B", "A"]
+    assert [row["mw_pred"] for row in paired] == ["7.4", "7.0"]
+    assert [row["extra"] for row in paired] == ["first", "second"]
+    assert [row["mw_selected"] for row in paired] == [7.1, 7.2]
+    assert [row["label_delta"] for row in paired] == pytest.approx([0.1, 0.1])
+    assert predictions[0].keys() == {
+        "event",
+        "station",
+        "mw_pred",
+        "mw_catalog",
+        "extra",
+    }
+
+
+def test_prediction_pairing_rejects_duplicate_or_missing_label_events() -> None:
+    prediction = [{"event": "A", "mw_pred": 7.0, "mw_catalog": 7.1}]
+    with pytest.raises(ValueError, match="duplicate label event"):
+        pair_prediction_rows(
+            prediction,
+            [*_comparison_labels(), _comparison_labels()[0]],
+            prediction_key="mw_pred",
+            old_reference_key="mw_catalog",
+        )
+    with pytest.raises(ValueError, match="missing selected labels"):
+        pair_prediction_rows(
+            [{"event": "C", "mw_pred": 7.0, "mw_catalog": 7.1}],
+            _comparison_labels(),
+            prediction_key="mw_pred",
+            old_reference_key="mw_catalog",
+        )
+
+
+def test_paired_summary_reports_old_selected_and_source_metrics() -> None:
+    paired = pair_prediction_rows(
+        [
+            {"event": "A", "mw_pred": 7.0, "mw_catalog": 7.1},
+            {"event": "B", "mw_pred": 7.4, "mw_catalog": 7.0},
+        ],
+        _comparison_labels(),
+        prediction_key="mw_pred",
+        old_reference_key="mw_catalog",
+    )
+
+    result = summarize_paired_rows(paired, prediction_key="mw_pred")
+
+    assert result["old"] == pytest.approx(
+        {
+            "count": 2,
+            "mae": 0.25,
+            "rmse": math.sqrt((0.1**2 + 0.4**2) / 2.0),
+            "bias": 0.15,
+        }
+    )
+    assert result["selected"] == pytest.approx(
+        {
+            "count": 2,
+            "mae": 0.25,
+            "rmse": math.sqrt((0.2**2 + 0.3**2) / 2.0),
+            "bias": 0.05,
+        }
+    )
+    assert result["by_source"]["usgs_preferred"]["count"] == 1
+    assert result["by_source_rank"]["3"]["selected"]["mae"] == pytest.approx(0.3)
