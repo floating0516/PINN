@@ -246,6 +246,7 @@ def test_active_unseen_evaluation_uses_catalog_head(
     config = yaml.safe_load(
         Path("configs/config_v2.yaml").read_text(encoding="utf-8")
     )
+    config["model"]["input_components"] = ["radial", "tangential"]
     model_dir = tmp_path / "model"
     model_dir.mkdir()
     (model_dir / "config.yaml").write_text(
@@ -253,6 +254,8 @@ def test_active_unseen_evaluation_uses_catalog_head(
         encoding="utf-8",
     )
     (model_dir / "best_model.pth").write_bytes(b"checkpoint")
+
+    received_waveforms: list[torch.Tensor] = []
 
     class ScalarHeadModel:
         def __init__(self, _config):
@@ -269,6 +272,7 @@ def test_active_unseen_evaluation_uses_catalog_head(
 
         def predict_heads(self, waveform, meta=None):
             del meta
+            received_waveforms.append(waveform.detach().cpu())
             return PINNPrediction(
                 stf_encoded=torch.zeros(waveform.shape[0], 300),
                 catalog_mw=torch.full(
@@ -303,6 +307,7 @@ def test_active_unseen_evaluation_uses_catalog_head(
     )
     sample = {
         "radial": np.zeros(200, dtype=np.float32),
+        "tangential": np.full(200, 2.0, dtype=np.float32),
         "source_distance_m": 20_000.0,
         "epicentral_distance_m": 17_000.0,
         "theta_deg": 30.0,
@@ -332,6 +337,15 @@ def test_active_unseen_evaluation_uses_catalog_head(
     row = result["station_rows"][0]
     assert row["mw_pred"] == pytest.approx(7.3)
     assert row["mw_window_pred"] == pytest.approx(0.6)
+    assert received_waveforms[0].shape == (1, 2, 200)
+    torch.testing.assert_close(
+        received_waveforms[0][0, 0],
+        torch.zeros(200),
+    )
+    torch.testing.assert_close(
+        received_waveforms[0][0, 1],
+        torch.full((200,), 2.0),
+    )
 
 
 def test_external_adapter_matches_training_npz_preprocessing(tmp_path: Path):

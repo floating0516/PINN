@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
 
+from src.utils.config_v2 import waveform_input_components_from_config
+
 
 @dataclass(frozen=True)
 class PINNPrediction:
@@ -64,9 +66,11 @@ class PINNModel(nn.Module):
                 nn.GELU(),
             )
 
-        # 嵌入层：将原始径向分量映射到隐藏维度
+        # 嵌入层：将配置的波形分量映射到隐藏维度
+        self.input_components = waveform_input_components_from_config(config)
+        self.input_channels = len(self.input_components)
         self.embed = nn.Sequential(
-            nn.Conv1d(in_channels=1, out_channels=self.hidden_dim, kernel_size=7, padding=3),
+            nn.Conv1d(in_channels=self.input_channels, out_channels=self.hidden_dim, kernel_size=7, padding=3),
             nn.GELU(),
             nn.GroupNorm(num_groups=8, num_channels=self.hidden_dim),
         )

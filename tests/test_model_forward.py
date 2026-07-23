@@ -13,6 +13,7 @@ PINNModel 前向传播自动化测试，不依赖真实数据集或配置文件�
 7. transformer_num_layers 配置生效（层数变化导致参数量变化）
 """
 
+import copy
 import math
 from pathlib import Path
 import sys
@@ -123,6 +124,40 @@ def test_predict_heads_returns_station_stf_and_catalog_magnitude() -> None:
     assert prediction.stf_encoded.shape == (3, 300)
     assert prediction.catalog_mw.shape == (3,)
     assert torch.equal(prediction.stf_encoded, legacy_output)
+
+
+def test_rt_model_accepts_two_channels_and_backpropagates() -> None:
+    config = yaml.safe_load(
+        Path("configs/config_v2.yaml").read_text(encoding="utf-8")
+    )
+    config["model"]["input_components"] = ["radial", "tangential"]
+    model = PINNModel(config).train()
+    waveform = torch.randn(2, 2, 200, requires_grad=True)
+
+    prediction = model.predict_heads(
+        waveform,
+        meta=_make_meta(2, torch.device("cpu")),
+    )
+    (prediction.stf_encoded.mean() + prediction.catalog_mw.mean()).backward()
+
+    assert model.embed[0].in_channels == 2
+    assert waveform.grad is not None
+    assert torch.isfinite(waveform.grad).all()
+
+
+def test_radial_checkpoint_is_strictly_compatible_only_with_radial_config(
+) -> None:
+    radial_config = yaml.safe_load(
+        Path("configs/config_v2.yaml").read_text(encoding="utf-8")
+    )
+    radial_state = PINNModel(radial_config).state_dict()
+    PINNModel(radial_config).load_state_dict(radial_state, strict=True)
+
+    rt_config = copy.deepcopy(radial_config)
+    rt_config["model"]["input_components"] = ["radial", "tangential"]
+
+    with pytest.raises(RuntimeError, match="size mismatch"):
+        PINNModel(rt_config).load_state_dict(radial_state, strict=True)
 
 
 def test_catalog_magnitude_head_bias_and_gradient_flow() -> None:

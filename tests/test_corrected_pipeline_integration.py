@@ -403,6 +403,7 @@ def test_active_workflow_trains_reloads_and_evaluates_locked_station_split(
             "transformer_num_layers": 1,
             "dropout": 0.0,
             "use_meta": True,
+            "input_components": ["radial", "tangential"],
         }
     )
     config["paths"].update(

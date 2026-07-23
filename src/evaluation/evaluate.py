@@ -17,6 +17,7 @@ from src.data.data_loader import get_data_loaders
 from src.data.loaders_v2 import get_data_loaders_v2
 from src.data.metadata import build_metadata_tensor
 from src.data.metadata import metadata_distance_from_config
+from src.data.model_input import assemble_model_input
 from src.evaluation.metrics import (
     aggregate_event_predictions,
     summarize_predictions,
@@ -273,6 +274,14 @@ def evaluate(
         for batch in test_loader:
             radial = batch['radial'].to(device)
             radial = _ensure_time_steps(radial, input_time_steps)
+            model_input = (
+                _ensure_time_steps(
+                    assemble_model_input(batch, config).to(device),
+                    input_time_steps,
+                )
+                if pipeline_version == 2
+                else radial
+            )
             stf_true = batch.get('stf', None)
             has_stf = batch.get('has_stf', None)
             magnitude = batch.get(
@@ -321,7 +330,7 @@ def evaluate(
             meta = build_metadata_tensor(metadata_distance_m, theta_deg, azimuth_deg)
             prediction = _predict_outputs(
                 model,
-                radial,
+                model_input,
                 meta=meta,
                 stf_m_ref=stf_m_ref,
                 source_dt_sec=magnitude_dt_batch,
@@ -651,6 +660,14 @@ def evaluate(
         sample_batch = next(iter(test_loader))
         radial = sample_batch['radial'].to(device)
         radial = _ensure_time_steps(radial, input_time_steps)
+        model_input = (
+            _ensure_time_steps(
+                assemble_model_input(sample_batch, config).to(device),
+                input_time_steps,
+            )
+            if pipeline_version == 2
+            else radial
+        )
         stf_true = sample_batch.get('stf', None)
         dt = sample_batch.get(
             'waveform_dt_sec' if pipeline_version == 2 else 'dt',
@@ -711,7 +728,7 @@ def evaluate(
 
         sample_prediction = _predict_outputs(
             model,
-            radial,
+            model_input,
             meta=meta_s,
             stf_m_ref=stf_m_ref,
             source_dt_sec=source_dt,

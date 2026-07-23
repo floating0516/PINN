@@ -316,7 +316,7 @@ def _assert_backpropagates(config: dict[str, Any], train_loader: Any) -> None:
     active_workflow = config.get("workflow") == "station_random_shifted_stf"
     if active_workflow:
         heads = model.predict_heads(
-            prepared.radial,
+            prepared.model_input,
             meta=prepared.metadata,
         )
         prediction = heads.stf_encoded
@@ -326,7 +326,7 @@ def _assert_backpropagates(config: dict[str, Any], train_loader: Any) -> None:
         if not bool(torch.isfinite(pred_catalog_mw).all()):
             raise FloatingPointError("smoke catalog Mw prediction is non-finite")
     else:
-        prediction = model(prepared.radial, meta=prepared.metadata)
+        prediction = model(prepared.model_input, meta=prepared.metadata)
         pred_catalog_mw = None
     loss, metrics = criterion(
         prediction,

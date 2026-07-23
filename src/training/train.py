@@ -19,6 +19,7 @@ sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
 from src.models.model import PINNModel
 from src.data.data_loader import get_data_loaders
+from src.data.model_input import assemble_model_input
 from src.data.metadata import build_metadata_tensor
 from src.data.metadata import metadata_distance_from_config
 from src.evaluation.metrics import (
@@ -59,6 +60,7 @@ from src.utils.run_dirs import create_run_dir, make_run_id
 @dataclass(frozen=True)
 class _PreparedV2Batch:
     radial: torch.Tensor
+    model_input: torch.Tensor
     source_distance_m: torch.Tensor
     theta_deg: torch.Tensor
     phi_slip_deg: torch.Tensor
@@ -104,6 +106,7 @@ def _prepare_v2_batch(
     device: torch.device,
 ) -> _PreparedV2Batch:
     radial = batch["radial"].to(device)
+    model_input = assemble_model_input(batch, config).to(device)
     source_distance_m = batch["source_distance_m"].to(device)
     epicentral_distance_m = batch.get(
         "epicentral_distance_m",
@@ -139,6 +142,7 @@ def _prepare_v2_batch(
     )
     return _PreparedV2Batch(
         radial=radial,
+        model_input=model_input,
         source_distance_m=source_distance_m,
         theta_deg=theta_deg,
         phi_slip_deg=phi_slip_deg,
@@ -549,6 +553,7 @@ def _train_impl(
             if pipeline_version == 2:
                 prepared_v2 = _prepare_v2_batch(batch, config, device)
                 radial = prepared_v2.radial
+                model_input = prepared_v2.model_input
                 distance = prepared_v2.source_distance_m
                 magnitude = prepared_v2.true_mag
                 theta_deg = prepared_v2.theta_deg
@@ -558,6 +563,7 @@ def _train_impl(
                 meta = prepared_v2.metadata
             else:
                 radial = batch['radial'].to(device)
+                model_input = radial
                 vertical = batch['vertical'].to(device)
                 distance = batch['distance'].to(device)
                 magnitude = batch['magnitude'].to(device)
@@ -580,11 +586,11 @@ def _train_impl(
             
             # 前向计算
             if active_workflow:
-                prediction = model.predict_heads(radial, meta=meta)
+                prediction = model.predict_heads(model_input, meta=meta)
                 pred_log = prediction.stf_encoded
                 pred_catalog_mw = prediction.catalog_mw
             else:
-                pred_log = model(radial, meta=meta)  # (B, T)
+                pred_log = model(model_input, meta=meta)  # (B, T)
                 pred_catalog_mw = None
 
             # 统一使用 STF 积分 Mw 作为物理约束目标（与 evaluate.py 一致）
@@ -671,6 +677,7 @@ def _train_impl(
                 if pipeline_version == 2:
                     prepared_v2 = _prepare_v2_batch(batch, config, device)
                     radial = prepared_v2.radial
+                    model_input = prepared_v2.model_input
                     distance = prepared_v2.source_distance_m
                     magnitude = prepared_v2.true_mag
                     theta_deg = prepared_v2.theta_deg
@@ -680,6 +687,7 @@ def _train_impl(
                     meta = prepared_v2.metadata
                 else:
                     radial = batch['radial'].to(device)
+                    model_input = radial
                     vertical = batch['vertical'].to(device)
                     distance = batch['distance'].to(device)
                     magnitude = batch['magnitude'].to(device)
@@ -699,11 +707,11 @@ def _train_impl(
                     meta = build_metadata_tensor(distance, theta_deg, phi_deg)
 
                 if active_workflow:
-                    prediction = model.predict_heads(radial, meta=meta)
+                    prediction = model.predict_heads(model_input, meta=meta)
                     pred_log = prediction.stf_encoded
                     pred_catalog_mw = prediction.catalog_mw
                 else:
-                    pred_log = model(radial, meta=meta)
+                    pred_log = model(model_input, meta=meta)
                     pred_catalog_mw = None
                 
                 # 统一使用 STF 积分 Mw（与 evaluate.py 一致）

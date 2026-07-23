@@ -43,6 +43,7 @@ from src.baseline.scaling_laws import predict_mw
 from src.data.external_records import record_from_external_bundle
 from src.data.metadata import build_metadata_tensor
 from src.data.metadata import metadata_distance_from_config
+from src.data.model_input import assemble_model_input
 from src.data.sample_builder import SampleRejected, build_station_sample
 from src.data.waveform import WaveformConfig, waveform_config_from_v2
 from src.evaluation.evaluate import (
@@ -57,7 +58,10 @@ from src.evaluation.metrics import (
 )
 from src.models.model import PINNModel
 from src.training.physics import PhysicsLoss
-from src.utils.config_v2 import validate_config_on_startup
+from src.utils.config_v2 import (
+    validate_config_on_startup,
+    waveform_input_components_from_config,
+)
 from src.utils.device import get_preferred_device
 from src.visualization.visualize import set_srl_plot_style
 
@@ -664,6 +668,18 @@ def evaluate_unseen_events(
                     continue
                 radial = torch.tensor(sample["radial"], dtype=torch.float32, device=device).unsqueeze(0).unsqueeze(0)
                 radial = _ensure_time_steps(radial, time_steps)
+                component_tensors = {
+                    name: torch.as_tensor(
+                        sample[name],
+                        dtype=torch.float32,
+                        device=device,
+                    ).reshape(1, 1, -1)
+                    for name in waveform_input_components_from_config(config)
+                }
+                model_input = _ensure_time_steps(
+                    assemble_model_input(component_tensors, config),
+                    time_steps,
+                )
                 source_distance_tensor = torch.tensor(
                     [sample["source_distance_m"]],
                     dtype=torch.float32,
@@ -688,7 +704,7 @@ def evaluate_unseen_events(
                 source_dt = 1.0 / float(ds_cfg["sample_rate_hz"])
                 prediction = _predict_outputs(
                     model,
-                    radial,
+                    model_input,
                     meta=meta,
                     stf_m_ref=stf_m_ref,
                     source_dt_sec=torch.tensor([source_dt], device=device),

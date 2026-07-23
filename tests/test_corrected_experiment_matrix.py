@@ -125,6 +125,28 @@ def test_active_smoke_backpropagates_through_both_prediction_heads(
     _assert_backpropagates(config, [_prepared_batch()])
 
 
+def test_prepare_v2_batch_stacks_rt_but_keeps_radial_physics() -> None:
+    config = yaml.safe_load(
+        (PROJECT_ROOT / "configs/config_v2.yaml").read_text(encoding="utf-8")
+    )
+    config["model"]["input_components"] = ["radial", "tangential"]
+    batch = _prepared_batch()
+    batch["tangential"] = torch.full((1, 1, 200), 2.0)
+
+    prepared = _prepare_v2_batch(batch, config, torch.device("cpu"))
+
+    assert prepared.model_input.shape == (1, 2, 200)
+    assert prepared.radial.shape == (1, 1, 200)
+    torch.testing.assert_close(
+        prepared.model_input[:, 0],
+        prepared.radial[:, 0],
+    )
+    torch.testing.assert_close(
+        prepared.model_input[:, 1],
+        batch["tangential"][:, 0],
+    )
+
+
 def test_delta_metadata_changes_only_network_distance() -> None:
     config = {
         "geometry": {"network_distance": "epicentral"},
