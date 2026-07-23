@@ -19,6 +19,11 @@ from scripts.evaluation.recompute_relabel_metrics import (
     pair_prediction_rows,
     summarize_paired_rows,
 )
+from scripts.experiments.run_relabel_campaign import (
+    assert_split_assignment_matches,
+    evaluate_pilot_gate,
+    prepare_relabel_config,
+)
 from src.data.magnitude_relabel import (
     AmbiguousUSGSMatch,
     LocalEvent,
@@ -790,3 +795,67 @@ def test_paired_summary_reports_old_selected_and_source_metrics() -> None:
     )
     assert result["by_source"]["usgs_preferred"]["count"] == 1
     assert result["by_source_rank"]["3"]["selected"]["mae"] == pytest.approx(0.3)
+
+
+def test_relabel_config_changes_only_the_scalar_dataset_path() -> None:
+    frozen = {
+        "pipeline_version": 2,
+        "paths": {
+            "data_path": "data/gnss_events_matched.gcmt.npz",
+            "output_dir": "outputs",
+            "logs_dir": "outputs/logs",
+            "models_dir": "outputs/models",
+            "results_dir": "outputs/results",
+        },
+        "dataset": {"stf": {"path": "data/STF_SCARDEC"}},
+        "training": {"random_seed": 42, "epochs": 200},
+    }
+
+    prepared = prepare_relabel_config(frozen, "/data/candidate.npz")
+
+    assert prepared["paths"]["data_path"] == "/data/candidate.npz"
+    assert prepared["dataset"] == frozen["dataset"]
+    assert prepared["training"] == frozen["training"]
+    assert frozen["paths"]["data_path"] == "data/gnss_events_matched.gcmt.npz"
+
+
+@pytest.mark.parametrize(
+    ("pilot_mae", "passed"),
+    [(0.25, True), (0.2500000001, False), (0.24, True)],
+)
+def test_pilot_gate_stops_only_when_degradation_exceeds_point_zero_five(
+    pilot_mae: float,
+    passed: bool,
+) -> None:
+    gate = evaluate_pilot_gate(
+        frozen_selected_event_mae=0.2,
+        pilot_selected_event_mae=pilot_mae,
+        max_degradation=0.05,
+    )
+
+    assert gate.passed is passed
+    assert gate.stop_threshold == pytest.approx(0.25)
+    assert gate.degradation == pytest.approx(pilot_mae - 0.2)
+
+
+def test_split_assignment_check_ignores_only_magnitude_summary(tmp_path) -> None:
+    frozen = tmp_path / "frozen.json"
+    candidate = tmp_path / "candidate.json"
+    payload = {
+        "assignment_sha256": "same-assignment",
+        "sample_keys": {"train": ["A::S1"], "validation": [], "test": []},
+        "per_event_station_counts": {
+            "A": {"train": 1, "validation": 0, "test": 0}
+        },
+        "catalog_mw_summary": {"train": {"mean": 7.0}},
+    }
+    frozen.write_text(json.dumps(payload), encoding="utf-8")
+    payload["catalog_mw_summary"] = {"train": {"mean": 7.2}}
+    candidate.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert_split_assignment_matches(candidate, frozen)
+
+    payload["assignment_sha256"] = "changed-assignment"
+    candidate.write_text(json.dumps(payload), encoding="utf-8")
+    with pytest.raises(ValueError, match="split assignment"):
+        assert_split_assignment_matches(candidate, frozen)
