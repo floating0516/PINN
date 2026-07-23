@@ -36,10 +36,10 @@ In `PINNModel`, recognize `model.input_fusion == "magnitude_gated_residual"`, re
 
 Run the focused test, one real-data CUDA forward/loss/backward smoke, then `python -m pytest -q`. Expected: focused test PASS, finite CUDA smoke, and full suite with zero failures.
 
-- [ ] **Step 5: Commit and train once**
+- [x] **Step 5: Commit and train once**
 
 Commit the implementation, create a detached worktree at that commit, derive the USGS seed-42 config with R+T gated fusion, frozen radial backbone, and `training.pretrain_path` set to the formal R-only seed-42 checkpoint, then run 200 epochs in `pinn-run:train` under `systemd-inhibit`.
 
-- [ ] **Step 6: Evaluate and decide**
+- [x] **Step 6: Evaluate and decide**
 
 Run one internal mechanism summary and one fixed eight-event external evaluation. If any internal gate fails, record the result and end T experiments without seeds 17/73.
