@@ -145,6 +145,69 @@ def test_rt_model_accepts_two_channels_and_backpropagates() -> None:
     assert torch.isfinite(waveform.grad).all()
 
 
+def test_gated_tangential_residual_starts_at_frozen_radial_prediction() -> None:
+    radial_config = yaml.safe_load(
+        Path("configs/config_v2.yaml").read_text(encoding="utf-8")
+    )
+    gated_config = copy.deepcopy(radial_config)
+    gated_config["model"].update(
+        {
+            "input_components": ["radial", "tangential"],
+            "input_fusion": "magnitude_gated_residual",
+            "freeze_radial_backbone": True,
+        }
+    )
+
+    torch.manual_seed(7)
+    radial_model = PINNModel(radial_config).eval()
+    gated_model = PINNModel(gated_config).eval()
+    incompatible = gated_model.load_state_dict(
+        radial_model.state_dict(),
+        strict=False,
+    )
+    waveform_r = torch.randn(3, 1, 200)
+    waveform_t = torch.randn(3, 1, 200)
+    metadata = _make_meta(3, torch.device("cpu"))
+
+    with torch.no_grad():
+        radial = radial_model.predict_heads(waveform_r, meta=metadata)
+        gated = gated_model.predict_heads(
+            torch.cat((waveform_r, waveform_t), dim=1),
+            meta=metadata,
+        )
+
+    assert incompatible.unexpected_keys == []
+    assert incompatible.missing_keys
+    assert all(key.startswith("tangential_") for key in incompatible.missing_keys)
+    torch.testing.assert_close(
+        gated.stf_encoded,
+        radial.stf_encoded,
+        rtol=0.0,
+        atol=5e-7,
+    )
+    assert torch.equal(gated.catalog_mw, radial.catalog_mw)
+    assert gated_model.tangential_gate_logit.item() == 0.0
+    assert all(
+        not parameter.requires_grad
+        for name, parameter in gated_model.named_parameters()
+        if not name.startswith("tangential_")
+    )
+
+    gated_model.train()
+    with torch.no_grad():
+        gated_model.tangential_magnitude_head[-1].bias.fill_(1.0)
+    prediction = gated_model.predict_heads(
+        torch.cat((waveform_r, waveform_t), dim=1),
+        meta=metadata,
+    )
+    prediction.catalog_mw.sum().backward()
+
+    gate_gradient = gated_model.tangential_gate_logit.grad
+    assert gate_gradient is not None
+    assert torch.isfinite(gate_gradient)
+    assert gate_gradient.abs() > 0.0
+
+
 def test_radial_checkpoint_is_strictly_compatible_only_with_radial_config(
 ) -> None:
     radial_config = yaml.safe_load(

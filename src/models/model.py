@@ -69,8 +69,24 @@ class PINNModel(nn.Module):
         # 嵌入层：将配置的波形分量映射到隐藏维度
         self.input_components = waveform_input_components_from_config(config)
         self.input_channels = len(self.input_components)
+        self.input_fusion = str(
+            config['model'].get('input_fusion', 'early')
+        ).lower()
+        self.gated_tangential_residual = (
+            self.input_fusion == 'magnitude_gated_residual'
+        )
+        if self.gated_tangential_residual and self.input_components != (
+            'radial',
+            'tangential',
+        ):
+            raise ValueError(
+                'magnitude_gated_residual requires radial and tangential inputs'
+            )
+        embed_input_channels = (
+            1 if self.gated_tangential_residual else self.input_channels
+        )
         self.embed = nn.Sequential(
-            nn.Conv1d(in_channels=self.input_channels, out_channels=self.hidden_dim, kernel_size=7, padding=3),
+            nn.Conv1d(in_channels=embed_input_channels, out_channels=self.hidden_dim, kernel_size=7, padding=3),
             nn.GELU(),
             nn.GroupNorm(num_groups=8, num_channels=self.hidden_dim),
         )
@@ -132,6 +148,45 @@ class PINNModel(nn.Module):
         else:
             self.magnitude_head = None
 
+        if self.gated_tangential_residual:
+            if self.magnitude_head is None:
+                raise ValueError(
+                    'magnitude_gated_residual requires the catalog magnitude head'
+                )
+            magnitude_hidden = max(16, self.hidden_dim // 4)
+            self.tangential_encoder = nn.Sequential(
+                nn.Conv1d(
+                    in_channels=1,
+                    out_channels=self.hidden_dim,
+                    kernel_size=7,
+                    padding=3,
+                ),
+                nn.GELU(),
+                nn.GroupNorm(num_groups=8, num_channels=self.hidden_dim),
+                ResidualDilatedBlock(
+                    self.hidden_dim,
+                    dilation=1,
+                    dropout=self.dropout_p,
+                ),
+            )
+            self.tangential_pool = nn.AdaptiveAvgPool1d(1)
+            self.tangential_meta_embed = nn.Sequential(
+                nn.Linear(5, self.hidden_dim),
+                nn.GELU(),
+            )
+            self.tangential_magnitude_head = nn.Sequential(
+                nn.Linear(self.hidden_dim * 2, magnitude_hidden),
+                nn.GELU(),
+                nn.Dropout(self.dropout_p),
+                nn.Linear(magnitude_hidden, 1),
+            )
+            self.tangential_gate_logit = nn.Parameter(torch.zeros(()))
+
+            if bool(config['model'].get('freeze_radial_backbone', False)):
+                for name, parameter in self.named_parameters():
+                    if not name.startswith('tangential_'):
+                        parameter.requires_grad_(False)
+
     def _resize_source_time(self, seq_time: torch.Tensor) -> torch.Tensor:
         if (
             self.output_time_steps is None
@@ -150,7 +205,15 @@ class PINNModel(nn.Module):
         x: torch.Tensor,
         meta: Optional[torch.Tensor],
     ) -> torch.Tensor:
-        feat = self.embed(x)                 # (B, C, T)
+        if self.gated_tangential_residual:
+            if x.ndim != 3 or x.size(1) != 2:
+                raise ValueError(
+                    'magnitude_gated_residual expects input shape (B, 2, T)'
+                )
+            backbone_input = x[:, :1].contiguous()
+        else:
+            backbone_input = x
+        feat = self.embed(backbone_input)    # (B, C, T)
         for block in self.tcn_blocks:
             feat = block(feat)               # (B, C, T)
         feat = self.se(feat)                 # (B, C, T)
@@ -170,6 +233,22 @@ class PINNModel(nn.Module):
         sequence = self._resize_source_time(sequence)
         return self.rate_head(sequence).squeeze(-1)
 
+    def _predict_tangential_magnitude_residual(
+        self,
+        x: torch.Tensor,
+        meta: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        tangential = self.tangential_encoder(x[:, 1:2])
+        waveform_features = self.tangential_pool(tangential).squeeze(-1)
+        if meta is None:
+            metadata_features = torch.zeros_like(waveform_features)
+        else:
+            metadata_features = self.tangential_meta_embed(meta)
+        delta_mw = self.tangential_magnitude_head(
+            torch.cat((waveform_features, metadata_features), dim=1)
+        ).squeeze(-1)
+        return torch.tanh(self.tangential_gate_logit) * delta_mw
+
     def predict_heads(
         self,
         x: torch.Tensor,
@@ -178,9 +257,15 @@ class PINNModel(nn.Module):
         if self.magnitude_head is None:
             raise RuntimeError("catalog magnitude head is disabled")
         sequence = self._encode_sequence(x, meta)
+        catalog_mw = self.magnitude_head(sequence.mean(dim=1)).squeeze(-1)
+        if self.gated_tangential_residual:
+            catalog_mw = catalog_mw + self._predict_tangential_magnitude_residual(
+                x,
+                meta,
+            )
         return PINNPrediction(
             stf_encoded=self._predict_stf(sequence),
-            catalog_mw=self.magnitude_head(sequence.mean(dim=1)).squeeze(-1),
+            catalog_mw=catalog_mw,
         )
 
     def forward(self, x: torch.Tensor, meta: Optional[torch.Tensor] = None) -> torch.Tensor:
@@ -199,7 +284,10 @@ class PINNModel(nn.Module):
     def debug_forward(self, x: torch.Tensor) -> dict:
         shapes = {}
         shapes['input'] = list(x.shape)
-        feat = self.embed(x)
+        backbone_input = (
+            x[:, :1].contiguous() if self.gated_tangential_residual else x
+        )
+        feat = self.embed(backbone_input)
         shapes['embed'] = list(feat.shape)
         for i, block in enumerate(self.tcn_blocks):
             feat = block(feat)

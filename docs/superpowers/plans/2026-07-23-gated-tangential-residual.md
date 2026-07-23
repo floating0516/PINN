@@ -18,21 +18,21 @@
 - Use: `src/training/train.py`
 - Create at runtime: `runs/phase11-rt-gated-seed42-<stamp>-<commit>/`
 
-- [ ] **Step 1: Write the focused failing test**
+- [x] **Step 1: Write the focused failing test**
 
 Add a test that constructs an R-only model and a gated R+T model, loads the R state with `strict=False`, and asserts that the zero gate produces identical STF and catalog-Mw predictions, all base parameters are frozen, and the gate receives a finite nonzero gradient.
 
-- [ ] **Step 2: Verify the focused test fails**
+- [x] **Step 2: Verify the focused test fails**
 
 Run: `python -m pytest tests/test_model_forward.py::test_gated_tangential_residual_starts_at_frozen_radial_prediction -q`
 
 Expected: FAIL because `magnitude_gated_residual` is not implemented and the current two-channel embedding cannot load the radial checkpoint.
 
-- [ ] **Step 3: Implement the minimal gated residual**
+- [x] **Step 3: Implement the minimal gated residual**
 
 In `PINNModel`, recognize `model.input_fusion == "magnitude_gated_residual"`, require R+T input, keep `embed` at one input channel, add the independent T temporal encoder, metadata-conditioned scalar residual head, and zero-initialized tanh gate. Use only `x[:, :1]` for the existing sequence/STF path and freeze every parameter whose name does not begin with `tangential_` when `model.freeze_radial_backbone` is true.
 
-- [ ] **Step 4: Verify implementation once**
+- [x] **Step 4: Verify implementation once**
 
 Run the focused test, one real-data CUDA forward/loss/backward smoke, then `python -m pytest -q`. Expected: focused test PASS, finite CUDA smoke, and full suite with zero failures.
 
