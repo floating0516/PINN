@@ -368,6 +368,9 @@ class CorrectedEarthquakeDataset(Dataset):
                 sample["mechanism"], dtype=torch.long
             ),
             "radial": torch.from_numpy(sample["radial"]).float().unsqueeze(0),
+            "tangential": torch.from_numpy(
+                sample["tangential"]
+            ).float().unsqueeze(0),
             "vertical": torch.from_numpy(sample["vertical"]).float(),
             "waveform_valid_mask": torch.from_numpy(
                 sample["waveform_valid_mask"]

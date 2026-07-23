@@ -5,11 +5,12 @@ import numpy as np
 import pytest
 import torch
 
-from src.data import dataset_v2
+from src.data import dataset_v2, sample_builder
 from src.data.dataset_v2 import (
     CorrectedEarthquakeDataset,
     _load_stf_files,
 )
+from src.data.sample_builder import rotate_horizontal_to_rt
 from src.data.loaders_v2 import get_data_loaders_v2
 from src.evaluation.evaluate import evaluate
 from src.models.model import PINNModel
@@ -275,10 +276,80 @@ def test_same_event_has_one_stf_and_one_reference_mw(
 
     item = dataset[0]
     assert item["radial"].shape == (1, 200)
+    assert item["tangential"].shape == (1, 200)
+    assert torch.isfinite(item["tangential"]).all()
     assert item["vertical"].shape == (200,)
     assert item["stf"].shape == (200,)
     assert item["waveform_valid_mask"].dtype == torch.bool
     assert item["has_stf"].item() is True
+
+
+def test_rotate_horizontal_to_rt_preserves_energy() -> None:
+    east = np.array([1.0, 2.0, -3.0])
+    north = np.array([4.0, -5.0, 6.0])
+
+    radial, tangential = rotate_horizontal_to_rt(east, north, 37.0)
+
+    np.testing.assert_allclose(
+        radial**2 + tangential**2,
+        east**2 + north**2,
+        rtol=1.0e-12,
+        atol=1.0e-12,
+    )
+
+
+def test_rt_addition_keeps_radial_threshold_authoritative(
+    tmp_path: Path,
+) -> None:
+    npz_path = tmp_path / "events.npz"
+    _write_stations_npz(npz_path)
+    stf_dir = tmp_path / "stf"
+    _write_stf(stf_dir, "eventa")
+    config = make_v2_dataset_config(
+        npz_path=npz_path,
+        stf_dir=stf_dir,
+        radial_peak_min_cm=1.0e9,
+    )
+
+    dataset = CorrectedEarthquakeDataset(config)
+
+    assert len(dataset) == 0
+    assert {
+        row["rejection_reason"] for row in dataset.manifest_rows
+    } == {"below_radial_peak_threshold"}
+
+
+def test_tangential_preprocessing_failure_is_not_a_silent_rejection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    npz_path = tmp_path / "events.npz"
+    _write_stations_npz(npz_path)
+    stf_dir = tmp_path / "stf"
+    _write_stf(stf_dir, "eventa")
+    real_preprocess = sample_builder.preprocess_waveform
+    calls = 0
+
+    def fail_third_call(*args: Any, **kwargs: Any):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            raise ValueError("synthetic tangential failure")
+        return real_preprocess(*args, **kwargs)
+
+    monkeypatch.setattr(
+        sample_builder,
+        "preprocess_waveform",
+        fail_third_call,
+    )
+
+    with pytest.raises(ValueError, match="tangential preprocessing failed"):
+        CorrectedEarthquakeDataset(
+            make_v2_dataset_config(
+                npz_path=npz_path,
+                stf_dir=stf_dir,
+            )
+        )
 
 
 def test_station_workflow_shifts_same_event_stf_by_station_p_arrival(

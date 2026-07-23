@@ -24,6 +24,17 @@ class SampleRejected(ValueError):
         self.sample = sample
 
 
+def rotate_horizontal_to_rt(
+    east: np.ndarray,
+    north: np.ndarray,
+    azimuth_deg: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    azimuth = math.radians(float(azimuth_deg))
+    radial = east * math.sin(azimuth) + north * math.cos(azimuth)
+    tangential = east * math.cos(azimuth) - north * math.sin(azimuth)
+    return radial, tangential
+
+
 def _compute_phi_slip_deg(
     azimuth_deg: float,
     strike_deg: float,
@@ -105,10 +116,10 @@ def build_station_sample(
             "components must be one-dimensional and equal length",
         )
 
-    azimuth_rad = math.radians(geometry.azimuth_deg)
-    radial_raw = (
-        east * math.sin(azimuth_rad)
-        + north * math.cos(azimuth_rad)
+    radial_raw, tangential_raw = rotate_horizontal_to_rt(
+        east,
+        north,
+        geometry.azimuth_deg,
     )
     p_arrival_sec = geometry.source_distance_m / alpha_m_per_s
     try:
@@ -168,4 +179,21 @@ def build_station_sample(
             f"{radial_peak_cm:.6f} <= {radial_peak_min_cm:.6f} cm",
             sample=sample,
         )
+    try:
+        tangential = preprocess_waveform(
+            time_rel,
+            tangential_raw,
+            units=units,
+            p_arrival_sec=p_arrival_sec,
+            config=waveform_config,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "tangential preprocessing failed for "
+            f"{record.event}/{record.station}: {exc}"
+        ) from exc
+    sample["tangential"] = tangential.values_m
+    sample["tangential_peak_cm"] = float(
+        np.max(np.abs(tangential.values_m)) * 100.0
+    )
     return sample

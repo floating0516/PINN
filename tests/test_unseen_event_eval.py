@@ -418,6 +418,10 @@ def test_external_adapter_matches_training_npz_preprocessing(tmp_path: Path):
     )
 
     assert np.allclose(training_sample["radial"], external_sample["radial"])
+    assert np.allclose(
+        training_sample["tangential"],
+        external_sample["tangential"],
+    )
     assert np.array_equal(
         training_sample["waveform_valid_mask"],
         external_sample["waveform_valid_mask"],
