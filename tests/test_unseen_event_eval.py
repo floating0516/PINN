@@ -164,25 +164,14 @@ def test_load_event_bundle_allows_missing_u_component(tmp_path: Path):
     assert bundle.stations[0].u_m.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.0])
 
 
-def test_load_event_bundle_rescales_iquique_aftershock_waveforms_from_mm_to_m(tmp_path: Path):
-    """验证：Iquique aftershock 2014 的异常大位移会按 mm->m 缩放，避免把毫米误当成米"""
+def test_load_event_bundle_preserves_iquique_canonical_value_m(tmp_path: Path):
+    """Canonical Value_m data must not be rescaled from an event-name guess."""
     event_dir = _write_event_dir(tmp_path, event_name="iquique-aftershock-2014")
     event_meta_path = event_dir / "event.json"
     meta = json.loads(event_meta_path.read_text(encoding="utf-8"))
     meta["event"] = "Iquique Aftershock 2014"
     meta["magnitude"] = 7.7
     event_meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
-
-    waveform_path = event_dir / "waveforms.csv.gz"
-    rows = []
-    with gzip.open(waveform_path, "rt", encoding="utf-8", newline="") as f:
-        for row in csv.DictReader(f):
-            row["Value_m"] = str(float(row["Value_m"]) * 1000.0)
-            rows.append(row)
-    with gzip.open(waveform_path, "wt", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["Station", "Time_UTC", "Time_Offset_s", "Component", "Value_m", "Sampling_Hz", "Source_File"])
-        writer.writeheader()
-        writer.writerows(rows)
 
     bundle = load_event_bundle(event_dir)
 
@@ -191,25 +180,14 @@ def test_load_event_bundle_rescales_iquique_aftershock_waveforms_from_mm_to_m(tm
     assert bundle.stations[0].u_m.tolist() == pytest.approx([0.003, 0.013, 0.023, 0.033])
 
 
-def test_load_event_bundle_rescales_nepal_aftershock_waveforms_by_1e_minus_4(tmp_path: Path):
-    """验证：Nepal aftershock 2015 的原始值按 1e-4 缩放后再作为米使用"""
+def test_load_event_bundle_preserves_nepal_canonical_value_m(tmp_path: Path):
+    """Canonical Value_m data must remain meters for Nepal aftershock too."""
     event_dir = _write_event_dir(tmp_path, event_name="nepal-aftershock-2015")
     event_meta_path = event_dir / "event.json"
     meta = json.loads(event_meta_path.read_text(encoding="utf-8"))
     meta["event"] = "M 7.3 - Nepal"
     meta["magnitude"] = 7.3
     event_meta_path.write_text(json.dumps(meta, ensure_ascii=False), encoding="utf-8")
-
-    waveform_path = event_dir / "waveforms.csv.gz"
-    rows = []
-    with gzip.open(waveform_path, "rt", encoding="utf-8", newline="") as f:
-        for row in csv.DictReader(f):
-            row["Value_m"] = str(float(row["Value_m"]) * 10000.0)
-            rows.append(row)
-    with gzip.open(waveform_path, "wt", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["Station", "Time_UTC", "Time_Offset_s", "Component", "Value_m", "Sampling_Hz", "Source_File"])
-        writer.writeheader()
-        writer.writerows(rows)
 
     bundle = load_event_bundle(event_dir)
 
@@ -523,6 +501,32 @@ def test_plot_unseen_station_panels_creates_panel_figure(tmp_path: Path):
         save_path=tmp_path / "event_a_panels.png",
         top_n=1,
         sort_by="max_radial_cm",
+    )
+
+    assert panel_path.exists()
+
+
+def test_plot_unseen_station_panels_uses_independent_time_axes(tmp_path: Path):
+    """Waveform and source outputs may have different configured lengths."""
+    panel_path = plot_unseen_station_panels(
+        panel_rows=[
+            {
+                "event": "EventA",
+                "station": "STA",
+                "mw_catalog": 7.1,
+                "mw_pred": 7.0,
+                "source_distance_km": 120.0,
+                "max_radial_cm": 1.5,
+                "radial": np.array([0.0, 0.01], dtype=float),
+                "pred_rate": np.array([0.0, 1.0e18, 2.0e18], dtype=float),
+                "mw_series": np.array([0.0, 6.5, 7.0], dtype=float),
+                "waveform_time_axis": np.array([0.0, 1.0], dtype=float),
+                "source_time_axis": np.array([0.0, 1.0, 2.0], dtype=float),
+                "time_axis": np.array([0.0, 1.0, 2.0], dtype=float),
+            }
+        ],
+        save_path=tmp_path / "independent_axes.png",
+        top_n=1,
     )
 
     assert panel_path.exists()

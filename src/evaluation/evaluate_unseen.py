@@ -89,15 +89,6 @@ class EventBundle:
     rake: float = float("nan")
 
 
-def _waveform_rescale_factor(*, event_dir_name: str, event_name: str) -> float:
-    text = f"{event_dir_name} {event_name}".lower()
-    if "iquique" in text and "aftershock" in text and "2014" in text:
-        return 1.0 / 1000.0
-    if "nepal" in text and "aftershock" in text and "2015" in text:
-        return 1.0e-4
-    return 1.0
-
-
 def _format_event_display_name(*, event_name: str, event_dir_name: str, magnitude: float) -> str:
     base = event_dir_name.replace("_", "-").strip().lower()
     parts = [part for part in base.split("-") if part]
@@ -133,10 +124,6 @@ def load_event_bundle(event_dir: str | Path) -> EventBundle:
             }
 
     per_station: dict[str, dict[str, list[float]]] = {}
-    waveform_rescale_factor = _waveform_rescale_factor(
-        event_dir_name=event_path.name,
-        event_name=str(meta.get("event", "")),
-    )
     with gzip.open(event_path / "waveforms.csv.gz", "rt", encoding="utf-8", newline="") as f:
         for row in csv.DictReader(f):
             station = str(row["Station"])
@@ -145,7 +132,6 @@ def load_event_bundle(event_dir: str | Path) -> EventBundle:
                 continue
             offset = float(row["Time_Offset_s"])
             value_m = float(row["Value_m"])
-            value_m *= waveform_rescale_factor
             item = per_station.setdefault(
                 station,
                 {"t": [], "E": [], "N": [], "U": []},
@@ -359,7 +345,14 @@ def plot_unseen_station_panels(
     fig, axes = plt.subplots(len(selected_rows), 3, figsize=(7.2, 2.2 * len(selected_rows)), squeeze=False, sharex=False)
 
     for row_idx, row in enumerate(selected_rows):
-        t = np.asarray(row["time_axis"], dtype=float)
+        source_t = np.asarray(
+            row.get("source_time_axis", row["time_axis"]),
+            dtype=float,
+        )
+        waveform_t = np.asarray(
+            row.get("waveform_time_axis", row["time_axis"]),
+            dtype=float,
+        )
         radial = np.asarray(row["radial"], dtype=float)
         pred_rate = np.asarray(row["pred_rate"], dtype=float)
         mw_series = np.asarray(row["mw_series"], dtype=float)
@@ -368,7 +361,7 @@ def plot_unseen_station_panels(
         dist_km = float(row["source_distance_km"])
 
         ax0, ax1, ax2 = axes[row_idx]
-        ax0.plot(t, radial, color=_OKABE_ITO[0], linewidth=1.0)
+        ax0.plot(waveform_t, radial, color=_OKABE_ITO[0], linewidth=1.0)
         ax0.text(0.02, 0.92, f"Dist: {dist_km:.0f} km | $M_w$: {mw_catalog:.2f}", transform=ax0.transAxes, ha="left", va="top", fontsize=6)
         ax0.set_ylabel("Radial disp.")
         ax0.grid(True, axis="y", linestyle=":", linewidth=0.4, color="#CCCCCC")
@@ -376,7 +369,7 @@ def plot_unseen_station_panels(
         if row_idx == 0:
             ax0.set_title("Radial Component")
 
-        ax1.plot(t, pred_rate, color=_OKABE_ITO[1], linestyle="--", label="Predicted")
+        ax1.plot(source_t, pred_rate, color=_OKABE_ITO[1], linestyle="--", label="Predicted")
         ax1.set_ylabel("Moment Rate")
         ax1.grid(True, axis="y", linestyle=":", linewidth=0.4, color="#CCCCCC")
         ax1.spines["top"].set_visible(False); ax1.spines["right"].set_visible(False)
@@ -384,7 +377,7 @@ def plot_unseen_station_panels(
             ax1.set_title("Predicted Source Time Function")
             ax1.legend(frameon=False)
 
-        ax2.plot(t, mw_series, color=_OKABE_ITO[1], linestyle="--", label=f"Predicted: {mw_pred:.2f}")
+        ax2.plot(source_t, mw_series, color=_OKABE_ITO[1], linestyle="--", label=f"Predicted: {mw_pred:.2f}")
         ax2.axhline(mw_catalog, color="black", linewidth=0.9, linestyle="-", label=f"Reference: {mw_catalog:.2f}")
         ax2.set_ylabel("$M_w(t)$")
         ax2.grid(True, axis="y", linestyle=":", linewidth=0.4, color="#CCCCCC")
@@ -775,7 +768,18 @@ def evaluate_unseen_events(
                         "radial": np.asarray(sample["radial"], dtype=float),
                         "pred_rate": dot_m0[0].detach().cpu().numpy(),
                         "mw_series": mw_series,
-                        "time_axis": np.arange(dot_m0.shape[-1], dtype=float) * source_dt,
+                        "waveform_time_axis": np.arange(
+                            len(sample["radial"]),
+                            dtype=float,
+                        ) * sample_dt,
+                        "source_time_axis": np.arange(
+                            dot_m0.shape[-1],
+                            dtype=float,
+                        ) * source_dt,
+                        "time_axis": np.arange(
+                            dot_m0.shape[-1],
+                            dtype=float,
+                        ) * source_dt,
                     }
                 )
             if predictions:
