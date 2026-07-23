@@ -32,3 +32,33 @@ Events with one training station can be sampled roughly 56 times more often than
 - Reuse the existing sampler weight and loader tests; do not add a broader test matrix.
 - Validate that the formal YAML differs from the phase-9 R-only config only in `training.event_balanced_sampling`.
 - Launch only from `pinn-run:train` under `systemd-inhibit --what=sleep --mode=block` in a detached run worktree.
+
+## Outcome
+
+The controlled campaign completed at commit `c9e36c2` in
+`runs/phase13-r-event-balanced-20260723T160258Z-c9e36c2`.
+
+| Seed | Station MAE | Event MAE |
+|---:|---:|---:|
+| 17 | 0.095250 | 0.176327 |
+| 42 | 0.096669 | 0.137968 |
+| 73 | 0.103685 | 0.175792 |
+
+The internal three-seed ensemble Event MAE improved from `0.160927` to
+`0.125224`, exceeding the frozen `0.150927` pass threshold. The `Mw < 7`
+stratum improved from `0.299449` to `0.244039`, and events with at most three
+test stations improved from `0.221843` to `0.171392`. Mean seed dispersion
+also decreased from `0.112731` to `0.098376`. The tradeoff was a mean Station
+MAE increase from `0.086590` to `0.098535`.
+
+The one-time external sanity check produced seed Event MAEs of
+`0.242825 / 0.196584 / 0.217170` and an ensemble Event MAE of `0.212720`.
+This is a slight `0.006273 Mw` regression from the fixed `0.206447` R-only
+baseline. The external result was not used for checkpoint selection or further
+tuning.
+
+The frozen internal gate passed, but the evidence is mixed across evaluation
+roles. Retain event-balanced sampling as an event-prioritized R-only candidate;
+do not replace the phase-9 model as the universal R-only baseline. All three
+200-epoch logs, checkpoints, split hashes, and internal/external predictions
+passed the final audit.

@@ -45,7 +45,7 @@ Copy the verified phase-9 R-only config, keep `checkpoint_metric: station_mae_ca
 
 Validate the YAML, compare it structurally with the phase-9 config, and assert that the only difference is `training.event_balanced_sampling`.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 Commit with message `feat: balance radial training by event`.
 
@@ -55,18 +55,26 @@ Commit with message `feat: balance radial training by event`.
 - Create at runtime: `/home/lihe/PINN_Mag/runs/phase13-r-event-balanced-<stamp>-<commit>/`
 - Create at runtime: `/home/lihe/PINN_Mag/worktrees/run-<commit>/`
 
-- [ ] **Step 1: Create a detached run worktree**
+- [x] **Step 1: Create a detached run worktree**
 
 Create it at the implementation commit and confirm the tracked tree is clean.
 
-- [ ] **Step 2: Launch the formal campaign**
+- [x] **Step 2: Launch the formal campaign**
 
 In `pinn-run:train`, run the corrected matrix in `within-event-station` mode for seeds `17 42 73` and 200 epochs under `systemd-inhibit`, using the frozen phase-9 dataset manifest.
 
-- [ ] **Step 3: Audit startup**
+- [x] **Step 3: Audit startup**
 
 Confirm R-only input, USGS NPZ, `event_balanced_sampling=true`, `checkpoint_metric=station_mae_catalog`, clean commit provenance, and split hashes identical to phase 9.
 
-- [ ] **Step 4: Evaluate the internal ensemble**
+- [x] **Step 4: Evaluate the internal ensemble**
 
 Verify three complete 200-epoch logs and finite outputs, join event predictions across seeds, and compare with `0.1609267`. Run the external eight-event evaluation only if the result is `<= 0.1509267` and the sparse/low-magnitude strata do not materially regress.
+
+## Recorded Outcome
+
+- Internal ensemble Event MAE: `0.1609267 -> 0.1252236`; gate passed.
+- Mean Station MAE: `0.0865903 -> 0.0985346`.
+- External ensemble Event MAE: `0.2064468 -> 0.2127201`; one-time sanity check slightly regressed.
+- Decision: retain as an event-prioritized candidate without replacing the universal phase-9 R-only baseline.
+- Audit: three 200-epoch logs, checkpoint hashes, unchanged splits, finite predictions, and `159 stations / 8 events` per external seed all passed.
