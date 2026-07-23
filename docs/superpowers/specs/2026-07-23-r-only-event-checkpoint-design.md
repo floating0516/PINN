@@ -25,3 +25,16 @@ Align checkpoint selection with the event-level metric used to judge the final t
 - Run the focused config test, the small config test module, and one existing training checkpoint test.
 - Validate that the formal config differs from the prior USGS config only in `training.checkpoint_metric`.
 - Launch formal training only in `pinn-run:train` under `systemd-inhibit --what=sleep --mode=block` from a detached worktree at the committed experiment revision.
+
+## Outcome
+
+- Implementation commit: `780413e`.
+- Formal run: `runs/phase12-r-event-checkpoint-20260723T142043Z-780413e`.
+- Selected epochs for seeds 17/42/73: `61 / 82 / 163`.
+- Per-seed Event MAE: `0.242270 / 0.161997 / 0.203594`.
+- Internal ensemble Event MAE changed from `0.160927` to `0.178856`, a regression of `0.017929 Mw`.
+- Mw below 7 ensemble MAE changed from `0.299449` to `0.316048`; events with at most three test stations changed from `0.221843` to `0.234701`.
+- The internal gate failed, so the fixed external eight-event set was not evaluated.
+- Artifact audit confirmed three complete 200-epoch logs, finite predictions, matching checkpoint hashes, clean commit provenance, R-only inputs, and split hashes identical to phase 9.
+
+The event-level selector is implemented correctly but is too noisy under the fixed station-random protocol: 20 of 31 events have at most three validation stations. Selecting the minimum event-median error across 200 epochs overfits those sparse validation station subsets. Keep the original station-selected three-seed R-only campaign as the active baseline.

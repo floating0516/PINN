@@ -51,7 +51,7 @@ Load both YAML files, remove `training.checkpoint_metric`, and assert the remain
 
 Expected: validator passes and the only value difference is `station_mae_catalog -> event_mae_catalog`.
 
-- [ ] **Step 3: Commit the implementation**
+- [x] **Step 3: Commit the implementation**
 
 Commit the test, validator, formal config, spec, and plan with message `feat: select radial checkpoints by event mae`.
 
@@ -61,18 +61,18 @@ Commit the test, validator, formal config, spec, and plan with message `feat: se
 - Create at runtime: `/home/lihe/PINN_Mag/runs/phase12-r-event-checkpoint-<stamp>-<commit>/`
 - Create at runtime: `/home/lihe/PINN_Mag/worktrees/run-<commit>/`
 
-- [ ] **Step 1: Create a detached run worktree**
+- [x] **Step 1: Create a detached run worktree**
 
 Create the worktree at the implementation commit and confirm its tracked tree is clean.
 
-- [ ] **Step 2: Launch only from the formal tmux pane**
+- [x] **Step 2: Launch only from the formal tmux pane**
 
 In `pinn-run:train`, change to the detached worktree, load `/home/lihe/.config/pinn/server.env`, and run `scripts/experiments/run_corrected_matrix.py` in `within-event-station` mode for seeds `17 42 73`, 200 epochs, with the frozen dataset manifest and unique output root under `systemd-inhibit --what=sleep --mode=block`.
 
-- [ ] **Step 3: Confirm startup**
+- [x] **Step 3: Confirm startup**
 
 Confirm the campaign manifest records the committed revision, `git_dirty=false`, the three seeds, the USGS-priority NPZ, and `checkpoint_metric=event_mae_catalog`. Confirm one CUDA training process is active and the log begins without exceptions.
 
-- [ ] **Step 4: Evaluate after all seeds finish**
+- [x] **Step 4: Evaluate after all seeds finish**
 
 Join the three internal `event_summary.csv` files by event, average each event's three predictions, and compare the ensemble Event MAE with `0.1609267`. Run the fixed external eight-event evaluation only if the internal result is `<= 0.1509267`.
