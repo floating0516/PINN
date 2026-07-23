@@ -35,6 +35,7 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime
+import math
 import sys
 import traceback
 from pathlib import Path
@@ -132,6 +133,19 @@ def load_completed_unseen(csv_path: Path) -> set[str]:
             if not error:
                 completed.add(key)
     return completed
+
+
+def summarize_event_error_metrics(
+    event_rows: list[dict[str, Any]],
+) -> dict[str, float]:
+    if not event_rows:
+        return {"mae": float("nan"), "rmse": float("nan"), "bias": float("nan")}
+    errors = [float(row["error_vs_catalog"]) for row in event_rows]
+    return {
+        "mae": sum(abs(error) for error in errors) / len(errors),
+        "rmse": math.sqrt(sum(error**2 for error in errors) / len(errors)),
+        "bias": sum(errors) / len(errors),
+    }
 
 
 def main() -> None:
@@ -263,15 +277,10 @@ def main() -> None:
 
                 # 汇总指标
                 event_rows = result.get("event_rows", [])
-                if event_rows:
-                    import math
-                    errors = [float(r["error"]) for r in event_rows]
-                    abs_errors = [abs(e) for e in errors]
-                    mae = sum(abs_errors) / len(abs_errors)
-                    rmse = math.sqrt(sum(e**2 for e in errors) / len(errors))
-                    bias = sum(errors) / len(errors)
-                else:
-                    mae = rmse = bias = float("nan")
+                metrics = summarize_event_error_metrics(event_rows)
+                mae = metrics["mae"]
+                rmse = metrics["rmse"]
+                bias = metrics["bias"]
 
                 print(f"  ✓ 完成: {n_events} 事件, {n_stations} 台站, MAE={mae:.4f}")
 
