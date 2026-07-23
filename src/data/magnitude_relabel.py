@@ -4,10 +4,14 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 import hashlib
+import io
 import math
 from numbers import Real
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
+import zipfile
 
 import numpy as np
 
@@ -21,6 +25,17 @@ MAX_MAGNITUDE_DELTA = 0.5
 WARNING_DELTA_MW = 0.1
 REVIEW_DELTA_MW = 0.2
 _THRESHOLD_EPSILON = 1.0e-12
+CANDIDATE_ADDED_ARRAYS = (
+    "magnitude_selected",
+    "magnitude_usgs",
+    "magnitude_gcmt",
+    "magnitude_stf_native",
+    "magnitude_source",
+    "magnitude_source_rank",
+    "magnitude_type",
+    "usgs_event_id",
+    "usgs_product_id",
+)
 
 
 class MagnitudeRelabelError(ValueError):
@@ -57,6 +72,7 @@ class USGSMatch:
     distance_km: float
     magnitude_delta: float
     explicit_mapping_id: str
+    review_disposition: str
 
 
 @dataclass(frozen=True)
@@ -172,12 +188,6 @@ def _candidate_evidence(
         longitude,
     )
     magnitude_delta = abs(magnitude - local_magnitude)
-    if (
-        time_delta > MAX_TIME_DELTA_SEC + _THRESHOLD_EPSILON
-        or distance > MAX_DISTANCE_KM + _THRESHOLD_EPSILON
-        or magnitude_delta > MAX_MAGNITUDE_DELTA + _THRESHOLD_EPSILON
-    ):
-        return None
     return USGSMatch(
         usgs_event_id=event_id,
         detail_url=str(properties.get("detail", "")),
@@ -185,6 +195,16 @@ def _candidate_evidence(
         distance_km=distance,
         magnitude_delta=magnitude_delta,
         explicit_mapping_id="",
+        review_disposition="",
+    )
+
+
+def _within_automatic_match_thresholds(evidence: USGSMatch) -> bool:
+    return (
+        evidence.time_delta_sec <= MAX_TIME_DELTA_SEC + _THRESHOLD_EPSILON
+        and evidence.distance_km <= MAX_DISTANCE_KM + _THRESHOLD_EPSILON
+        and evidence.magnitude_delta
+        <= MAX_MAGNITUDE_DELTA + _THRESHOLD_EPSILON
     )
 
 
@@ -194,6 +214,7 @@ def match_usgs_event(
     *,
     explicit_event_id: str = "",
     explicit_mapping_id: str = "",
+    explicit_review_disposition: str = "",
 ) -> USGSMatch:
     if explicit_event_id:
         selected = [
@@ -208,16 +229,25 @@ def match_usgs_event(
         evidence = _candidate_evidence(local_event, selected[0])
         if evidence is None:
             raise NoUSGSMatch(
-                f"explicit USGS event {explicit_event_id!r} fails match thresholds"
+                f"explicit USGS event {explicit_event_id!r} lacks match evidence"
             )
         if not explicit_mapping_id:
             raise MagnitudeRelabelError("explicit mapping requires a mapping ID")
-        return replace(evidence, explicit_mapping_id=explicit_mapping_id)
+        if not explicit_review_disposition:
+            raise MagnitudeRelabelError(
+                "explicit mapping requires a review disposition"
+            )
+        return replace(
+            evidence,
+            explicit_mapping_id=explicit_mapping_id,
+            review_disposition=explicit_review_disposition,
+        )
 
     acceptable = [
         evidence
         for feature in features
         if (evidence := _candidate_evidence(local_event, feature)) is not None
+        and _within_automatic_match_thresholds(evidence)
     ]
     if not acceptable:
         raise NoUSGSMatch(f"no acceptable USGS match for {local_event.event}")
@@ -435,3 +465,211 @@ def read_native_stf(path: str | Path) -> NativeSTFMagnitude:
         header_scalar_moment_nm=header_moment,
         warning="" if traceable else "missing_source_header",
     )
+
+
+def _event_text(value: Any) -> str:
+    if isinstance(value, (bytes, np.bytes_)):
+        return value.decode("utf-8", errors="strict")
+    return str(value)
+
+
+def _float_array(rows: Sequence[Mapping[str, Any]], key: str) -> np.ndarray:
+    values = [
+        (
+            float(value)
+            if (value := _finite_float(row.get(key))) is not None
+            else math.nan
+        )
+        for row in rows
+    ]
+    return np.asarray(values, dtype=np.float64)
+
+
+def _deterministic_npz(path: Path, arrays: Mapping[str, np.ndarray]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        raise FileExistsError(f"refusing to overwrite candidate NPZ: {path}")
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=path.parent,
+            prefix=f".{path.name}.tmp-",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+        with zipfile.ZipFile(
+            temporary_path,
+            mode="w",
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=9,
+        ) as archive:
+            for name, array in arrays.items():
+                payload = io.BytesIO()
+                np.save(payload, np.asarray(array), allow_pickle=True)
+                info = zipfile.ZipInfo(
+                    filename=f"{name}.npy",
+                    date_time=(1980, 1, 1, 0, 0, 0),
+                )
+                info.compress_type = zipfile.ZIP_DEFLATED
+                info.external_attr = 0o600 << 16
+                archive.writestr(
+                    info,
+                    payload.getvalue(),
+                    compress_type=zipfile.ZIP_DEFLATED,
+                    compresslevel=9,
+                )
+        os.replace(temporary_path, path)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
+
+
+def write_candidate_npz(
+    source_path: str | Path,
+    destination_path: str | Path,
+    label_rows: Sequence[Mapping[str, Any]],
+) -> str:
+    source = Path(source_path)
+    destination = Path(destination_path)
+    with np.load(source, allow_pickle=True) as data:
+        source_names = list(data.files)
+        source_arrays = {name: data[name] for name in source_names}
+    if "events" not in source_arrays or "magnitude" not in source_arrays:
+        raise MagnitudeRelabelError("source NPZ lacks events or magnitude")
+    events = source_arrays["events"]
+    if len(label_rows) != len(events):
+        raise MagnitudeRelabelError(
+            f"label row count {len(label_rows)} does not match {len(events)} events"
+        )
+    for index, (event_value, row) in enumerate(zip(events, label_rows, strict=True)):
+        if int(row.get("event_index", -1)) != index:
+            raise MagnitudeRelabelError(f"label event index mismatch at {index}")
+        if str(row.get("event", "")) != _event_text(event_value):
+            raise MagnitudeRelabelError(f"label event name mismatch at {index}")
+    selected = _float_array(label_rows, "mw_selected")
+    if not np.all(np.isfinite(selected)):
+        raise MissingMagnitudeSource("candidate contains a non-finite selected label")
+    source_magnitude = np.asarray(source_arrays["magnitude"])
+    gcmt = _float_array(label_rows, "mw_gcmt")
+    if not np.array_equal(gcmt, source_magnitude.astype(np.float64), equal_nan=True):
+        raise MagnitudeRelabelError("manifest GCMT labels differ from source magnitude")
+    selected = selected.astype(source_magnitude.dtype, copy=False)
+    additions = {
+        "magnitude_selected": selected,
+        "magnitude_usgs": _float_array(label_rows, "mw_usgs"),
+        "magnitude_gcmt": gcmt,
+        "magnitude_stf_native": _float_array(label_rows, "mw_stf_native"),
+        "magnitude_source": np.asarray(
+            [str(row.get("mw_source", "")) for row in label_rows],
+            dtype=np.str_,
+        ),
+        "magnitude_source_rank": np.asarray(
+            [int(row.get("mw_source_rank", 0)) for row in label_rows],
+            dtype=np.int16,
+        ),
+        "magnitude_type": np.asarray(
+            [str(row.get("mw_type", "")) for row in label_rows],
+            dtype=np.str_,
+        ),
+        "usgs_event_id": np.asarray(
+            [str(row.get("usgs_event_id", "")) for row in label_rows],
+            dtype=np.str_,
+        ),
+        "usgs_product_id": np.asarray(
+            [str(row.get("product_id", "")) for row in label_rows],
+            dtype=np.str_,
+        ),
+    }
+    arrays: dict[str, np.ndarray] = {}
+    for name in source_names:
+        arrays[name] = selected if name == "magnitude" else source_arrays[name]
+    arrays.update(additions)
+    _deterministic_npz(destination, arrays)
+    validate_candidate_npz(source, destination)
+    return hashlib.sha256(destination.read_bytes()).hexdigest()
+
+
+def _deep_equal(left: Any, right: Any) -> bool:
+    if isinstance(left, np.ndarray) or isinstance(right, np.ndarray):
+        if not isinstance(left, np.ndarray) or not isinstance(right, np.ndarray):
+            return False
+        if left.shape != right.shape or left.dtype != right.dtype:
+            return False
+        if left.dtype == object:
+            return all(
+                _deep_equal(left_value, right_value)
+                for left_value, right_value in zip(
+                    left.flat,
+                    right.flat,
+                    strict=True,
+                )
+            )
+        return bool(np.array_equal(left, right, equal_nan=True))
+    if isinstance(left, Mapping) or isinstance(right, Mapping):
+        if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+            return False
+        return left.keys() == right.keys() and all(
+            _deep_equal(left[key], right[key]) for key in left
+        )
+    if isinstance(left, (list, tuple)) or isinstance(right, (list, tuple)):
+        if type(left) is not type(right) or len(left) != len(right):
+            return False
+        return all(
+            _deep_equal(left_value, right_value)
+            for left_value, right_value in zip(left, right, strict=True)
+        )
+    try:
+        if math.isnan(float(left)) and math.isnan(float(right)):
+            return True
+    except (TypeError, ValueError):
+        pass
+    return bool(left == right)
+
+
+def validate_candidate_npz(
+    source_path: str | Path,
+    candidate_path: str | Path,
+) -> None:
+    with np.load(source_path, allow_pickle=True) as source, np.load(
+        candidate_path,
+        allow_pickle=True,
+    ) as candidate:
+        expected_names = [*source.files, *CANDIDATE_ADDED_ARRAYS]
+        if candidate.files != expected_names:
+            raise MagnitudeRelabelError(
+                f"candidate arrays differ: expected={expected_names}, "
+                f"actual={candidate.files}"
+            )
+        for name in source.files:
+            if name != "magnitude" and not _deep_equal(source[name], candidate[name]):
+                raise MagnitudeRelabelError(f"non-label array changed: {name}")
+        event_count = len(source["events"])
+        for name in ("magnitude", *CANDIDATE_ADDED_ARRAYS):
+            if len(candidate[name]) != event_count:
+                raise MagnitudeRelabelError(
+                    f"candidate label array has wrong length: {name}"
+                )
+        if not np.array_equal(
+            candidate["magnitude"],
+            candidate["magnitude_selected"],
+            equal_nan=True,
+        ):
+            raise MagnitudeRelabelError(
+                "candidate magnitude differs from magnitude_selected"
+            )
+        if not np.all(np.isfinite(candidate["magnitude_selected"])):
+            raise MissingMagnitudeSource("candidate selected labels are non-finite")
+        if not np.array_equal(
+            candidate["magnitude_gcmt"],
+            source["magnitude"],
+            equal_nan=True,
+        ):
+            raise MagnitudeRelabelError(
+                "candidate magnitude_gcmt differs from source magnitude"
+            )
+        if any(not str(value) for value in candidate["magnitude_source"]):
+            raise MagnitudeRelabelError("candidate contains an empty magnitude source")
+        ranks = np.asarray(candidate["magnitude_source_rank"], dtype=np.int64)
+        if not bool(np.all((ranks >= 1) & (ranks <= 4))):
+            raise MagnitudeRelabelError("candidate contains an invalid source rank")
