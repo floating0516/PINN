@@ -112,11 +112,18 @@ def _validate_station_random_workflow(config: dict[str, Any]) -> None:
     )
     if _as_int(config, ("training", "early_stop_patience")) != 0:
         raise ValueError("training.early_stop_patience 必须严格等于 0")
-    _require_value(
+    checkpoint_metric = _required(
         config,
         ("training", "checkpoint_metric"),
-        "station_mae_catalog",
     )
+    if not isinstance(checkpoint_metric, str) or checkpoint_metric not in {
+        "station_mae_catalog",
+        "event_mae_catalog",
+    }:
+        raise ValueError(
+            "training.checkpoint_metric must be station_mae_catalog "
+            "or event_mae_catalog"
+        )
     _require_value(
         config,
         ("evaluation", "external_role"),

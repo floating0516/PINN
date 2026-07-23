@@ -16,21 +16,21 @@
 - Modify: `tests/test_config_v2.py`
 - Modify: `src/utils/config_v2.py`
 
-- [ ] **Step 1: Write the focused failing test**
+- [x] **Step 1: Write the focused failing test**
 
 Add `test_active_station_workflow_accepts_event_checkpoint_metric`, set the active config's checkpoint metric to `event_mae_catalog`, and call `validate_config_v2`. Change the conflicting-value parametrization to reject `val_loss` instead of the newly accepted value.
 
-- [ ] **Step 2: Verify the test fails for the intended reason**
+- [x] **Step 2: Verify the test fails for the intended reason**
 
 Run: `source /home/lihe/.config/pinn/server.env && /home/lihe/PINN_Mag/venv/bin/python -m pytest tests/test_config_v2.py::test_active_station_workflow_accepts_event_checkpoint_metric -q`
 
 Expected: FAIL because the active workflow currently requires `station_mae_catalog` exactly.
 
-- [ ] **Step 3: Implement the minimal validator change**
+- [x] **Step 3: Implement the minimal validator change**
 
 Read `training.checkpoint_metric` with `_required` and accept exactly `station_mae_catalog` or `event_mae_catalog`; raise a `ValueError` containing `training.checkpoint_metric` for any other value.
 
-- [ ] **Step 4: Verify the narrow behavior**
+- [x] **Step 4: Verify the narrow behavior**
 
 Run the focused test, `tests/test_config_v2.py`, and `tests/test_training_checkpointing.py::test_active_training_logs_station_catalog_metric_and_runs_all_epochs`.
 
@@ -41,11 +41,11 @@ Expected: all selected tests pass with no warnings or errors.
 **Files:**
 - Create: `configs/experiments_v2/V2-USGS-EVENT-CHECKPOINT.yaml`
 
-- [ ] **Step 1: Add the complete formal configuration**
+- [x] **Step 1: Add the complete formal configuration**
 
 Copy the verified phase-9 USGS-priority configuration and change only `training.checkpoint_metric` to `event_mae_catalog`.
 
-- [ ] **Step 2: Validate the scientific diff**
+- [x] **Step 2: Validate the scientific diff**
 
 Load both YAML files, remove `training.checkpoint_metric`, and assert the remaining mappings are equal. Run `validate_config_v2` on the new configuration.
 

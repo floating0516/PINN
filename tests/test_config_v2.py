@@ -160,6 +160,13 @@ def test_active_station_workflow_has_fixed_three_hundred_step_contract() -> None
     assert stf_output_steps_from_config(config) == 300
 
 
+def test_active_station_workflow_accepts_event_checkpoint_metric() -> None:
+    config = _active_station_v2()
+    config["training"]["checkpoint_metric"] = "event_mae_catalog"
+
+    validate_config_v2(config)
+
+
 @pytest.mark.parametrize(
     ("path", "value", "message"),
     [
@@ -173,7 +180,7 @@ def test_active_station_workflow_has_fixed_three_hundred_step_contract() -> None
         (("training", "split_protocol"), "grouped_event", "split_protocol"),
         (("training", "event_balanced_sampling"), True, "event_balanced_sampling"),
         (("training", "early_stop_patience"), 50, "early_stop_patience"),
-        (("training", "checkpoint_metric"), "event_mae_catalog", "checkpoint_metric"),
+        (("training", "checkpoint_metric"), "val_loss", "checkpoint_metric"),
         (("evaluation", "external_role"), "validation", "external_role"),
     ],
 )
