@@ -12,6 +12,7 @@ from src.utils.config_v2 import (
     stf_output_steps_from_config,
     validate_config_on_startup,
     validate_config_v2,
+    waveform_input_components_from_config,
 )
 
 
@@ -107,6 +108,48 @@ def _active_station_v2() -> dict:
 
 def test_valid_v2_config_passes() -> None:
     validate_config_v2(_minimal_v2())
+
+
+def test_waveform_components_default_to_radial() -> None:
+    config = _minimal_v2()
+
+    validate_config_v2(config)
+
+    assert waveform_input_components_from_config(config) == ("radial",)
+
+
+def test_waveform_components_accept_canonical_rt() -> None:
+    config = _minimal_v2()
+    config.setdefault("model", {})["input_components"] = [
+        "radial",
+        "tangential",
+    ]
+
+    validate_config_v2(config)
+
+    assert waveform_input_components_from_config(config) == (
+        "radial",
+        "tangential",
+    )
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "radial",
+        [],
+        ["tangential"],
+        ["tangential", "radial"],
+        ["radial", "radial"],
+        ["radial", "vertical"],
+    ],
+)
+def test_waveform_components_reject_ambiguous_values(value: object) -> None:
+    config = _minimal_v2()
+    config.setdefault("model", {})["input_components"] = value
+
+    with pytest.raises(ValueError, match="input_components"):
+        validate_config_v2(config)
 
 
 def test_active_station_workflow_has_fixed_three_hundred_step_contract() -> None:

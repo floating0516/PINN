@@ -143,6 +143,27 @@ def validate_config_on_startup(config: dict[str, Any]) -> None:
     validate_config_v2(config)
 
 
+def waveform_input_components_from_config(
+    config: dict[str, Any],
+) -> tuple[str, ...]:
+    value = (config.get("model", {}) or {}).get(
+        "input_components",
+        ["radial"],
+    )
+    if not isinstance(value, (list, tuple)):
+        raise ValueError("model.input_components must be a sequence")
+    components = tuple(value)
+    if components not in {
+        ("radial",),
+        ("radial", "tangential"),
+    }:
+        raise ValueError(
+            "model.input_components must be ['radial'] or "
+            "['radial', 'tangential']"
+        )
+    return components
+
+
 def validate_config_v2(config: dict[str, Any]) -> None:
     if not isinstance(config, dict):
         raise ValueError("第二版配置必须是映射")
@@ -150,6 +171,8 @@ def validate_config_v2(config: dict[str, Any]) -> None:
     pipeline_version = _as_int(config, ("pipeline_version",))
     if pipeline_version != 2:
         raise ValueError("pipeline_version 必须为 2")
+
+    waveform_input_components_from_config(config)
 
     for path in _FORBIDDEN_PATHS:
         exists, _ = _lookup(config, path)
