@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import torch
 import yaml
 
 from scripts.experiments import run_manuscript_stf_iteration as campaign
@@ -13,16 +14,23 @@ from src.utils.provenance import sha256_file
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-CONFIG_PATH = (
+PHASE23_CONFIG_PATH = (
     PROJECT_ROOT
     / "configs"
     / "experiments"
     / "manuscript_station_stf_usgs.yaml"
 )
+PHASE24_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_monotonic_cosine.yaml"
+)
+CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
-def _config() -> dict[str, Any]:
-    return yaml.safe_load(CONFIG_PATH.read_text(encoding="utf-8"))
+def _config(path: Path = CONFIG_PATH) -> dict[str, Any]:
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -83,32 +91,80 @@ def _selected_train_summary(
     }
 
 
-def test_formal_config_and_variants_have_one_scientific_difference() -> None:
-    config = _config()
+@pytest.mark.parametrize(
+    ("config_path", "expected_axis", "baseline_value", "candidate_value"),
+    [
+        (
+            PHASE23_CONFIG_PATH,
+            campaign.STF_OUTPUT_PARAMETERIZATION_AXIS,
+            "direct",
+            "moment_shape_factorized",
+        ),
+        (
+            PHASE24_CONFIG_PATH,
+            campaign.SCHEDULER_T0_AXIS,
+            15,
+            195,
+        ),
+    ],
+)
+def test_formal_configs_and_variants_have_one_scientific_difference(
+    config_path: Path,
+    expected_axis: str,
+    baseline_value: Any,
+    candidate_value: Any,
+) -> None:
+    config = _config(config_path)
 
     campaign.validate_formal_config(config)
     variants = campaign.build_variant_configs(config)
 
-    assert variants["baseline"]["model"]["stf_output_parameterization"] == "direct"
-    assert (
-        variants["candidate"]["model"]["stf_output_parameterization"]
-        == "moment_shape_factorized"
-    )
+    assert campaign.variant_axis_from_config(config) == expected_axis
+    section, key = campaign.VARIANT_AXIS_PATHS[expected_axis]
+    assert variants["baseline"][section][key] == baseline_value
+    assert variants["candidate"][section][key] == candidate_value
     assert campaign._config_diff_paths(
         variants["baseline"],
         variants["candidate"],
-    ) == {"model.stf_output_parameterization"}
+    ) == {".".join(campaign.VARIANT_AXIS_PATHS[expected_axis])}
+    if expected_axis == campaign.SCHEDULER_T0_AXIS:
+        assert {
+            variant["model"]["stf_output_parameterization"]
+            for variant in variants.values()
+        } == {"moment_shape_factorized"}
+        assert {
+            variant["training"]["scheduler_T_mult"]
+            for variant in variants.values()
+        } == {2}
 
 
-def test_formal_config_rejects_a_second_scientific_change() -> None:
-    variants = campaign.build_variant_configs(_config())
+@pytest.mark.parametrize(
+    ("config_path", "expected_axis"),
+    [
+        (PHASE23_CONFIG_PATH, campaign.STF_OUTPUT_PARAMETERIZATION_AXIS),
+        (PHASE24_CONFIG_PATH, campaign.SCHEDULER_T0_AXIS),
+    ],
+)
+def test_formal_config_rejects_a_second_scientific_change(
+    config_path: Path,
+    expected_axis: str,
+) -> None:
+    variants = campaign.build_variant_configs(_config(config_path))
     changed = copy.deepcopy(variants["candidate"])
     changed["model"]["dropout"] = 0.1
 
     assert campaign._config_diff_paths(variants["baseline"], changed) == {
         "model.dropout",
-        "model.stf_output_parameterization",
+        ".".join(campaign.VARIANT_AXIS_PATHS[expected_axis]),
     }
+
+
+def test_phase24_axis_requires_scheduler_t0_15_baseline() -> None:
+    config = _config(PHASE24_CONFIG_PATH)
+    config["training"]["scheduler_T0"] = 195
+
+    with pytest.raises(ValueError, match="Phase24 factorized/T0=15 baseline"):
+        campaign.validate_formal_config(config)
 
 
 def test_split_contract_is_frozen_for_all_three_seeds() -> None:
@@ -166,6 +222,81 @@ def test_validation_log_replays_checkpoint_minimum_delta() -> None:
     }
 
 
+def test_phase23_legacy_seed_summary_without_new_axis_fields_resumes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_root = tmp_path / "seed_17"
+    references: dict[str, dict[str, str]] = {}
+    for name in ("checkpoint", "config", "split", "training_log", "run_manifest"):
+        artifact_path = tmp_path / f"{name}.artifact"
+        artifact_path.write_text(name, encoding="utf-8")
+        references[name] = _artifact(artifact_path)
+    legacy_summary = {
+        "variant": "baseline",
+        "parameterization": "direct",
+        "seed": 17,
+        campaign.VALIDATION_METRIC: 0.2,
+        **references,
+    }
+    _write_json(seed_root / "seed_summary.json", legacy_summary)
+    monkeypatch.setattr(
+        campaign,
+        "_runtime_config",
+        lambda *_args, **_kwargs: pytest.fail(
+            "a valid legacy seed summary must resume without retraining"
+        ),
+    )
+
+    resumed = campaign._train_one_seed(
+        variant="baseline",
+        config=_config(PHASE23_CONFIG_PATH),
+        seed=17,
+        seed_root=seed_root,
+        dataset_manifest=tmp_path / "unused_manifest.csv",
+        frozen_split_path=tmp_path / "unused_split.json",
+        resume=True,
+    )
+
+    assert "variant_axis" not in resumed
+    assert "scheduler_T0" not in resumed
+    assert resumed == legacy_summary
+
+
+def _logged_scheduler_learning_rates(scheduler_t0: int) -> list[float]:
+    parameter = torch.nn.Parameter(torch.tensor(0.0))
+    optimizer = torch.optim.AdamW([parameter], lr=1.0e-4)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+        optimizer,
+        T_0=scheduler_t0,
+        T_mult=2,
+        eta_min=1.0e-6,
+    )
+    learning_rates: list[float] = []
+    for epoch in range(200):
+        optimizer.zero_grad(set_to_none=True)
+        parameter.square().backward()
+        optimizer.step()
+        learning_rates.append(float(optimizer.param_groups[0]["lr"]))
+        if epoch >= 5:
+            scheduler.step()
+    return learning_rates
+
+
+def test_phase24_scheduler_has_no_restart_in_the_logged_training_window() -> None:
+    baseline = _logged_scheduler_learning_rates(15)
+    candidate = _logged_scheduler_learning_rates(195)
+
+    assert candidate[:6] == pytest.approx([1.0e-4] * 6)
+    assert all(next_lr <= lr for lr, next_lr in zip(candidate, candidate[1:]))
+    baseline_restart_epochs = [
+        epoch
+        for epoch in range(2, 201)
+        if baseline[epoch - 1] > baseline[epoch - 2]
+    ]
+    assert baseline_restart_epochs == [21, 51, 111]
+
+
 def test_seed_selection_uses_validation_event_mae_and_never_ensembles() -> None:
     seed_rows = {
         17: {campaign.VALIDATION_METRIC: 0.22},
@@ -195,13 +326,39 @@ def test_locked_test_loader_raises_on_iteration() -> None:
         iter(locked)
 
 
+@pytest.mark.parametrize(
+    (
+        "formal_config_path",
+        "expected_axis",
+        "expected_parameterizations",
+        "expected_scheduler_t0s",
+    ),
+    [
+        (
+            PHASE23_CONFIG_PATH,
+            campaign.STF_OUTPUT_PARAMETERIZATION_AXIS,
+            ("direct", "moment_shape_factorized"),
+            (15, 15),
+        ),
+        (
+            PHASE24_CONFIG_PATH,
+            campaign.SCHEDULER_T0_AXIS,
+            ("moment_shape_factorized", "moment_shape_factorized"),
+            (15, 195),
+        ),
+    ],
+)
 def test_train_stage_selects_from_validation_without_test_or_external(
+    formal_config_path: Path,
+    expected_axis: str,
+    expected_parameterizations: tuple[str, str],
+    expected_scheduler_t0s: tuple[int, int],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config_path = tmp_path / "frozen_config.yaml"
     config_path.write_text(
-        yaml.safe_dump(_config(), sort_keys=False),
+        yaml.safe_dump(_config(formal_config_path), sort_keys=False),
         encoding="utf-8",
     )
     manifest_path = tmp_path / "dataset_manifest.csv"
@@ -267,10 +424,18 @@ def test_train_stage_selects_from_validation_without_test_or_external(
     ]
     assert summary["test_evaluated"] is False
     assert summary["external_evaluated"] is False
+    assert summary["variant_axis"] == expected_axis
     assert summary["variants"]["baseline"]["selection"]["selected_seed"] == 42
     assert summary["variants"]["candidate"]["selection"]["selected_seed"] == 73
+    variant_names = ("baseline", "candidate")
+    assert tuple(
+        summary["variants"][name]["parameterization"] for name in variant_names
+    ) == expected_parameterizations
+    assert tuple(
+        summary["variants"][name]["scheduler_T0"] for name in variant_names
+    ) == expected_scheduler_t0s
     assert summary["variants"]["candidate"]["scientific_diff_from_baseline"] == [
-        "model.stf_output_parameterization"
+        ".".join(campaign.VARIANT_AXIS_PATHS[expected_axis])
     ]
 
 

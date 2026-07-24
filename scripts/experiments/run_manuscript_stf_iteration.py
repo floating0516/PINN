@@ -57,10 +57,24 @@ from src.utils.provenance import (  # noqa: E402
 
 
 SEEDS = (17, 42, 73)
-VARIANTS = {
-    "baseline": "direct",
-    "candidate": "moment_shape_factorized",
+STF_OUTPUT_PARAMETERIZATION_AXIS = "stf_output_parameterization"
+SCHEDULER_T0_AXIS = "scheduler_T0"
+VARIANT_AXES = {
+    STF_OUTPUT_PARAMETERIZATION_AXIS: {
+        "baseline": "direct",
+        "candidate": "moment_shape_factorized",
+    },
+    SCHEDULER_T0_AXIS: {
+        "baseline": 15,
+        "candidate": 195,
+    },
 }
+VARIANT_AXIS_PATHS = {
+    STF_OUTPUT_PARAMETERIZATION_AXIS: ("model", "stf_output_parameterization"),
+    SCHEDULER_T0_AXIS: ("training", "scheduler_T0"),
+}
+# Backward-compatible alias for the Phase23 campaign and its persisted tests.
+VARIANTS = VARIANT_AXES[STF_OUTPUT_PARAMETERIZATION_AXIS]
 VALIDATION_METRIC = "validation_event_mae_catalog"
 EXPECTED_SOURCE_SHA256 = (
     "2e1fa4c12fc1eb03ffc8bf9235491f0886d4b0d360ebcb3486baca4d948cfd6a"
@@ -256,16 +270,37 @@ def _config_diff_paths(
     return set() if base == candidate else {prefix}
 
 
+def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
+    model = base_config.get("model")
+    if not isinstance(model, Mapping):
+        raise ValueError("formal config is missing model")
+    training = base_config.get("training")
+    if not isinstance(training, Mapping):
+        raise ValueError("formal config is missing training")
+    parameterization = model.get("stf_output_parameterization")
+    scheduler_t0 = training.get("scheduler_T0")
+    if parameterization == "direct" and scheduler_t0 == 15:
+        return STF_OUTPUT_PARAMETERIZATION_AXIS
+    if parameterization == "moment_shape_factorized" and scheduler_t0 == 15:
+        return SCHEDULER_T0_AXIS
+    raise ValueError(
+        "formal config must describe the Phase23 direct baseline or the "
+        "Phase24 factorized/T0=15 baseline"
+    )
+
+
 def build_variant_configs(
     base_config: Mapping[str, Any],
 ) -> dict[str, dict[str, Any]]:
+    axis = variant_axis_from_config(base_config)
     variants: dict[str, dict[str, Any]] = {}
-    for name, parameterization in VARIANTS.items():
+    for name, value in VARIANT_AXES[axis].items():
         config = copy.deepcopy(dict(base_config))
-        config["model"]["stf_output_parameterization"] = parameterization
+        section, key = VARIANT_AXIS_PATHS[axis]
+        config[section][key] = value
         variants[name] = config
     differences = _config_diff_paths(variants["baseline"], variants["candidate"])
-    expected = {"model.stf_output_parameterization"}
+    expected = {".".join(VARIANT_AXIS_PATHS[axis])}
     if differences != expected:
         raise ValueError(
             "baseline/candidate scientific diff changed: "
@@ -311,7 +346,6 @@ def validate_formal_config(config: dict[str, Any]) -> None:
         ("model", "dropout"): 0.2,
         ("model", "input_components"): ["radial"],
         ("model", "predict_catalog_mw"): False,
-        ("model", "stf_output_parameterization"): "direct",
         ("training", "split_protocol"): "within_event_station",
         ("training", "validation_event_fraction"): 0.15,
         ("training", "test_event_fraction"): 0.15,
@@ -319,6 +353,9 @@ def validate_formal_config(config: dict[str, Any]) -> None:
         ("training", "early_stop_metric"): "event_mae_catalog",
         ("training", "checkpoint_metric"): "event_mae_catalog",
         ("training", "early_stop_min_delta"): 0.0,
+        ("training", "epochs"): 200,
+        ("training", "warmup_epochs"): 5,
+        ("training", "scheduler_T_mult"): 2,
         ("training", "stf_rate_loss", "lambda_MSE"): 1.0,
         ("training", "stf_rate_loss", "lambda_synth"): 0.5,
         ("training", "stf_rate_loss", "lambda_mag"): 1.0,
@@ -453,6 +490,7 @@ def run_preflight(
     summary = {
         "stage": "preflight",
         "status": "complete",
+        "variant_axis": variant_axis_from_config(source_config),
         "created_at_utc": utc_now_iso(),
         "git_commit": current_git_commit(PROJECT_ROOT),
         "git_dirty": False,
@@ -693,6 +731,7 @@ def _train_one_seed(
     summary = {
         "variant": variant,
         "parameterization": config["model"]["stf_output_parameterization"],
+        "scheduler_T0": int(config["training"]["scheduler_T0"]),
         "seed": seed,
         **checkpoint_selection,
         "checkpoint": _artifact(verified["checkpoint_path"]),
@@ -723,6 +762,7 @@ def run_train(
     if smoke.get("status") != "complete":
         raise RuntimeError("smoke stage did not pass")
     config, dataset_manifest = _preflight_config(preflight)
+    variant_axis = variant_axis_from_config(config)
     variants = build_variant_configs(config)
     variant_summaries: dict[str, Any] = {}
     for variant, variant_config in variants.items():
@@ -757,6 +797,7 @@ def run_train(
             "parameterization": variant_config["model"][
                 "stf_output_parameterization"
             ],
+            "scheduler_T0": int(variant_config["training"]["scheduler_T0"]),
             "scientific_diff_from_baseline": sorted(
                 _config_diff_paths(variants["baseline"], variant_config)
             ),
@@ -775,6 +816,7 @@ def run_train(
         "smoke_summary": _artifact(
             _stage_dir(output_root, "smoke") / "summary.json"
         ),
+        "variant_axis": variant_axis,
         "selection_metric": VALIDATION_METRIC,
         "test_evaluated": False,
         "external_evaluated": False,
