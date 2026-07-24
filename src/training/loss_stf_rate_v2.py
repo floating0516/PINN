@@ -75,6 +75,7 @@ def forward_displacement_from_rate(
     include_far_S: bool,
     include_intermediate_P: bool,
     include_intermediate_S: bool,
+    origin_aligned: bool = False,
 ) -> torch.Tensor:
     if rate_hat.ndim != 2 or not rate_hat.is_floating_point():
         raise ValueError("rate_hat must have shape (batch, source_time)")
@@ -105,8 +106,12 @@ def forward_displacement_from_rate(
         dim=1,
     )
     delays = travel_time.delays(source_distance)
-    p_delay_sec = torch.zeros_like(delays.p_sec)
-    s_delay_sec = delays.s_after_p_sec
+    if origin_aligned:
+        p_delay_sec = delays.p_sec
+        s_delay_sec = delays.s_sec
+    else:
+        p_delay_sec = torch.zeros_like(delays.p_sec)
+        s_delay_sec = delays.s_after_p_sec
     rate_p = sample_source_history(
         rate_hat,
         source_dt,
@@ -171,6 +176,45 @@ def forward_displacement_from_rate(
     if include_intermediate and include_intermediate_S:
         displacement = displacement + C_int_S_batch * moment_s
     return displacement
+
+
+def forward_displacement_from_origin_rate(
+    rate_hat: torch.Tensor,
+    source_dt_sec: torch.Tensor,
+    observation_dt_sec: torch.Tensor,
+    observation_steps: int,
+    source_distance_m: torch.Tensor,
+    travel_time: ConstantVelocityTravelTime,
+    C_int_P: torch.Tensor,
+    C_int_S: torch.Tensor,
+    C_far_P: torch.Tensor,
+    C_far_S: torch.Tensor,
+    *,
+    include_intermediate: bool,
+    include_far_P: bool,
+    include_far_S: bool,
+    include_intermediate_P: bool,
+    include_intermediate_S: bool,
+) -> torch.Tensor:
+    """Forward an origin-aligned source history with absolute P/S delays."""
+    return forward_displacement_from_rate(
+        rate_hat,
+        source_dt_sec,
+        observation_dt_sec,
+        observation_steps,
+        source_distance_m,
+        travel_time,
+        C_int_P,
+        C_int_S,
+        C_far_P,
+        C_far_S,
+        include_intermediate=include_intermediate,
+        include_far_P=include_far_P,
+        include_far_S=include_far_S,
+        include_intermediate_P=include_intermediate_P,
+        include_intermediate_S=include_intermediate_S,
+        origin_aligned=True,
+    )
 
 
 def compute_radiation_coefficients(
@@ -403,6 +447,237 @@ def pinn_loss_stf_rate_v2(
         "window_mw_mean": float(window_magnitude.detach().mean().cpu()),
     }
     return total_loss, metrics
+
+
+def causal_event_stf_rate_loss_v2(
+    *,
+    rate_hat: torch.Tensor,
+    pred_rate_encoded: torch.Tensor,
+    rate_ref_encoded: torch.Tensor,
+    rate_ref_physical: torch.Tensor,
+    pred_catalog_mw: torch.Tensor,
+    true_mag: torch.Tensor,
+    radial_obs: torch.Tensor,
+    source_distance_m: torch.Tensor,
+    theta_deg: torch.Tensor,
+    phi_slip_deg: torch.Tensor,
+    source_dt_sec: torch.Tensor,
+    observation_dt_sec: torch.Tensor,
+    waveform_valid_mask: torch.Tensor,
+    station_mask: torch.Tensor,
+    travel_time: ConstantVelocityTravelTime,
+    rho: float,
+    amplitude_gain: float,
+    lambda_MSE: float,
+    lambda_synth: float,
+    lambda_mag: float,
+    lambda_shape: float,
+    include_intermediate: bool,
+    radiation_mode: str,
+    include_far_P: bool,
+    include_far_S: bool,
+    include_intermediate_P: bool,
+    include_intermediate_S: bool,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Apply the original four losses to a shared origin-aligned event STF."""
+    if rate_hat.ndim != 2 or pred_rate_encoded.shape != rate_hat.shape:
+        raise ValueError("event STF predictions must have shape (batch, source_time)")
+    batch_size = rate_hat.shape[0]
+    if rate_ref_encoded.shape != rate_hat.shape:
+        raise ValueError("encoded STF reference must match the prediction")
+    if rate_ref_physical.shape != rate_hat.shape:
+        raise ValueError("physical STF reference must match the prediction")
+    if radial_obs.ndim != 3 or radial_obs.shape[0] != batch_size:
+        raise ValueError("radial_obs must have shape (batch, station, time)")
+    station_shape = radial_obs.shape[:2]
+    station_tensors = {
+        "source_distance_m": source_distance_m,
+        "theta_deg": theta_deg,
+        "phi_slip_deg": phi_slip_deg,
+        "observation_dt_sec": observation_dt_sec,
+        "station_mask": station_mask,
+    }
+    for name, value in station_tensors.items():
+        if value.shape != station_shape:
+            raise ValueError(f"{name} must have shape (batch, station)")
+    if waveform_valid_mask.shape != radial_obs.shape:
+        raise ValueError("waveform_valid_mask must match radial_obs")
+
+    event_indices, station_indices = torch.nonzero(
+        station_mask.to(dtype=torch.bool),
+        as_tuple=True,
+    )
+    if event_indices.numel() == 0:
+        raise ValueError("at least one station is required for the forward loss")
+    selected_rate = rate_hat[event_indices]
+    selected_distance = source_distance_m[event_indices, station_indices]
+    selected_theta = theta_deg[event_indices, station_indices]
+    selected_phi = phi_slip_deg[event_indices, station_indices]
+    radiation = compute_radiation_coefficients(
+        selected_theta,
+        selected_phi,
+        mode=radiation_mode,
+    )
+    coefficients = compute_physical_coefficients(
+        selected_distance,
+        rho,
+        travel_time.alpha_m_per_s,
+        travel_time.beta_m_per_s,
+        *radiation,
+        amplitude_gain=amplitude_gain,
+    )
+    source_dt = _batch_vector(
+        source_dt_sec,
+        batch_size=batch_size,
+        reference=rate_hat,
+        name="source_dt_sec",
+    )[event_indices]
+    selected_observation_dt = observation_dt_sec[event_indices, station_indices]
+    selected_observed = radial_obs[event_indices, station_indices]
+    selected_valid = waveform_valid_mask[event_indices, station_indices]
+    u_hat = forward_displacement_from_origin_rate(
+        selected_rate,
+        source_dt,
+        selected_observation_dt,
+        radial_obs.shape[-1],
+        selected_distance,
+        travel_time,
+        *coefficients,
+        include_intermediate=include_intermediate,
+        include_far_P=include_far_P,
+        include_far_S=include_far_S,
+        include_intermediate_P=include_intermediate_P,
+        include_intermediate_S=include_intermediate_S,
+    )
+
+    L_MSE = F.mse_loss(pred_rate_encoded, rate_ref_encoded)
+    L_synth = masked_normalized_waveform_mse(
+        u_hat,
+        selected_observed,
+        selected_valid,
+    )
+    L_mag = F.mse_loss(
+        pred_catalog_mw.reshape(batch_size),
+        true_mag.reshape(batch_size),
+    )
+    L_shape = _shape_loss(rate_hat, rate_ref_physical)
+    total_loss = (
+        float(lambda_MSE) * L_MSE
+        + float(lambda_synth) * L_synth
+        + float(lambda_mag) * L_mag
+        + float(lambda_shape) * L_shape
+    )
+    window_magnitude = moment_magnitude_from_rate(rate_hat, source_dt_sec)
+    metrics = {
+        "L_total": float(total_loss.detach().cpu()),
+        "L_MSE": float(L_MSE.detach().cpu()),
+        "L_synth": float(L_synth.detach().cpu()),
+        "L_mag": float(L_mag.detach().cpu()),
+        "L_shape": float(L_shape.detach().cpu()),
+        "window_mw_mean": float(window_magnitude.detach().mean().cpu()),
+    }
+    return total_loss, metrics
+
+
+class CausalEventSTFRateWaveformLossV2(nn.Module):
+    """Original V2 loss system for a causal, event-level shared STF model."""
+
+    def __init__(self, config: dict[str, Any]) -> None:
+        super().__init__()
+        validate_config_v2(config)
+        loss_config = config["training"]["stf_rate_loss"]
+        self.lambda_MSE = float(loss_config["lambda_MSE"])
+        self.lambda_synth = float(loss_config["lambda_synth"])
+        self.lambda_mag = float(loss_config["lambda_mag"])
+        self.lambda_shape = float(loss_config["lambda_shape"])
+        self.rate_representation = str(
+            config["training"]["rate_representation"]
+        ).lower()
+        self.stf_m_ref = stf_m_ref_from_config(config)
+        physics = config["physics"]
+        self.rho = float(physics["rho"])
+        self.travel_time = travel_time_from_config(config)
+        self.amplitude_gain = float(physics["amplitude_gain"])
+        self.include_intermediate = bool(
+            loss_config.get("include_intermediate_field", True)
+        )
+        self.radiation_mode = str(
+            loss_config.get("radiation_pattern_mode", "simplified")
+        ).lower()
+        self.include_far_P = bool(loss_config.get("include_far_field_P", True))
+        self.include_far_S = bool(loss_config.get("include_far_field_S", True))
+        self.include_intermediate_P = bool(
+            loss_config.get("include_intermediate_field_P", True)
+        )
+        self.include_intermediate_S = bool(
+            loss_config.get("include_intermediate_field_S", True)
+        )
+
+    def _decode_rate(self, pred_rate: torch.Tensor) -> torch.Tensor:
+        safe = torch.nan_to_num(
+            pred_rate,
+            nan=0.0,
+            posinf=0.0,
+            neginf=0.0,
+        )
+        if self.rate_representation == "log1p":
+            safe = torch.clamp(safe, min=-20.0, max=6.0)
+            return torch.clamp(
+                self.stf_m_ref * (torch.pow(10.0, safe) - 1.0),
+                min=0.0,
+            )
+        if self.rate_representation == "linear":
+            return torch.clamp(safe, min=0.0)
+        raise ValueError(
+            f"unsupported rate_representation: {self.rate_representation}"
+        )
+
+    def forward(
+        self,
+        pred_rate: torch.Tensor,
+        *,
+        pred_catalog_mw: torch.Tensor,
+        rate_ref_encoded: torch.Tensor,
+        rate_ref_physical: torch.Tensor,
+        true_mag: torch.Tensor,
+        radial_obs: torch.Tensor,
+        source_distance_m: torch.Tensor,
+        theta_deg: torch.Tensor,
+        phi_slip_deg: torch.Tensor,
+        source_dt_sec: torch.Tensor,
+        observation_dt_sec: torch.Tensor,
+        waveform_valid_mask: torch.Tensor,
+        station_mask: torch.Tensor,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        return causal_event_stf_rate_loss_v2(
+            rate_hat=self._decode_rate(pred_rate),
+            pred_rate_encoded=pred_rate,
+            rate_ref_encoded=rate_ref_encoded,
+            rate_ref_physical=rate_ref_physical,
+            pred_catalog_mw=pred_catalog_mw,
+            true_mag=true_mag,
+            radial_obs=radial_obs,
+            source_distance_m=source_distance_m,
+            theta_deg=theta_deg,
+            phi_slip_deg=phi_slip_deg,
+            source_dt_sec=source_dt_sec,
+            observation_dt_sec=observation_dt_sec,
+            waveform_valid_mask=waveform_valid_mask,
+            station_mask=station_mask,
+            travel_time=self.travel_time,
+            rho=self.rho,
+            amplitude_gain=self.amplitude_gain,
+            lambda_MSE=self.lambda_MSE,
+            lambda_synth=self.lambda_synth,
+            lambda_mag=self.lambda_mag,
+            lambda_shape=self.lambda_shape,
+            include_intermediate=self.include_intermediate,
+            radiation_mode=self.radiation_mode,
+            include_far_P=self.include_far_P,
+            include_far_S=self.include_far_S,
+            include_intermediate_P=self.include_intermediate_P,
+            include_intermediate_S=self.include_intermediate_S,
+        )
 
 
 class STFRateWaveformLossV2(nn.Module):

@@ -5,6 +5,7 @@ import torch
 from src.physics.travel_time import ConstantVelocityTravelTime
 from src.training.loss_stf_rate_v2 import (
     compute_physical_coefficients,
+    forward_displacement_from_origin_rate,
     forward_displacement_from_rate,
 )
 from src.training.time_sampling import sample_source_history
@@ -98,6 +99,38 @@ def test_p_aligned_forward_uses_zero_p_and_relative_s_delay() -> None:
     assert torch.equal(
         displacement,
         torch.tensor([[0.0, 1.0, 1.0, 0.0, 0.0]]),
+    )
+
+
+def test_origin_aligned_forward_uses_absolute_p_and_s_delays() -> None:
+    rate = torch.tensor([[0.0, 1.0, 0.0, 0.0]])
+    zeros = torch.zeros(1)
+    ones = torch.ones(1)
+
+    displacement = forward_displacement_from_origin_rate(
+        rate,
+        source_dt_sec=torch.tensor([1.0]),
+        observation_dt_sec=torch.tensor([1.0]),
+        observation_steps=6,
+        source_distance_m=torch.tensor([3.0]),
+        travel_time=ConstantVelocityTravelTime(
+            alpha_m_per_s=3.0,
+            beta_m_per_s=1.5,
+        ),
+        C_int_P=zeros,
+        C_int_S=zeros,
+        C_far_P=ones,
+        C_far_S=ones,
+        include_intermediate=False,
+        include_far_P=True,
+        include_far_S=True,
+        include_intermediate_P=False,
+        include_intermediate_S=False,
+    )
+
+    assert torch.equal(
+        displacement,
+        torch.tensor([[0.0, 0.0, 1.0, 1.0, 0.0, 0.0]]),
     )
 
 
