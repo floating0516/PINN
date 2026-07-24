@@ -1,0 +1,162 @@
+{
+  "inputs": {
+    "full_config": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/config.yaml",
+      "sha256": "8b280673a08df52f97867054c96edb6f7e4babdd6ed431f57e4fbff40facbef7"
+    },
+    "full_final_events": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/external_final_event_predictions.csv",
+      "sha256": "7568237806901783a1c0743b1b9ae566d582a6ebef4feaad0a782197a9622082"
+    },
+    "full_horizon_metrics": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/external_horizon_metrics.csv",
+      "sha256": "95dd1dfa3eecf5e2ca34788939799270ea56fcad208264893c0e9368905f111e"
+    },
+    "full_online_predictions": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/external_online_predictions.csv",
+      "sha256": "3a7b40fe708200d265b0149676948ad8e31632227e807728af77d1e62e0b4854"
+    },
+    "full_seed_17_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/seed_17/training_log.csv",
+      "sha256": "069d2103bbe67a24f4f3c54a4fd7cea5696dd3bfdf687cb09c9783688f83c807"
+    },
+    "full_seed_42_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/seed_42/training_log.csv",
+      "sha256": "0ea14d25e9b9ce03fabf40b139cb6a3ef92cfd856dcd66563a401e90483d8092"
+    },
+    "full_seed_73_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/seed_73/training_log.csv",
+      "sha256": "4ed3068a9613d6f9242a1c1069378be01c6f7e832fb18adced9f2f663d587dc0"
+    },
+    "full_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/selection.json",
+      "sha256": "a2fbf556a5858727c1585db9ae40db1c7aa259ae22033300f2e2202478a94902"
+    },
+    "full_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/summary.json",
+      "sha256": "e0a138fc72f4e6bf07d1476377a7dbd7950036a5ca29038058c1a578b62333e1"
+    },
+    "no_synth_config": {
+      "path": "/home/lihe/PINN_Mag/runs/phase20-forward-guided-no-synth-20260724T102555Z-de2149b/config.yaml",
+      "sha256": "7793176d38584d522e7e28c1b8ea9bce8d3503f7b890400c70efd263b9458c88"
+    },
+    "no_synth_horizon_metrics": {
+      "path": "/home/lihe/PINN_Mag/runs/phase20-forward-guided-no-synth-20260724T102555Z-de2149b/external_horizon_metrics.csv",
+      "sha256": "d16258ea140ff518fdbd9c81f395b8dd048eff7e71d231c4e6e8ee541705e4c6"
+    },
+    "no_synth_seed_17_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase20-forward-guided-no-synth-20260724T102555Z-de2149b/seed_17/training_log.csv",
+      "sha256": "6bb5acb497ff26a800fde525aeb8f54318cb659762dea6f3b0e9aeeeee582efe"
+    },
+    "no_synth_seed_42_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase20-forward-guided-no-synth-20260724T102555Z-de2149b/seed_42/training_log.csv",
+      "sha256": "84d00d92a75dd63da5e3b4021145ded799bfcf5c344375c5a9c3bb616768fa51"
+    },
+    "no_synth_seed_73_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase20-forward-guided-no-synth-20260724T102555Z-de2149b/seed_73/training_log.csv",
+      "sha256": "75c0753259287cace4966996ec2f1ec056eca829ec8685fd64323188a16f045c"
+    },
+    "no_synth_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase20-forward-guided-no-synth-20260724T102555Z-de2149b/selection.json",
+      "sha256": "eea1c5d9f1c979252a8f6d91b1b782817bc2f513b3b7cfe58821a537ca4ede6f"
+    },
+    "no_synth_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase20-forward-guided-no-synth-20260724T102555Z-de2149b/summary.json",
+      "sha256": "ad125f8649f72e36824f353063bb996f9e622d2a3e1ab02c8de8a2f239f67344"
+    },
+    "phase17_horizon_metrics": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/external_horizon_metrics.csv",
+      "sha256": "8981e4bac9702d2221a8b4ed2f20f4b6b1395915bcb70276409d44db4b01f820"
+    },
+    "phase17_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/summary.json",
+      "sha256": "3bab78092374f06dc1799e135024e30694e7c92d1ec145dd6c3f79bb81a3b0e9"
+    }
+  },
+  "outputs": {
+    "01_training_dynamics.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/01_training_dynamics.pdf",
+      "sha256": "ffcfb323fae8cd58fc3c2f658a2be8df6c22eda2bf0084bb8de89cff99bd4094"
+    },
+    "01_training_dynamics.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/01_training_dynamics.png",
+      "sha256": "76df742f8e0b225303222aa6862e3f301a7cfb5f564ae4441d061e29c41483e7"
+    },
+    "02_seed_selection.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/02_seed_selection.pdf",
+      "sha256": "d11aacea6b7fe5902fbe71785ef92ca7ac14e24e75f3be9ff00d4ed9f61a0910"
+    },
+    "02_seed_selection.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/02_seed_selection.png",
+      "sha256": "57c40ae8c0be71ff5247ed1262fd74902fa1b87a2452d751c9dbaaf73188ff6d"
+    },
+    "03_online_convergence.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/03_online_convergence.pdf",
+      "sha256": "ee4d07473959e9522d73e213e8ae622b1ef61617af77aa6b9d46ff883b38d4a5"
+    },
+    "03_online_convergence.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/03_online_convergence.png",
+      "sha256": "6f3165a8f85ca3b671df5d848dcfbeb7fb80fe0d1fd28e83e3727e841c703894"
+    },
+    "04_forward_loss_ablation.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/04_forward_loss_ablation.pdf",
+      "sha256": "5a7f04686ebf0dd30164dd53e6444ce865bf695b07a968bae9e989e19c61ee1a"
+    },
+    "04_forward_loss_ablation.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/04_forward_loss_ablation.png",
+      "sha256": "50475710a855247f86af5f2f30178d61b07bf489f37aae948e552da9276546a8"
+    },
+    "05_event_trajectories.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/05_event_trajectories.pdf",
+      "sha256": "f301a82ac14ed9357b3b3d6a68fcb949ba6d8239e19c4f6e7399cbe7d53362e7"
+    },
+    "05_event_trajectories.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/05_event_trajectories.png",
+      "sha256": "119b51e1fb1e2eea28ce44c3f6faedf796fba825b96829f5af29a19bab3aec50"
+    },
+    "06_dynamic_station_selection.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/06_dynamic_station_selection.pdf",
+      "sha256": "eaa9b9a59126e92f3bc9f5d749162a46a04a061820a2a4b3b319026adc318ee2"
+    },
+    "06_dynamic_station_selection.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/figures/06_dynamic_station_selection.png",
+      "sha256": "d21804f188c0a1215f923e6ea2f9d072bef6b9eae101efe320cbd9dcef5658ce"
+    },
+    "README.md": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/README.md",
+      "sha256": "c9f1d5511ad2d58571f9c79d4bb40752d7edc8b62e7a065433111945d3af9764"
+    },
+    "dynamic_station_summary.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/dynamic_station_summary.csv",
+      "sha256": "3198150492c6924233ed5727ec269e4ff513ca5435c2810233ac44c83fbff612"
+    },
+    "external_final_event_predictions.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/external_final_event_predictions.csv",
+      "sha256": "445dfa42fd21002de721b276a2e7a8496671493c89e0be825903b0e79b9b76d1"
+    },
+    "external_horizon_metrics.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/external_horizon_metrics.csv",
+      "sha256": "95dd1dfa3eecf5e2ca34788939799270ea56fcad208264893c0e9368905f111e"
+    },
+    "external_online_predictions.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/external_online_predictions.csv",
+      "sha256": "ac348cc204c5cdf5bb34543eb104e88c4f2d9ee145fa03de34df3de763408c4e"
+    },
+    "forward_loss_ablation.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/forward_loss_ablation.csv",
+      "sha256": "fed1fbd4573e1df05ea0305908f7c48b7aa287b3ab572235f7a3dcca5b52baed"
+    },
+    "no_synth_horizon_metrics.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/no_synth_horizon_metrics.csv",
+      "sha256": "d16258ea140ff518fdbd9c81f395b8dd048eff7e71d231c4e6e8ee541705e4c6"
+    },
+    "phase17_horizon_metrics.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/phase17_horizon_metrics.csv",
+      "sha256": "8981e4bac9702d2221a8b4ed2f20f4b6b1395915bcb70276409d44db4b01f820"
+    },
+    "seed_selection.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase19-causal-forward-guided-r-only/seed_selection.csv",
+      "sha256": "4094c60a96a8d11b8cbcca241f339d1e037aa83e85bd43a2c6f98387657dac0f"
+    }
+  }
+}
