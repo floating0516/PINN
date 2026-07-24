@@ -1,0 +1,106 @@
+{
+  "inputs": {
+    "phase17_config": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/config.yaml",
+      "sha256": "e8c629ec3b5fc8932edf5995e7645ff5c4dca20c4f8c9bd9b653e5ba1071facd"
+    },
+    "phase17_final_events": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/external_final_event_predictions.csv",
+      "sha256": "715312e4fde25a8371f1d52fce1d2b4adcdbf88c308d55cb88e308727c3b4af6"
+    },
+    "phase17_horizon_metrics": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/external_horizon_metrics.csv",
+      "sha256": "8981e4bac9702d2221a8b4ed2f20f4b6b1395915bcb70276409d44db4b01f820"
+    },
+    "phase17_online_predictions": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/external_online_predictions.csv",
+      "sha256": "a40e45e35f04bbd357f307185d4631604735e6ef3ac5fddb4bd2506f3de57252"
+    },
+    "phase17_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/selection.json",
+      "sha256": "f8b0c33ba50438c55e2c92d5d25b14f056d65bac396f9c83dabcad125d5c4fe5"
+    },
+    "phase17_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/summary.json",
+      "sha256": "3bab78092374f06dc1799e135024e30694e7c92d1ec145dd6c3f79bb81a3b0e9"
+    },
+    "seed_17_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/seed_17/training_log.csv",
+      "sha256": "ce10b31237e82d31ab78bec572192136189aef88fffc94821ff99aa0874e2de2"
+    },
+    "seed_42_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/seed_42/training_log.csv",
+      "sha256": "4079b6f188fc2e527d79a3df81ae192f96f1ddb310bf520ee49a30573af7615c"
+    },
+    "seed_73_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase17-causal-radial-online-20260724T072107Z-a337bd4/seed_73/training_log.csv",
+      "sha256": "cf07484b2b11d69c066e93467f1575be651b23907285f6ff5c6c11c43c562284"
+    }
+  },
+  "outputs": {
+    "01_training_dynamics.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/figures/01_training_dynamics.pdf",
+      "sha256": "bb994408b9b93a7d71023556aeec2182e9f3dde74a570b27dbd9628ee3198889"
+    },
+    "01_training_dynamics.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/figures/01_training_dynamics.png",
+      "sha256": "827040197761c972bef077fef8d29b91195c6351800c1b24e4df507bfb960dfe"
+    },
+    "02_seed_selection.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/figures/02_seed_selection.pdf",
+      "sha256": "8e3a2a6b6ef07033b74af04edb10818f1c1fa525fc3d0090b60f216f8fcc3f36"
+    },
+    "02_seed_selection.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/figures/02_seed_selection.png",
+      "sha256": "8c0898fc05d04c84f0b16325ec2321cd8517dc3bfad5a0d5935beead85ec169a"
+    },
+    "03_external_convergence.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/figures/03_external_convergence.pdf",
+      "sha256": "e1bc583f3dd84c904a0ef5804c541d9aec2c27df6f1be698a7bed2ea52123e42"
+    },
+    "03_external_convergence.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/figures/03_external_convergence.png",
+      "sha256": "cb38fcfd0be3f517e297c8622c53df7f16a5523a569fcb3bc017cf8c2baa2117"
+    },
+    "04_event_trajectories.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/figures/04_event_trajectories.pdf",
+      "sha256": "4f6575a8e8f1def318787931bfbc9778081983f8abff6df4ad3479867da22927"
+    },
+    "04_event_trajectories.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/figures/04_event_trajectories.png",
+      "sha256": "307170abcbb46ef9c839cd92f44dedfef2b9e56de7621e3ecf73e1b5ca1cb3f0"
+    },
+    "05_dynamic_station_selection.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/figures/05_dynamic_station_selection.pdf",
+      "sha256": "16483872f7447c85d6d225fcdd638224e479cb8d07f62c7b66d0d6c476cd324d"
+    },
+    "05_dynamic_station_selection.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/figures/05_dynamic_station_selection.png",
+      "sha256": "e802e18053c39bf23f5287b8a49da6fcbe6c027b87cea36bcfcbac3191c234f3"
+    },
+    "README.md": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/README.md",
+      "sha256": "ec38ed9e52ddbde849b1aa8e539b32d554a866900e21ce6f0420cbaa6a0b2fb3"
+    },
+    "dynamic_station_summary.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/dynamic_station_summary.csv",
+      "sha256": "b3fec4a6ce35c6420a555481f3b057fc1c49572a63d2317e81ee450d7080c64e"
+    },
+    "external_final_event_predictions.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/external_final_event_predictions.csv",
+      "sha256": "739c9fd90dee35a8537df0a56bd1e37e63fb2bd65d2d53799305a23c142fdfdb"
+    },
+    "external_horizon_metrics.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/external_horizon_metrics.csv",
+      "sha256": "8981e4bac9702d2221a8b4ed2f20f4b6b1395915bcb70276409d44db4b01f820"
+    },
+    "external_online_predictions.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/external_online_predictions.csv",
+      "sha256": "17958dbacf116edb031f828932084bbcfdec305a52699f5c738c691f5d84bbfe"
+    },
+    "seed_selection.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase17-causal-radial-online/seed_selection.csv",
+      "sha256": "556b437beda91c6e0b5e52d2c204290971caa600aa21259388f9fb64327af8a3"
+    }
+  }
+}

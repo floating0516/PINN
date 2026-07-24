@@ -1,0 +1,9 @@
+event,first_horizon_sec,prediction_count,maximum_active_station_count,final_active_station_count,final_used_station_count,distinct_used_station_sets,station_set_change_count,final_abs_error
+Iquique 2014,6.0,195,11,11,5,20,21,0.005008029937743963
+Kodiak 2018,36.0,165,64,64,5,26,28,0.05925693511962926
+Luding 2022,14.0,187,6,6,5,18,23,0.21394386291503942
+Mandalay 2025,38.0,163,13,13,5,22,25,0.0906923294067381
+Nepal 2015,8.0,193,5,5,5,14,13,0.19291954040527326
+Samos 2020,8.0,193,3,3,3,5,6,0.02536630630493164
+Sand Point 2025,12.0,189,45,45,5,24,24,0.019067478179931818
+Xizang 2025,10.0,191,12,12,5,17,18,0.20676078796386754
