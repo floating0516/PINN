@@ -9,6 +9,10 @@ from src.models.causal_forward_guided import (
     CausalForwardGuidedSpec,
 )
 from src.training.loss_stf_rate_v2 import CausalEventSTFRateWaveformLossV2
+from scripts.experiments.run_causal_forward_guided_event_neural import (
+    _load_yaml,
+    _validate_experiment_config,
+)
 
 
 def _spec() -> CausalForwardGuidedSpec:
@@ -141,3 +145,22 @@ def test_magnitude_residual_is_nonzero_early_and_exactly_zero_at_final() -> None
 
     assert prediction.magnitude_residual[0].abs().item() > 0.0
     assert prediction.magnitude_residual[1].item() == 0.0
+
+
+def test_full_and_no_synth_configs_differ_only_in_forward_weight() -> None:
+    full = _load_yaml(
+        Path("configs/experiments/causal_forward_guided_event_neural.yaml")
+    )
+    no_synth = _load_yaml(
+        Path(
+            "configs/experiments/"
+            "causal_forward_guided_event_neural_no_synth.yaml"
+        )
+    )
+    _validate_experiment_config(full)
+    _validate_experiment_config(no_synth)
+
+    assert full["loss"]["lambda_synth"] == 0.5
+    assert no_synth["loss"]["lambda_synth"] == 0.0
+    full["loss"]["lambda_synth"] = 0.0
+    assert full == no_synth

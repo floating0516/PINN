@@ -1369,13 +1369,18 @@ def run(
     summary = {
         "status": "smoke_complete" if smoke else "complete",
         "method": "causal_forward_guided_event_neural_v2",
+        "ablation": (
+            "none"
+            if float(loss_weights["lambda_synth"]) > 0.0
+            else "no_forward_loss"
+        ),
         "framework": "pytorch",
         "deep_learning": True,
         "input_components": ["R"],
         "uses_tcn": True,
         "uses_transformer": True,
         "uses_shared_event_stf": True,
-        "uses_original_four_term_loss": True,
+        "uses_original_four_term_loss": float(loss_weights["lambda_synth"]) > 0.0,
         "uses_absolute_forward_delays": True,
         "forward_reference_doi": REFERENCE_DOI,
         "uses_future_waveform": False,
