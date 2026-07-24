@@ -125,6 +125,20 @@ def test_source_aligned_workflow_rejects_string_event_balanced_flag() -> None:
         validate_config_v2(config)
 
 
+def test_event_balance_estimator_is_validated_with_its_enable_flag() -> None:
+    config = _minimal_v2()
+    config["training"]["event_balance_estimator"] = "unknown"
+    with pytest.raises(ValueError, match="event_balance_estimator"):
+        validate_config_v2(config)
+
+    config["training"]["event_balance_estimator"] = "inverse_count_full_data"
+    with pytest.raises(ValueError, match="event_balanced_sampling=true"):
+        validate_config_v2(config)
+
+    config["training"]["event_balanced_sampling"] = True
+    validate_config_v2(config)
+
+
 def test_waveform_components_default_to_radial() -> None:
     config = _minimal_v2()
 

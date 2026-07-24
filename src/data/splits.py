@@ -1,10 +1,21 @@
 from __future__ import annotations
 
 from collections import Counter
+from collections.abc import Mapping
 from dataclasses import dataclass
 import math
 
 import numpy as np
+
+
+REPLACEMENT_SAMPLING_ESTIMATOR = "replacement_sampling"
+INVERSE_COUNT_FULL_DATA_ESTIMATOR = "inverse_count_full_data"
+EVENT_BALANCE_ESTIMATORS = frozenset(
+    {
+        REPLACEMENT_SAMPLING_ESTIMATOR,
+        INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -135,3 +146,34 @@ def assert_no_event_overlap(
 def make_event_balanced_weights(events: list[str]) -> list[float]:
     counts = Counter(events)
     return [1.0 / counts[event] for event in events]
+
+
+def resolve_event_balance_estimator(training: Mapping[str, object]) -> str:
+    if "event_balance_estimator" not in training:
+        estimator = REPLACEMENT_SAMPLING_ESTIMATOR
+    else:
+        value = training["event_balance_estimator"]
+        if not isinstance(value, str) or value not in EVENT_BALANCE_ESTIMATORS:
+            raise ValueError(
+                "training.event_balance_estimator must be one of: "
+                + ", ".join(sorted(EVENT_BALANCE_ESTIMATORS))
+            )
+        estimator = value
+
+    enabled = training.get("event_balanced_sampling", False)
+    if not isinstance(enabled, bool):
+        raise ValueError("training.event_balanced_sampling must be boolean")
+    if not enabled and estimator != REPLACEMENT_SAMPLING_ESTIMATOR:
+        raise ValueError(
+            "training.event_balance_estimator=inverse_count_full_data "
+            "requires training.event_balanced_sampling=true"
+        )
+    return estimator
+
+
+def make_event_inverse_count_weights(events: list[str]) -> list[float]:
+    if not events:
+        raise ValueError("events must not be empty")
+    counts = Counter(events)
+    normalization = len(events) / len(counts)
+    return [normalization / counts[event] for event in events]

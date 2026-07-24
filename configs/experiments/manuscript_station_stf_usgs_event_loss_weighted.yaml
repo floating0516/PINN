@@ -1,0 +1,106 @@
+pipeline_version: 2
+project_name: manuscript_station_stf_usgs
+campaign:
+  variant_axis: event_balance_estimator
+dataset:
+  blacklist_events:
+    - N.Honshu2011
+    - N.Honshu2012
+    - N.Honshu2013
+    - E.Fukushima2011
+    - Iwate2011
+  units: mm
+  sample_rate_hz: 1.0
+  radial_peak_min_cm: 2.0
+  allow_missing_stf: false
+  waveform:
+    start_sec: 0.0
+    duration_sec: 200.0
+    min_valid_fraction: 0.99
+    max_interpolation_gap_sec: 0.0
+  baseline:
+    method: median
+    pre_event_start_sec: -60.0
+    pre_event_end_sec: 0.0
+    fallback: pre_p
+    fallback_max_sec: 30.0
+    min_samples: 10
+  filter:
+    type: lowpass
+    cutoff_hz: 0.2
+    num_taps: 7
+    window: hamming
+  stf:
+    path: /home/lihe/PINN_Mag/data/STF_SCARDEC
+    start_sec: 0.0
+    duration_sec: 200.0
+    min_retained_moment_fraction: 0.995
+    preserve_integral: true
+    m_ref: 1.0e+18
+    magnitude_target: catalog
+geometry:
+  network_distance: hypocentral
+physics:
+  rho: 3400.0
+  alpha: 7900.0
+  beta: 4533.0
+  distance_mode: hypocentral
+  delay_mode: absolute
+  amplitude_gain: 1.0
+model:
+  hidden_dim: 128
+  num_layers: 3
+  num_tcn_blocks: 6
+  transformer_num_layers: 3
+  dropout: 0.2
+  use_meta: true
+  input_components: [radial]
+  predict_catalog_mw: false
+  stf_output_parameterization: moment_shape_factorized
+paths:
+  data_path: /home/lihe/PINN_Mag/data/magnitude-label-snapshots/usgs-priority-20260723T044422Z-40d808a/gnss_events_matched.usgs_priority.npz
+  output_dir: outputs_manuscript_station_stf
+  logs_dir: outputs_manuscript_station_stf/logs
+  models_dir: outputs_manuscript_station_stf/models
+  results_dir: outputs_manuscript_station_stf/results
+training:
+  loss_name: stf_rate
+  rate_representation: log1p
+  random_seed: 42
+  batch_size: 64
+  epochs: 200
+  learning_rate: 0.0001
+  weight_decay: 1.0e-05
+  grad_clip_norm: 1.0
+  split_protocol: within_event_station
+  validation_event_fraction: 0.15
+  test_event_fraction: 0.15
+  strict_within_event_split_audit: true
+  event_balanced_sampling: true
+  event_balance_estimator: replacement_sampling
+  early_stop_metric: event_mae_catalog
+  checkpoint_metric: event_mae_catalog
+  early_stop_patience: 50
+  early_stop_min_delta: 0.0
+  warmup_epochs: 5
+  scheduler_T0: 15
+  scheduler_T_mult: 2
+  swa_start: 0
+  num_workers: 0
+  stf_rate_loss:
+    lambda_MSE: 1.0
+    lambda_synth: 0.5
+    lambda_mag: 1.0
+    lambda_shape: 0.1
+    include_intermediate_field: false
+    include_far_field_P: true
+    include_far_field_S: true
+    include_intermediate_field_P: true
+    include_intermediate_field_S: true
+    radiation_pattern_mode: full
+evaluation:
+  primary_reference: catalog
+  secondary_reference: stf_native
+  aggregation: event_median
+  station_thresholds_cm: [0.0, 1.0, 2.0]
+  external_role: development_validation

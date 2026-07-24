@@ -16,11 +16,15 @@ from torch.utils.data import DataLoader, Dataset, Subset, WeightedRandomSampler
 
 from src.data.dataset_v2 import CorrectedEarthquakeDataset
 from src.data.splits import (
+    INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+    REPLACEMENT_SAMPLING_ESTIMATOR,
     EventGroupSplit,
     assert_no_event_overlap,
     make_event_balanced_weights,
     make_event_group_split,
+    make_event_inverse_count_weights,
     make_within_event_station_split,
+    resolve_event_balance_estimator,
 )
 
 
@@ -278,18 +282,29 @@ def get_data_loaders_v2(
     worker_init_fn = partial(_worker_init, seed=seed)
     sampler = None
     shuffle = True
-    if bool(training.get("event_balanced_sampling", False)):
+    event_balanced_sampling = bool(training.get("event_balanced_sampling", False))
+    event_balance_estimator = resolve_event_balance_estimator(training)
+    event_balance_weights_by_event: dict[str, float] | None = None
+    if event_balanced_sampling:
         train_events = [events[index] for index in split.train_indices]
-        sampler = WeightedRandomSampler(
-            weights=torch.as_tensor(
-                make_event_balanced_weights(train_events),
-                dtype=torch.double,
-            ),
-            num_samples=len(split.train_indices),
-            replacement=True,
-            generator=generator,
-        )
-        shuffle = False
+        if event_balance_estimator == REPLACEMENT_SAMPLING_ESTIMATOR:
+            sampler = WeightedRandomSampler(
+                weights=torch.as_tensor(
+                    make_event_balanced_weights(train_events),
+                    dtype=torch.double,
+                ),
+                num_samples=len(split.train_indices),
+                replacement=True,
+                generator=generator,
+            )
+            shuffle = False
+        elif event_balance_estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR:
+            record_weights = make_event_inverse_count_weights(train_events)
+            event_balance_weights_by_event = dict(
+                zip(train_events, record_weights, strict=True)
+            )
+        else:  # pragma: no cover - resolve_event_balance_estimator is exhaustive
+            raise AssertionError("unreachable event-balance estimator")
     train_loader = DataLoader(
         train_dataset,
         batch_size=batch_size,
@@ -298,6 +313,11 @@ def get_data_loaders_v2(
         num_workers=num_workers,
         worker_init_fn=worker_init_fn,
         generator=generator,
+    )
+    setattr(
+        train_loader,
+        "event_balance_weights_by_event",
+        event_balance_weights_by_event,
     )
     validation_loader = DataLoader(
         validation_dataset,

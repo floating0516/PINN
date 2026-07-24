@@ -2,15 +2,19 @@ from collections import defaultdict
 
 import pytest
 import torch
-from torch.utils.data import Dataset, WeightedRandomSampler
+from torch.utils.data import Dataset, RandomSampler, WeightedRandomSampler
 
 from src.data import loaders_v2
 from src.data import splits as splits_module
 from src.data.loaders_v2 import get_data_loaders_v2
 from src.data.splits import (
+    INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+    REPLACEMENT_SAMPLING_ESTIMATOR,
     assert_no_event_overlap,
     make_event_balanced_weights,
     make_event_group_split,
+    make_event_inverse_count_weights,
+    resolve_event_balance_estimator,
 )
 
 
@@ -52,6 +56,36 @@ def test_event_balanced_weights_sum_equally_per_event() -> None:
     weights = make_event_balanced_weights(events)
 
     assert abs(sum(weights[:3]) - weights[3]) < 1.0e-12
+
+
+def test_inverse_count_weights_have_unit_mean_and_equal_event_mass() -> None:
+    events = ["A", "A", "A", "B"]
+
+    weights = make_event_inverse_count_weights(events)
+
+    assert sum(weights) == pytest.approx(len(events))
+    assert sum(weights[:3]) == pytest.approx(len(events) / 2)
+    assert weights[3] == pytest.approx(len(events) / 2)
+    assert weights == pytest.approx([2.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0, 2.0])
+
+
+def test_event_balance_estimator_defaults_to_legacy_and_rejects_conflicts() -> None:
+    assert resolve_event_balance_estimator(
+        {"event_balanced_sampling": True}
+    ) == REPLACEMENT_SAMPLING_ESTIMATOR
+    assert resolve_event_balance_estimator(
+        {
+            "event_balanced_sampling": True,
+            "event_balance_estimator": INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+        }
+    ) == INVERSE_COUNT_FULL_DATA_ESTIMATOR
+    with pytest.raises(ValueError, match="requires.*event_balanced_sampling=true"):
+        resolve_event_balance_estimator(
+            {
+                "event_balanced_sampling": False,
+                "event_balance_estimator": INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+            }
+        )
 
 
 def test_station_split_is_order_independent_and_has_no_key_overlap() -> None:
@@ -165,6 +199,14 @@ def _patch_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
         "CorrectedEarthquakeDataset",
         lambda config: _FakeDataset(),
     )
+
+
+def _sampled_stations(loader) -> list[str]:
+    return [
+        str(station)
+        for batch in loader
+        for station in batch["station"]
+    ]
 
 
 def test_grouped_loader_uses_balanced_sampler_and_manifest(
@@ -294,26 +336,100 @@ def test_within_event_station_balanced_sampler_is_event_equal_and_resumable(
         event_weight_sums[event] += float(weight)
     assert len(set(round(value, 12) for value in event_weight_sums.values())) == 1
 
-    def sampled_stations(loader) -> list[str]:
-        return [
-            str(station)
-            for batch in loader
-            for station in batch["station"]
-        ]
-
-    first_epoch = sampled_stations(first)
+    first_epoch = _sampled_stations(first)
     resume_state = first.generator.get_state().clone()
-    second_epoch = sampled_stations(first)
+    second_epoch = _sampled_stations(first)
 
     replay, _, _, _ = get_data_loaders_v2(config)
-    assert sampled_stations(replay) == first_epoch
-    assert sampled_stations(replay) == second_epoch
+    assert _sampled_stations(replay) == first_epoch
+    assert _sampled_stations(replay) == second_epoch
 
     resumed, _, _, _ = get_data_loaders_v2(config)
     resumed.generator.set_state(resume_state)
-    assert sampled_stations(resumed) == second_epoch
+    assert _sampled_stations(resumed) == second_epoch
 
     different_seed = _loader_config("within_event_station")
     different_seed["training"]["random_seed"] = 43
     other, _, _, _ = get_data_loaders_v2(different_seed)
-    assert sampled_stations(other) != first_epoch
+    assert _sampled_stations(other) != first_epoch
+
+
+def test_explicit_replacement_estimator_preserves_legacy_draws(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dataset(monkeypatch)
+    legacy_config = _loader_config("grouped_event")
+    explicit_config = _loader_config("grouped_event")
+    explicit_config["training"][
+        "event_balance_estimator"
+    ] = REPLACEMENT_SAMPLING_ESTIMATOR
+
+    legacy, _, _, _ = get_data_loaders_v2(legacy_config)
+    explicit, _, _, _ = get_data_loaders_v2(explicit_config)
+
+    assert isinstance(legacy.sampler, WeightedRandomSampler)
+    assert isinstance(explicit.sampler, WeightedRandomSampler)
+    torch.testing.assert_close(legacy.sampler.weights, explicit.sampler.weights)
+    assert torch.equal(legacy.generator.get_state(), explicit.generator.get_state())
+    assert _sampled_stations(legacy) == _sampled_stations(explicit)
+
+
+def test_inverse_count_full_data_sampler_covers_all_records_and_resumes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dataset(monkeypatch)
+    config = _loader_config("grouped_event")
+    config["training"][
+        "event_balance_estimator"
+    ] = INVERSE_COUNT_FULL_DATA_ESTIMATOR
+
+    first, validation, test, _ = get_data_loaders_v2(config)
+
+    assert isinstance(first.sampler, RandomSampler)
+    assert first.sampler.replacement is False
+    assert first.sampler.num_samples == len(first.dataset)
+    assert not isinstance(validation.sampler, WeightedRandomSampler)
+    assert not isinstance(test.sampler, WeightedRandomSampler)
+    assert not hasattr(validation, "event_balance_weights_by_event")
+    assert not hasattr(test, "event_balance_weights_by_event")
+
+    weights_by_event = first.event_balance_weights_by_event
+    assert weights_by_event is not None
+    event_mass: dict[str, float] = defaultdict(float)
+    for dataset_index in first.dataset.indices:
+        event = first.dataset.dataset.samples[dataset_index]["event"]
+        event_mass[event] += weights_by_event[event]
+    expected_event_mass = len(first.dataset) / len(event_mass)
+    assert list(event_mass.values()) == pytest.approx(
+        [expected_event_mass] * len(event_mass)
+    )
+    assert sum(event_mass.values()) == pytest.approx(len(first.dataset))
+
+    first_epoch = _sampled_stations(first)
+    assert len(first_epoch) == len(first.dataset)
+    assert len(set(first_epoch)) == len(first.dataset)
+    resume_state = first.generator.get_state().clone()
+    second_epoch = _sampled_stations(first)
+    assert len(set(second_epoch)) == len(first.dataset)
+
+    replay, _, _, _ = get_data_loaders_v2(config)
+    assert _sampled_stations(replay) == first_epoch
+    assert _sampled_stations(replay) == second_epoch
+
+    resumed, _, _, _ = get_data_loaders_v2(config)
+    resumed.generator.set_state(resume_state)
+    assert _sampled_stations(resumed) == second_epoch
+
+
+def test_loader_rejects_inverse_count_estimator_when_balancing_is_disabled(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dataset(monkeypatch)
+    config = _loader_config("grouped_event")
+    config["training"].update(
+        event_balanced_sampling=False,
+        event_balance_estimator=INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+    )
+
+    with pytest.raises(ValueError, match="requires.*event_balanced_sampling=true"):
+        get_data_loaders_v2(config)

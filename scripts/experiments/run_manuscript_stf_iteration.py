@@ -43,6 +43,12 @@ from src.data.manifest import (  # noqa: E402
     audit_passes,
     build_dataset_summary,
 )
+from src.data.splits import (  # noqa: E402
+    INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+    REPLACEMENT_SAMPLING_ESTIMATOR,
+    make_event_inverse_count_weights,
+    resolve_event_balance_estimator,
+)
 from src.evaluation.delayed_prefix import (  # noqa: E402
     MANUSCRIPT_PROCESSING_DELAY_SEC,
 )
@@ -68,6 +74,8 @@ STF_OUTPUT_PARAMETERIZATION_AXIS = "stf_output_parameterization"
 SCHEDULER_T0_AXIS = "scheduler_T0"
 RADIAL_DYNAMIC_RANGE_STEM_AXIS = "radial_dynamic_range_stem"
 EVENT_BALANCED_SAMPLING_AXIS = "event_balanced_sampling"
+EVENT_BALANCE_ESTIMATOR_AXIS = "event_balance_estimator"
+STATION_UNIFORM_ESTIMATOR = "station_uniform"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
         "baseline": "direct",
@@ -85,12 +93,17 @@ VARIANT_AXES = {
         "baseline": False,
         "candidate": True,
     },
+    EVENT_BALANCE_ESTIMATOR_AXIS: {
+        "baseline": REPLACEMENT_SAMPLING_ESTIMATOR,
+        "candidate": INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+    },
 }
 VARIANT_AXIS_PATHS = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: ("model", "stf_output_parameterization"),
     SCHEDULER_T0_AXIS: ("training", "scheduler_T0"),
     RADIAL_DYNAMIC_RANGE_STEM_AXIS: ("model", "radial_dynamic_range_stem"),
     EVENT_BALANCED_SAMPLING_AXIS: ("training", "event_balanced_sampling"),
+    EVENT_BALANCE_ESTIMATOR_AXIS: ("training", "event_balance_estimator"),
 }
 # Backward-compatible alias for the Phase23 campaign and its persisted tests.
 VARIANTS = VARIANT_AXES[STF_OUTPUT_PARAMETERIZATION_AXIS]
@@ -101,6 +114,8 @@ EXPECTED_SOURCE_SHA256 = (
 EXPECTED_EVENT_COUNT = 31
 EXPECTED_STATION_COUNT = 2558
 EXPECTED_SPLIT_COUNTS = (1788, 385, 385)
+EXPECTED_TRAIN_EVENT_STATION_COUNT_MINIMUM = 1
+EXPECTED_TRAIN_EVENT_STATION_COUNT_MAXIMUM = 482
 EXPECTED_SPLIT_SHA256 = {
     17: "fa5c5d1cd3bdb3e8a775140a9bea4adce885b151eff717627d5e8ab82fd4e9a8",
     42: "5ac2e07ed186dce737a3592694632775b7bbf603bf922a4a74fa6b86a3d5c240",
@@ -302,32 +317,56 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
     parameterization = model.get("stf_output_parameterization")
     scheduler_t0 = training.get("scheduler_T0")
     stem_is_explicit = "radial_dynamic_range_stem" in model
+    estimator_is_explicit = "event_balance_estimator" in training
     campaign = base_config.get("campaign", {})
     if not isinstance(campaign, Mapping):
         raise ValueError("formal config campaign marker must be a mapping")
     explicit_axis = campaign.get("variant_axis")
     if explicit_axis is not None:
-        if explicit_axis != EVENT_BALANCED_SAMPLING_AXIS:
+        if explicit_axis == EVENT_BALANCED_SAMPLING_AXIS:
+            if (
+                parameterization != "moment_shape_factorized"
+                or scheduler_t0 != 15
+                or stem_is_explicit
+                or estimator_is_explicit
+                or training.get("event_balanced_sampling") is not False
+            ):
+                raise ValueError(
+                    "Phase26 event-balanced baseline requires factorized STF, "
+                    "scheduler_T0=15, the original radial stem, no explicit "
+                    "event-balance estimator, and event_balanced_sampling=False"
+                )
+            return EVENT_BALANCED_SAMPLING_AXIS
+        if explicit_axis == EVENT_BALANCE_ESTIMATOR_AXIS:
+            if (
+                parameterization != "moment_shape_factorized"
+                or scheduler_t0 != 15
+                or stem_is_explicit
+                or training.get("event_balanced_sampling") is not True
+                or training.get("event_balance_estimator")
+                != REPLACEMENT_SAMPLING_ESTIMATOR
+            ):
+                raise ValueError(
+                    "Phase27 full-data objective baseline requires factorized "
+                    "STF, scheduler_T0=15, the original radial stem, "
+                    "event_balanced_sampling=true, and "
+                    "event_balance_estimator='replacement_sampling'"
+                )
+            return EVENT_BALANCE_ESTIMATOR_AXIS
+        else:
             raise ValueError(f"unsupported formal campaign axis: {explicit_axis!r}")
-        if (
-            parameterization != "moment_shape_factorized"
-            or scheduler_t0 != 15
-            or stem_is_explicit
-            or training.get("event_balanced_sampling") is not False
-        ):
-            raise ValueError(
-                "Phase26 event-balanced baseline requires factorized STF, "
-                "scheduler_T0=15, the original radial stem, and "
-                "event_balanced_sampling=false"
-            )
-        return EVENT_BALANCED_SAMPLING_AXIS
     if (
         parameterization == "direct"
         and scheduler_t0 == 15
         and not stem_is_explicit
+        and not estimator_is_explicit
     ):
         return STF_OUTPUT_PARAMETERIZATION_AXIS
-    if parameterization == "moment_shape_factorized" and scheduler_t0 == 15:
+    if (
+        parameterization == "moment_shape_factorized"
+        and scheduler_t0 == 15
+        and not estimator_is_explicit
+    ):
         if stem_is_explicit:
             if model.get("radial_dynamic_range_stem") == "none":
                 return RADIAL_DYNAMIC_RANGE_STEM_AXIS
@@ -340,7 +379,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         "formal config must describe the Phase23 direct baseline or the "
         "Phase24 factorized/T0=15 baseline or the Phase25 factorized/T0=15 "
         "baseline with explicit radial dynamic-range stem or the explicitly "
-        "marked Phase26 event-balanced baseline"
+        "marked Phase26/Phase27 event-balance baselines"
     )
 
 
@@ -378,6 +417,7 @@ def _require_exact(config: Mapping[str, Any], path: Sequence[str], expected: Any
 
 def validate_formal_config(config: dict[str, Any]) -> None:
     validate_config_v2(config)
+    variant_axis = variant_axis_from_config(config)
     if "workflow" in config:
         raise ValueError("manuscript STF config must use a source-aligned STF")
     required = {
@@ -404,7 +444,6 @@ def validate_formal_config(config: dict[str, Any]) -> None:
         ("training", "split_protocol"): "within_event_station",
         ("training", "validation_event_fraction"): 0.15,
         ("training", "test_event_fraction"): 0.15,
-        ("training", "event_balanced_sampling"): False,
         ("training", "early_stop_metric"): "event_mae_catalog",
         ("training", "checkpoint_metric"): "event_mae_catalog",
         ("training", "early_stop_min_delta"): 0.0,
@@ -423,6 +462,11 @@ def validate_formal_config(config: dict[str, Any]) -> None:
     }
     for path, expected in required.items():
         _require_exact(config, path, expected)
+    _require_exact(
+        config,
+        ("training", "event_balanced_sampling"),
+        variant_axis == EVENT_BALANCE_ESTIMATOR_AXIS,
+    )
     build_variant_configs(config)
 
 
@@ -448,6 +492,13 @@ def _runtime_config(
     return runtime
 
 
+def event_balance_estimator_from_config(config: Mapping[str, Any]) -> str:
+    training = config["training"]
+    if not bool(training["event_balanced_sampling"]):
+        return STATION_UNIFORM_ESTIMATOR
+    return resolve_event_balance_estimator(training)
+
+
 def _training_sampling_manifest(
     train_loader: DataLoader[Any],
     config: Mapping[str, Any],
@@ -466,31 +517,74 @@ def _training_sampling_manifest(
     if (
         len(events) != EXPECTED_SPLIT_COUNTS[0]
         or len(counts) != EXPECTED_EVENT_COUNT
+        or min(counts.values()) != EXPECTED_TRAIN_EVENT_STATION_COUNT_MINIMUM
+        or max(counts.values()) != EXPECTED_TRAIN_EVENT_STATION_COUNT_MAXIMUM
     ):
         raise ValueError("formal training sampling cohort changed")
 
     enabled = bool(config["training"]["event_balanced_sampling"])
+    estimator = event_balance_estimator_from_config(config)
     sampler = train_loader.sampler
-    if enabled:
+    if estimator == REPLACEMENT_SAMPLING_ESTIMATOR:
         if not isinstance(sampler, WeightedRandomSampler):
             raise TypeError("event-balanced training requires WeightedRandomSampler")
         if not sampler.replacement:
             raise ValueError("event-balanced training must sample with replacement")
-        weights = [float(value) for value in sampler.weights.tolist()]
+        sampling_weights = [float(value) for value in sampler.weights.tolist()]
         expected_weights = [1.0 / counts[event] for event in events]
         if any(
             not math.isclose(actual, expected, rel_tol=0.0, abs_tol=1.0e-12)
-            for actual, expected in zip(weights, expected_weights, strict=True)
+            for actual, expected in zip(
+                sampling_weights,
+                expected_weights,
+                strict=True,
+            )
         ):
             raise ValueError("event-balanced sampler weights changed")
+        objective_weights = [1.0] * len(events)
         mode = "event_equal_with_replacement"
-    else:
+    elif estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR:
+        if not isinstance(sampler, RandomSampler) or sampler.replacement:
+            raise TypeError(
+                "full-data event objective requires shuffled sampling without "
+                "replacement"
+            )
+        sampling_weights = [1.0] * len(events)
+        objective_weights = make_event_inverse_count_weights(events)
+        loader_weights = getattr(
+            train_loader,
+            "event_balance_weights_by_event",
+            None,
+        )
+        expected_loader_weights = {
+            event: len(events) / (len(counts) * count)
+            for event, count in counts.items()
+        }
+        if not isinstance(loader_weights, Mapping) or set(loader_weights) != set(
+            expected_loader_weights
+        ):
+            raise ValueError("full-data loader event-weight mapping changed")
+        if any(
+            not math.isclose(
+                float(loader_weights[event]),
+                expected,
+                rel_tol=0.0,
+                abs_tol=1.0e-12,
+            )
+            for event, expected in expected_loader_weights.items()
+        ):
+            raise ValueError("full-data loader event weights changed")
+        mode = "event_equal_inverse_count_full_data"
+    elif estimator == STATION_UNIFORM_ESTIMATOR:
         if not isinstance(sampler, RandomSampler) or sampler.replacement:
             raise TypeError(
                 "baseline training requires shuffled sampling without replacement"
             )
-        weights = [1.0] * len(events)
+        sampling_weights = [1.0] * len(events)
+        objective_weights = [1.0] * len(events)
         mode = "station_uniform_without_replacement"
+    else:
+        raise ValueError(f"unknown event-balance estimator: {estimator}")
 
     draw_count = int(sampler.num_samples)
     if draw_count != len(events):
@@ -498,29 +592,80 @@ def _training_sampling_manifest(
     if sampler.generator is not train_loader.generator:
         raise ValueError("sampler and DataLoader must share their seeded generator")
 
-    total_weight = sum(weights)
+    total_weight = sum(sampling_weights)
     event_weights: dict[str, float] = {event: 0.0 for event in counts}
-    for event, weight in zip(events, weights, strict=True):
-        event_weights[event] += weight
+    event_objective_weights: dict[str, float] = {
+        event: 0.0 for event in counts
+    }
+    for event, sampling_weight, objective_weight in zip(
+        events,
+        sampling_weights,
+        objective_weights,
+        strict=True,
+    ):
+        event_weights[event] += sampling_weight
+        event_objective_weights[event] += objective_weight
     event_draws = [
         draw_count * value / total_weight for value in event_weights.values()
     ]
-    if enabled:
-        record_probabilities = [weight / total_weight for weight in weights]
+    if not math.isclose(
+        sum(objective_weights),
+        float(len(events)),
+        rel_tol=0.0,
+        abs_tol=1.0e-9,
+    ):
+        raise ValueError("formal objective weights must have global mean one")
+    if estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR:
+        expected_event_mass = len(events) / len(counts)
+        if any(
+            not math.isclose(
+                mass,
+                expected_event_mass,
+                rel_tol=0.0,
+                abs_tol=1.0e-9,
+            )
+            for mass in event_objective_weights.values()
+        ):
+            raise ValueError("full-data objective event masses are not equal")
+    if estimator == REPLACEMENT_SAMPLING_ESTIMATOR:
+        record_probabilities = [
+            weight / total_weight for weight in sampling_weights
+        ]
         expected_unique = sum(
             1.0 - (1.0 - probability) ** draw_count
             for probability in record_probabilities
         )
     else:
         expected_unique = float(draw_count)
-    weight_rows = [
+    sampling_weight_rows = [
         {"event": event, "station": station, "weight": weight}
-        for event, station, weight in zip(events, stations, weights, strict=True)
+        for event, station, weight in zip(
+            events,
+            stations,
+            sampling_weights,
+            strict=True,
+        )
     ]
+    objective_weight_rows = [
+        {"event": event, "station": station, "weight": weight}
+        for event, station, weight in zip(
+            events,
+            stations,
+            objective_weights,
+            strict=True,
+        )
+    ]
+    sampling_weight_sha256 = hashlib.sha256(
+        _json_bytes(sampling_weight_rows)
+    ).hexdigest()
+    objective_weight_sha256 = hashlib.sha256(
+        _json_bytes(objective_weight_rows)
+    ).hexdigest()
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "mode": mode,
         "event_balanced_sampling": enabled,
+        "event_balance_estimator": estimator,
         "sampler_class": type(sampler).__name__,
         "replacement": bool(sampler.replacement),
         "draw_count": draw_count,
@@ -531,7 +676,28 @@ def _training_sampling_manifest(
         "expected_event_draws_minimum": min(event_draws),
         "expected_event_draws_maximum": max(event_draws),
         "expected_unique_record_count": expected_unique,
-        "sample_weight_sha256": hashlib.sha256(_json_bytes(weight_rows)).hexdigest(),
+        "expected_unique_record_fraction": expected_unique / len(events),
+        "optimizer_step_count": math.ceil(draw_count / train_loader.batch_size),
+        "loss_weights_applied": (
+            estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR
+        ),
+        "objective_weight_formula": (
+            "N/(E*n_event)"
+            if estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR
+            else "1"
+        ),
+        "objective_reduction": (
+            "mean(sample_weight * per_sample_loss)"
+            if estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR
+            else "existing_unweighted_reduction"
+        ),
+        "objective_weight_minimum": min(objective_weights),
+        "objective_weight_maximum": max(objective_weights),
+        "event_objective_mass_minimum": min(event_objective_weights.values()),
+        "event_objective_mass_maximum": max(event_objective_weights.values()),
+        "sample_weight_sha256": sampling_weight_sha256,
+        "sampling_weight_sha256": sampling_weight_sha256,
+        "objective_weight_sha256": objective_weight_sha256,
     }
 
 
@@ -682,6 +848,21 @@ def _smoke_one_device(
     model = PINNModel(config).to(device).train()
     criterion = STFRateWaveformLossV2(config).to(device)
     prediction = model(prepared.model_input, meta=prepared.metadata)
+    sample_weights = None
+    if (
+        event_balance_estimator_from_config(config)
+        == INVERSE_COUNT_FULL_DATA_ESTIMATOR
+    ):
+        minimum_weight = EXPECTED_SPLIT_COUNTS[0] / (
+            EXPECTED_EVENT_COUNT * EXPECTED_TRAIN_EVENT_STATION_COUNT_MAXIMUM
+        )
+        maximum_weight = EXPECTED_SPLIT_COUNTS[0] / (
+            EXPECTED_EVENT_COUNT * EXPECTED_TRAIN_EVENT_STATION_COUNT_MINIMUM
+        )
+        sample_weights = torch.tensor(
+            [minimum_weight, maximum_weight],
+            device=device,
+        )[:batch_size]
     loss, metrics = criterion(
         prediction,
         pred_catalog_mw=None,
@@ -695,6 +876,7 @@ def _smoke_one_device(
         stf_true=prepared.stf_true,
         has_stf=prepared.has_stf,
         true_mag=prepared.true_mag,
+        sample_weights=sample_weights,
     )
     values = [float(loss.detach().cpu()), *map(float, metrics.values())]
     if not all(math.isfinite(value) for value in values):
@@ -715,6 +897,8 @@ def _smoke_one_device(
         "parameter_count": sum(parameter.numel() for parameter in model.parameters()),
         "loss": float(loss.detach().cpu()),
         "metrics": metrics,
+        "event_balance_estimator": event_balance_estimator_from_config(config),
+        "sample_weights_exercised": sample_weights is not None,
         "passed": True,
     }
     del batch, prepared, prediction, criterion, model, loss
@@ -838,7 +1022,11 @@ def _train_one_seed(
         campaign = config.get("campaign", {})
         require_sampling = (
             isinstance(campaign, Mapping)
-            and campaign.get("variant_axis") == EVENT_BALANCED_SAMPLING_AXIS
+            and campaign.get("variant_axis")
+            in {
+                EVENT_BALANCED_SAMPLING_AXIS,
+                EVENT_BALANCE_ESTIMATOR_AXIS,
+            }
         )
         if resume and _seed_summary_is_valid(
             summary,
@@ -900,6 +1088,7 @@ def _train_one_seed(
         "event_balanced_sampling": bool(
             config["training"]["event_balanced_sampling"]
         ),
+        "event_balance_estimator": event_balance_estimator_from_config(config),
         "seed": seed,
         **checkpoint_selection,
         "checkpoint": _artifact(verified["checkpoint_path"]),
@@ -972,6 +1161,9 @@ def run_train(
             ),
             "event_balanced_sampling": bool(
                 variant_config["training"]["event_balanced_sampling"]
+            ),
+            "event_balance_estimator": event_balance_estimator_from_config(
+                variant_config
             ),
             "scientific_diff_from_baseline": sorted(
                 _config_diff_paths(variants["baseline"], variant_config)

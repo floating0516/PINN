@@ -15,6 +15,7 @@ from torch import nn
 from torch.optim.swa_utils import AveragedModel
 import yaml
 
+from src.data.splits import INVERSE_COUNT_FULL_DATA_ESTIMATOR
 from src.training.checkpointing import (
     CheckpointValidationError,
     atomic_torch_save,
@@ -29,7 +30,12 @@ from src.training.checkpointing import (
     validate_checkpoint_provenance,
     write_emergency_checkpoint,
 )
-from src.training.train import _prepare_v2_batch, train
+from src.training.train import (
+    _batch_event_sample_weights,
+    _prepare_v2_batch,
+    _training_event_balance_weights,
+    train,
+)
 
 
 def _make_training_objects() -> tuple[
@@ -256,6 +262,121 @@ def test_active_v2_batch_uses_catalog_magnitude_as_scalar_target(
     prepared = _prepare_v2_batch(batch, config, torch.device("cpu"))
 
     assert torch.equal(prepared.true_mag, batch["magnitude_catalog"])
+
+
+def test_training_event_weights_map_batch_events_on_reference_tensor() -> None:
+    class Loader:
+        event_balance_weights_by_event = {"A": 2.0 / 3.0, "B": 2.0}
+
+    config = {
+        "training": {
+            "event_balanced_sampling": True,
+            "event_balance_estimator": INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+        }
+    }
+    weights_by_event = _training_event_balance_weights(config, Loader())
+    reference = torch.zeros(3, 1, dtype=torch.float64)
+
+    weights = _batch_event_sample_weights(
+        {"event": ["B", "A", "A"]},
+        weights_by_event,
+        reference=reference,
+    )
+
+    assert weights is not None
+    assert weights.dtype == reference.dtype
+    torch.testing.assert_close(
+        weights,
+        torch.tensor([2.0, 2.0 / 3.0, 2.0 / 3.0], dtype=reference.dtype),
+    )
+    assert _batch_event_sample_weights(
+        {},
+        None,
+        reference=reference,
+    ) is None
+
+
+class _InjectedLoader(list):
+    event_balance_weights_by_event: dict[str, float] | None = None
+
+
+class _RecordingCriterion(nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.sample_weights: list[torch.Tensor | None] = []
+
+    def forward(
+        self,
+        pred_rate: torch.Tensor,
+        *,
+        sample_weights: torch.Tensor | None = None,
+        **_kwargs,
+    ) -> tuple[torch.Tensor, dict[str, float]]:
+        self.sample_weights.append(
+            None if sample_weights is None else sample_weights.detach().cpu().clone()
+        )
+        loss = pred_rate.square().mean()
+        value = float(loss.detach().cpu())
+        return loss, {
+            "L_total": value,
+            "L_MSE": value,
+            "L_synth": 0.0,
+            "L_mag": 0.0,
+            "L_shape": 0.0,
+            "window_mw_mean": 0.0,
+        }
+
+    @staticmethod
+    def _decode_rate(pred_rate: torch.Tensor) -> torch.Tensor:
+        return torch.ones_like(pred_rate) * 1.0e18
+
+
+def test_inverse_count_weights_are_training_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        "src.training.train.get_preferred_device",
+        lambda: torch.device("cpu"),
+    )
+    criterion = _RecordingCriterion()
+    monkeypatch.setattr(
+        "src.training.train._build_stf_rate_criterion",
+        lambda _config, _device: criterion,
+    )
+    config = _training_config(tmp_path)
+    config["training"].update(
+        event_balanced_sampling=True,
+        event_balance_estimator=INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+        swa_start=0,
+    )
+    train_batch = _training_batch()
+    train_batch["event"] = ["Synthetic"]
+    validation_batch = _training_batch()
+    validation_batch["event"] = ["SyntheticValidation"]
+    train_loader = _InjectedLoader([train_batch])
+    train_loader.event_balance_weights_by_event = {"Synthetic": 1.0}
+    loaders = (
+        train_loader,
+        [validation_batch],
+        [],
+        {
+            "protocol": "grouped_event_test",
+            "seed": 42,
+            "train_events": ["Synthetic"],
+            "validation_events": ["SyntheticValidation"],
+            "test_events": [],
+            "train_record_count": 1,
+            "validation_record_count": 1,
+            "test_record_count": 0,
+        },
+    )
+
+    train(config=config, data_loaders=loaders)
+
+    assert len(criterion.sample_weights) == 2
+    torch.testing.assert_close(criterion.sample_weights[0], torch.ones(1))
+    assert criterion.sample_weights[1] is None
 
 
 def test_active_training_logs_station_catalog_metric_and_runs_all_epochs(

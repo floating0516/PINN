@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 import matplotlib.pyplot as plt
 from dataclasses import dataclass
+from collections.abc import Mapping
 
 # 将项目根目录加入 sys.path 以便导入 src
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
@@ -22,6 +23,10 @@ from src.data.data_loader import get_data_loaders
 from src.data.model_input import assemble_model_input
 from src.data.metadata import build_metadata_tensor
 from src.data.metadata import metadata_distance_from_config
+from src.data.splits import (
+    INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+    resolve_event_balance_estimator,
+)
 from src.evaluation.metrics import (
     aggregate_event_predictions,
     summarize_predictions,
@@ -155,6 +160,58 @@ def _prepare_v2_batch(
         metadata=metadata,
     )
 
+
+def _training_event_balance_weights(
+    config: dict,
+    train_loader: object,
+) -> dict[str, float] | None:
+    training = config.get("training", {})
+    estimator = resolve_event_balance_estimator(training)
+    if (
+        not bool(training.get("event_balanced_sampling", False))
+        or estimator != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+    ):
+        return None
+
+    weights = getattr(train_loader, "event_balance_weights_by_event", None)
+    if not isinstance(weights, Mapping) or not weights:
+        raise ValueError(
+            "inverse_count_full_data training loader is missing train-event weights"
+        )
+    result = {str(event): float(weight) for event, weight in weights.items()}
+    if any(not math.isfinite(weight) or weight <= 0.0 for weight in result.values()):
+        raise ValueError("train-event inverse-count weights must be finite and positive")
+    return result
+
+
+def _batch_event_sample_weights(
+    batch: dict,
+    weights_by_event: Mapping[str, float] | None,
+    *,
+    reference: torch.Tensor,
+) -> torch.Tensor | None:
+    if weights_by_event is None:
+        return None
+    event_values = batch.get("event")
+    if isinstance(event_values, str):
+        events = [event_values]
+    elif isinstance(event_values, (list, tuple)):
+        events = [str(event) for event in event_values]
+    else:
+        raise ValueError(
+            "inverse_count_full_data training batches require event names"
+        )
+    if len(events) != reference.shape[0]:
+        raise ValueError("training batch event count does not match batch size")
+    try:
+        values = [weights_by_event[event] for event in events]
+    except KeyError as error:
+        raise ValueError(
+            f"training batch contains unknown event: {error.args[0]}"
+        ) from error
+    return reference.new_tensor(values)
+
+
 def _train_impl(
     config: dict | None = None,
     data_loaders: tuple | None = None,
@@ -254,6 +311,10 @@ def _train_impl(
         )
     else:
         train_loader, val_loader, test_loader = get_data_loaders(config)
+    training_event_balance_weights = _training_event_balance_weights(
+        config,
+        train_loader,
+    )
     split_manifest_path = models_dir / 'split.json'
     if resume_payload is None:
         if split_manifest is not None:
@@ -582,6 +643,12 @@ def _train_impl(
                 dt_val = batch['dt'].mean().item()
                 meta = build_metadata_tensor(distance, theta_deg, phi_deg)
 
+            sample_weights = _batch_event_sample_weights(
+                batch,
+                training_event_balance_weights,
+                reference=radial,
+            )
+
             optimizer.zero_grad()
             
             # 前向计算
@@ -616,6 +683,7 @@ def _train_impl(
                         stf_true=prepared_v2.stf_true,
                         has_stf=prepared_v2.has_stf,
                         true_mag=prepared_v2.true_mag,
+                        sample_weights=sample_weights,
                     )
                 else:
                     loss, loss_dict = criterion_2(
@@ -737,6 +805,7 @@ def _train_impl(
                             stf_true=prepared_v2.stf_true,
                             has_stf=prepared_v2.has_stf,
                             true_mag=prepared_v2.true_mag,
+                            sample_weights=None,
                         )
                     else:
                         loss, loss_dict = criterion_2(

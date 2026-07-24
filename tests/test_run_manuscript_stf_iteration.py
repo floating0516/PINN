@@ -38,6 +38,12 @@ PHASE26_CONFIG_PATH = (
     / "experiments"
     / "manuscript_station_stf_usgs_event_balanced.yaml"
 )
+PHASE27_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_event_loss_weighted.yaml"
+)
 CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
@@ -130,6 +136,12 @@ def _selected_train_summary(
             False,
             True,
         ),
+        (
+            PHASE27_CONFIG_PATH,
+            campaign.EVENT_BALANCE_ESTIMATOR_AXIS,
+            campaign.REPLACEMENT_SAMPLING_ESTIMATOR,
+            campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+        ),
     ],
 )
 def test_formal_configs_and_variants_have_one_scientific_difference(
@@ -155,6 +167,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         campaign.SCHEDULER_T0_AXIS,
         campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS,
         campaign.EVENT_BALANCED_SAMPLING_AXIS,
+        campaign.EVENT_BALANCE_ESTIMATOR_AXIS,
     }:
         assert {
             variant["model"]["stf_output_parameterization"]
@@ -167,6 +180,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
     if expected_axis in {
         campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS,
         campaign.EVENT_BALANCED_SAMPLING_AXIS,
+        campaign.EVENT_BALANCE_ESTIMATOR_AXIS,
     }:
         assert {
             variant["training"]["scheduler_T0"] for variant in variants.values()
@@ -180,6 +194,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         (PHASE24_CONFIG_PATH, campaign.SCHEDULER_T0_AXIS),
         (PHASE25_CONFIG_PATH, campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS),
         (PHASE26_CONFIG_PATH, campaign.EVENT_BALANCED_SAMPLING_AXIS),
+        (PHASE27_CONFIG_PATH, campaign.EVENT_BALANCE_ESTIMATOR_AXIS),
     ],
 )
 def test_formal_config_rejects_a_second_scientific_change(
@@ -259,6 +274,40 @@ def test_phase26_axis_requires_an_explicit_campaign_marker() -> None:
     unknown_axis["campaign"]["variant_axis"] = "unknown"
     with pytest.raises(ValueError, match="unsupported formal campaign axis"):
         campaign.validate_formal_config(unknown_axis)
+
+
+def test_phase27_axis_requires_the_phase26_candidate_as_baseline() -> None:
+    config = _config(PHASE27_CONFIG_PATH)
+
+    assert (
+        campaign.variant_axis_from_config(config)
+        == campaign.EVENT_BALANCE_ESTIMATOR_AXIS
+    )
+    assert config["training"]["event_balanced_sampling"] is True
+    assert (
+        config["training"]["event_balance_estimator"]
+        == campaign.REPLACEMENT_SAMPLING_ESTIMATOR
+    )
+    phase26_incumbent = campaign.build_variant_configs(
+        _config(PHASE26_CONFIG_PATH)
+    )["candidate"]
+    phase27_baseline = campaign.build_variant_configs(config)["baseline"]
+    phase26_incumbent.pop("campaign")
+    phase27_baseline.pop("campaign")
+    phase27_baseline["training"].pop("event_balance_estimator")
+    assert phase27_baseline == phase26_incumbent
+
+    candidate_as_baseline = copy.deepcopy(config)
+    candidate_as_baseline["training"]["event_balance_estimator"] = (
+        campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR
+    )
+    with pytest.raises(ValueError, match="Phase27 full-data objective baseline"):
+        campaign.validate_formal_config(candidate_as_baseline)
+
+    disabled = copy.deepcopy(config)
+    disabled["training"]["event_balanced_sampling"] = False
+    with pytest.raises(ValueError, match="Phase27 full-data objective baseline"):
+        campaign.validate_formal_config(disabled)
 
 
 def test_split_contract_is_frozen_for_all_three_seeds() -> None:
@@ -445,7 +494,13 @@ def test_locked_test_loader_raises_on_iteration() -> None:
 def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -> None:
     class SamplingDataset(torch.utils.data.Dataset):
         def __init__(self) -> None:
-            events = [f"E{index:02d}" for index in range(30)] + ["E30"] * 1758
+            events = ["E00"]
+            events.extend(
+                event
+                for index in range(1, 30)
+                for event in [f"E{index:02d}"] * 45
+            )
+            events.extend(["E30"] * 482)
             self.samples = [
                 {"event": event, "station": f"S{index:04d}"}
                 for index, event in enumerate(events)
@@ -494,6 +549,7 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
     assert manifest["expected_event_draws_maximum"] == pytest.approx(1788 / 31)
     assert manifest["expected_unique_record_count"] < 1788
     assert len(manifest["sample_weight_sha256"]) == 64
+    assert len(manifest["objective_weight_sha256"]) == 64
 
     baseline_generator = torch.Generator().manual_seed(17)
     baseline_loader = torch.utils.data.DataLoader(
@@ -511,6 +567,37 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
     assert baseline["replacement"] is False
     assert baseline["expected_unique_record_count"] == pytest.approx(1788)
 
+    baseline_loader.event_balance_weights_by_event = {
+        event: 1788 / (31 * count) for event, count in counts.items()
+    }
+    full_data = campaign._training_sampling_manifest(
+        baseline_loader,
+        {
+            "training": {
+                "event_balanced_sampling": True,
+                "event_balance_estimator": (
+                    campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                ),
+            }
+        },
+    )
+    assert full_data["mode"] == "event_equal_inverse_count_full_data"
+    assert full_data["sampler_class"] == "RandomSampler"
+    assert full_data["replacement"] is False
+    assert full_data["expected_unique_record_count"] == pytest.approx(1788)
+    assert full_data["expected_unique_record_fraction"] == pytest.approx(1.0)
+    assert full_data["optimizer_step_count"] == 28
+    assert full_data["loss_weights_applied"] is True
+    assert full_data["objective_weight_formula"] == "N/(E*n_event)"
+    assert (
+        full_data["objective_reduction"]
+        == "mean(sample_weight * per_sample_loss)"
+    )
+    assert full_data["objective_weight_minimum"] == pytest.approx(1788 / (31 * 482))
+    assert full_data["objective_weight_maximum"] == pytest.approx(1788 / 31)
+    assert full_data["event_objective_mass_minimum"] == pytest.approx(1788 / 31)
+    assert full_data["event_objective_mass_maximum"] == pytest.approx(1788 / 31)
+
 
 @pytest.mark.parametrize(
     (
@@ -520,6 +607,7 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
         "expected_scheduler_t0s",
         "expected_stems",
         "expected_event_balanced",
+        "expected_estimators",
     ),
     [
         (
@@ -529,6 +617,7 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
             (15, 15),
             ("none", "none"),
             (False, False),
+            ("station_uniform", "station_uniform"),
         ),
         (
             PHASE24_CONFIG_PATH,
@@ -537,6 +626,7 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
             (15, 195),
             ("none", "none"),
             (False, False),
+            ("station_uniform", "station_uniform"),
         ),
         (
             PHASE25_CONFIG_PATH,
@@ -545,6 +635,7 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
             (15, 15),
             ("none", "asinh_residual"),
             (False, False),
+            ("station_uniform", "station_uniform"),
         ),
         (
             PHASE26_CONFIG_PATH,
@@ -553,6 +644,16 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
             (15, 15),
             ("none", "none"),
             (False, True),
+            ("station_uniform", "replacement_sampling"),
+        ),
+        (
+            PHASE27_CONFIG_PATH,
+            campaign.EVENT_BALANCE_ESTIMATOR_AXIS,
+            ("moment_shape_factorized", "moment_shape_factorized"),
+            (15, 15),
+            ("none", "none"),
+            (True, True),
+            ("replacement_sampling", "inverse_count_full_data"),
         ),
     ],
 )
@@ -563,6 +664,7 @@ def test_train_stage_selects_from_validation_without_test_or_external(
     expected_scheduler_t0s: tuple[int, int],
     expected_stems: tuple[str, str],
     expected_event_balanced: tuple[bool, bool],
+    expected_estimators: tuple[str, str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -652,6 +754,10 @@ def test_train_stage_selects_from_validation_without_test_or_external(
         summary["variants"][name]["event_balanced_sampling"]
         for name in variant_names
     ) == expected_event_balanced
+    assert tuple(
+        summary["variants"][name]["event_balance_estimator"]
+        for name in variant_names
+    ) == expected_estimators
     assert summary["variants"]["candidate"]["scientific_diff_from_baseline"] == [
         ".".join(campaign.VARIANT_AXIS_PATHS[expected_axis])
     ]

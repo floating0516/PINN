@@ -34,6 +34,28 @@ def _batch_vector(
     return result
 
 
+def _validated_sample_weights(
+    sample_weights: torch.Tensor | None,
+    *,
+    batch_size: int,
+    reference: torch.Tensor,
+) -> torch.Tensor | None:
+    if sample_weights is None:
+        return None
+    weights = torch.as_tensor(
+        sample_weights,
+        device=reference.device,
+        dtype=reference.dtype,
+    )
+    if weights.shape != (batch_size,):
+        raise ValueError("sample_weights must have shape (batch,)")
+    if not bool(torch.isfinite(weights).all()):
+        raise ValueError("sample_weights must be finite")
+    if not bool(torch.all(weights > 0.0)):
+        raise ValueError("sample_weights must be positive")
+    return weights
+
+
 def compute_physical_coefficients(
     source_distance_m: torch.Tensor,
     rho: float,
@@ -294,6 +316,25 @@ def masked_normalized_waveform_mse(
     return squared.sum() / mask.sum().clamp_min(1.0)
 
 
+def _per_sample_masked_normalized_waveform_mse(
+    u_hat: torch.Tensor,
+    u_obs: torch.Tensor,
+    valid_mask: torch.Tensor,
+) -> torch.Tensor:
+    if u_hat.shape != u_obs.shape or valid_mask.shape != u_obs.shape:
+        raise ValueError("waveform prediction, observation, and mask must match")
+    mask_bool = valid_mask.to(device=u_obs.device, dtype=torch.bool)
+    mask = mask_bool.to(dtype=u_obs.dtype)
+    observed_abs = torch.where(
+        mask_bool,
+        u_obs.abs(),
+        torch.zeros_like(u_obs),
+    )
+    scale = observed_abs.amax(dim=1, keepdim=True).clamp_min(1.0e-12)
+    squared = ((u_hat - u_obs) / scale).pow(2) * mask
+    return squared.sum(dim=1) / mask.sum(dim=1).clamp_min(1.0)
+
+
 def _shape_loss(predicted: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
     predicted_nonnegative = torch.clamp(predicted, min=0.0)
     reference_nonnegative = torch.clamp(reference, min=0.0)
@@ -304,6 +345,21 @@ def _shape_loss(predicted: torch.Tensor, reference: torch.Tensor) -> torch.Tenso
         dim=1, keepdim=True
     ).clamp_min(1.0e-12)
     return F.mse_loss(predicted_normalized, reference_normalized)
+
+
+def _per_sample_shape_loss(
+    predicted: torch.Tensor,
+    reference: torch.Tensor,
+) -> torch.Tensor:
+    predicted_nonnegative = torch.clamp(predicted, min=0.0)
+    reference_nonnegative = torch.clamp(reference, min=0.0)
+    predicted_normalized = predicted_nonnegative / predicted_nonnegative.sum(
+        dim=1, keepdim=True
+    ).clamp_min(1.0e-12)
+    reference_normalized = reference_nonnegative / reference_nonnegative.sum(
+        dim=1, keepdim=True
+    ).clamp_min(1.0e-12)
+    return (predicted_normalized - reference_normalized).pow(2).mean(dim=1)
 
 
 def pinn_loss_stf_rate_v2(
@@ -336,12 +392,18 @@ def pinn_loss_stf_rate_v2(
     include_intermediate_P: bool,
     include_intermediate_S: bool,
     origin_aligned: bool = False,
+    sample_weights: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch_size = rate_hat.shape[0]
     if pred_rate_encoded.shape != rate_hat.shape:
         raise ValueError("encoded and physical predicted rates must match")
     if u_obs.ndim != 2 or u_obs.shape[0] != batch_size:
         raise ValueError("u_obs must have shape (batch, observation_time)")
+    weights = _validated_sample_weights(
+        sample_weights,
+        batch_size=batch_size,
+        reference=rate_hat,
+    )
     angles_theta = _batch_vector(
         theta_deg,
         batch_size=batch_size,
@@ -387,11 +449,20 @@ def pinn_loss_stf_rate_v2(
         include_intermediate_S=include_intermediate_S,
         origin_aligned=origin_aligned,
     )
-    L_synth = masked_normalized_waveform_mse(
-        u_hat,
-        u_obs,
-        waveform_valid_mask,
-    )
+    if weights is None:
+        L_synth = masked_normalized_waveform_mse(
+            u_hat,
+            u_obs,
+            waveform_valid_mask,
+        )
+    else:
+        synth_per_sample = _per_sample_masked_normalized_waveform_mse(
+            u_hat,
+            u_obs,
+            waveform_valid_mask,
+        )
+        # Do not self-normalize a minibatch of globally normalized weights.
+        L_synth = (weights * synth_per_sample).mean()
 
     L_MSE = rate_hat.new_tensor(0.0)
     L_shape = rate_hat.new_tensor(0.0)
@@ -401,15 +472,30 @@ def pinn_loss_stf_rate_v2(
         else has_ref.to(device=rate_hat.device, dtype=torch.bool).reshape(-1)
     )
     if rate_ref_encoded is not None and torch.any(reference_mask):
-        L_MSE = F.mse_loss(
-            pred_rate_encoded[reference_mask],
-            rate_ref_encoded[reference_mask],
-        )
+        if weights is None:
+            L_MSE = F.mse_loss(
+                pred_rate_encoded[reference_mask],
+                rate_ref_encoded[reference_mask],
+            )
+        else:
+            mse_per_sample = F.mse_loss(
+                pred_rate_encoded[reference_mask],
+                rate_ref_encoded[reference_mask],
+                reduction="none",
+            ).mean(dim=1)
+            L_MSE = (weights[reference_mask] * mse_per_sample).mean()
     if rate_ref_physical is not None and torch.any(reference_mask):
-        L_shape = _shape_loss(
-            rate_hat[reference_mask],
-            rate_ref_physical[reference_mask],
-        )
+        if weights is None:
+            L_shape = _shape_loss(
+                rate_hat[reference_mask],
+                rate_ref_physical[reference_mask],
+            )
+        else:
+            shape_per_sample = _per_sample_shape_loss(
+                rate_hat[reference_mask],
+                rate_ref_physical[reference_mask],
+            )
+            L_shape = (weights[reference_mask] * shape_per_sample).mean()
 
     window_magnitude = moment_magnitude_from_rate(
         rate_hat,
@@ -429,10 +515,18 @@ def pinn_loss_stf_rate_v2(
         )
         finite = torch.isfinite(true_mag.reshape(-1))
         if torch.any(finite):
-            L_mag = F.mse_loss(
-                predicted_magnitude[finite],
-                true_mag.reshape(-1)[finite],
-            )
+            if weights is None:
+                L_mag = F.mse_loss(
+                    predicted_magnitude[finite],
+                    true_mag.reshape(-1)[finite],
+                )
+            else:
+                magnitude_per_sample = F.mse_loss(
+                    predicted_magnitude[finite],
+                    true_mag.reshape(-1)[finite],
+                    reduction="none",
+                )
+                L_mag = (weights[finite] * magnitude_per_sample).mean()
 
     total_loss = (
         float(lambda_MSE) * L_MSE
@@ -759,6 +853,7 @@ class STFRateWaveformLossV2(nn.Module):
         stf_true: torch.Tensor | None = None,
         has_stf: torch.Tensor | None = None,
         true_mag: torch.Tensor | None = None,
+        sample_weights: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, dict[str, float]]:
         if self.active_workflow and pred_catalog_mw is None:
             raise ValueError(
@@ -805,4 +900,5 @@ class STFRateWaveformLossV2(nn.Module):
             include_intermediate_P=self.include_intermediate_P,
             include_intermediate_S=self.include_intermediate_S,
             origin_aligned=self.origin_aligned,
+            sample_weights=sample_weights,
         )

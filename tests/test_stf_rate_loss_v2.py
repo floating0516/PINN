@@ -8,12 +8,14 @@ import yaml
 
 from scripts.experiments.run_experiment import collect_summary_row
 from scripts.plotting.plot_training_curves import build_loss_summary
+from src.physics.travel_time import ConstantVelocityTravelTime
 from src.training.loss_stf_rate_v2 import (
     STFRateWaveformLossV2,
     compute_physical_coefficients,
     forward_displacement_from_origin_rate,
     masked_normalized_waveform_mse,
     moment_magnitude_from_rate,
+    pinn_loss_stf_rate_v2,
 )
 from src.training.train import _build_stf_rate_criterion, _prepare_v2_batch
 
@@ -22,6 +24,38 @@ def _v2_config() -> dict:
     return yaml.safe_load(
         Path("configs/config_v2.yaml").read_text(encoding="utf-8")
     )
+
+
+def _analytic_weighted_loss_arguments() -> dict[str, object]:
+    return {
+        "rate_hat": torch.ones(2, 2, requires_grad=True),
+        "pred_rate_encoded": torch.zeros(2, 2, requires_grad=True),
+        "rate_ref_encoded": torch.tensor([[1.0, 1.0], [2.0, 2.0]]),
+        "rate_ref_physical": torch.tensor([[1.0, 0.0], [1.0, 1.0]]),
+        "u_obs": torch.tensor([[1.0, 0.0], [1.0, 1.0]]),
+        "source_dt_sec": torch.ones(2),
+        "observation_dt_sec": torch.ones(2),
+        "source_distance_m": torch.ones(2),
+        "waveform_valid_mask": torch.ones(2, 2, dtype=torch.bool),
+        "travel_time": ConstantVelocityTravelTime(2.0, 1.0),
+        "rho": 1.0,
+        "theta_deg": torch.zeros(2),
+        "phi_slip_deg": torch.zeros(2),
+        "amplitude_gain": 1.0,
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.1,
+        "has_ref": torch.ones(2, dtype=torch.bool),
+        "true_mag": torch.tensor([1.0, 3.0]),
+        "pred_catalog_mw": torch.zeros(2, requires_grad=True),
+        "include_intermediate": False,
+        "radiation_mode": "simplified",
+        "include_far_P": False,
+        "include_far_S": False,
+        "include_intermediate_P": False,
+        "include_intermediate_S": False,
+    }
 
 
 def test_per_sample_source_dt_changes_only_its_own_moment() -> None:
@@ -52,6 +86,92 @@ def test_invalid_waveform_samples_do_not_enter_synth_loss() -> None:
     )
 
     assert loss.item() == 0.0
+
+
+def test_weighted_four_term_loss_uses_batch_mean_not_weight_sum() -> None:
+    arguments = _analytic_weighted_loss_arguments()
+
+    loss, metrics = pinn_loss_stf_rate_v2(
+        **arguments,
+        sample_weights=torch.tensor([2.0, 4.0]),
+    )
+    loss.backward()
+
+    assert metrics["L_MSE"] == pytest.approx(9.0)
+    assert metrics["L_synth"] == pytest.approx(2.5)
+    assert metrics["L_mag"] == pytest.approx(19.0)
+    assert metrics["L_shape"] == pytest.approx(0.25)
+    assert metrics["L_total"] == pytest.approx(29.275)
+    assert loss.item() == pytest.approx(
+        metrics["L_MSE"]
+        + 0.5 * metrics["L_synth"]
+        + metrics["L_mag"]
+        + 0.1 * metrics["L_shape"]
+    )
+    for name in ("rate_hat", "pred_rate_encoded", "pred_catalog_mw"):
+        tensor = arguments[name]
+        assert isinstance(tensor, torch.Tensor)
+        gradient = tensor.grad
+        assert gradient is not None
+        assert torch.isfinite(gradient).all()
+
+
+def test_unit_sample_weights_match_unweighted_four_term_loss() -> None:
+    arguments = _analytic_weighted_loss_arguments()
+
+    unweighted_loss, unweighted_metrics = pinn_loss_stf_rate_v2(**arguments)
+    weighted_loss, weighted_metrics = pinn_loss_stf_rate_v2(
+        **arguments,
+        sample_weights=torch.ones(2),
+    )
+
+    assert weighted_loss.item() == unweighted_loss.item()
+    assert weighted_metrics == unweighted_metrics
+    assert unweighted_metrics["L_MSE"] == pytest.approx(2.5)
+    assert unweighted_metrics["L_synth"] == pytest.approx(0.75)
+    assert unweighted_metrics["L_mag"] == pytest.approx(5.0)
+    assert unweighted_metrics["L_shape"] == pytest.approx(0.125)
+
+
+def test_weighted_four_term_loss_respects_generic_target_masks() -> None:
+    arguments = _analytic_weighted_loss_arguments()
+    arguments["has_ref"] = torch.tensor([True, False])
+    arguments["true_mag"] = torch.tensor([1.0, float("nan")])
+    arguments["waveform_valid_mask"] = torch.tensor(
+        [[True, False], [True, True]]
+    )
+
+    _, metrics = pinn_loss_stf_rate_v2(
+        **arguments,
+        sample_weights=torch.tensor([2.0, 4.0]),
+    )
+
+    assert metrics["L_MSE"] == pytest.approx(2.0)
+    assert metrics["L_synth"] == pytest.approx(3.0)
+    assert metrics["L_mag"] == pytest.approx(2.0)
+    assert metrics["L_shape"] == pytest.approx(0.5)
+
+
+@pytest.mark.parametrize(
+    ("sample_weights", "message"),
+    [
+        (torch.tensor(1.0), "shape"),
+        (torch.tensor([1.0]), "shape"),
+        (torch.tensor([1.0, float("nan")]), "finite"),
+        (torch.tensor([1.0, float("inf")]), "finite"),
+        (torch.tensor([1.0, 0.0]), "positive"),
+        (torch.tensor([1.0, -1.0]), "positive"),
+    ],
+)
+def test_sample_weights_must_be_a_finite_positive_batch_vector(
+    sample_weights: torch.Tensor,
+    message: str,
+) -> None:
+    with pytest.raises(ValueError, match=message):
+        pinn_loss_stf_rate_v2(
+            **_analytic_weighted_loss_arguments(),
+            sample_weights=sample_weights,
+        )
 
 
 def test_v2_physical_coefficients_use_only_explicit_amplitude_gain() -> None:
@@ -88,6 +208,7 @@ def test_v2_loss_is_finite_differentiable_and_has_no_nonnegative_term() -> None:
         stf_true=stf_true,
         has_stf=torch.tensor([True, True]),
         true_mag=true_magnitude,
+        sample_weights=torch.tensor([0.5, 1.5]),
     )
     loss.backward()
 

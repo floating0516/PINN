@@ -4,6 +4,8 @@ import math
 from numbers import Integral, Real
 from typing import Any
 
+from src.data.splits import resolve_event_balance_estimator
+
 
 _FORBIDDEN_PATHS = (
     ("dataset", "p_velocity_mps"),
@@ -111,6 +113,7 @@ def _validate_station_random_workflow(config: dict[str, Any]) -> None:
     )
     if not isinstance(event_balanced_sampling, bool):
         raise ValueError("training.event_balanced_sampling must be boolean")
+    resolve_event_balance_estimator(config["training"])
     if _as_int(config, ("training", "early_stop_patience")) != 0:
         raise ValueError("training.early_stop_patience 必须严格等于 0")
     checkpoint_metric = _required(
@@ -263,6 +266,7 @@ def validate_config_v2(config: dict[str, Any]) -> None:
     )
     if sampling_exists and not isinstance(event_balanced_sampling, bool):
         raise ValueError("training.event_balanced_sampling must be boolean")
+    resolve_event_balance_estimator(config.get("training", {}))
 
     distance_mode = _required(config, ("physics", "distance_mode"))
     if distance_mode != "hypocentral":
