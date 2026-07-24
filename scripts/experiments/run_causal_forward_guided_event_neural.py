@@ -57,6 +57,8 @@ from src.utils.provenance import (  # noqa: E402
 REQUIRED_SEEDS = (17, 42, 73)
 SPLIT_NAMES = ("train", "validation", "test")
 REFERENCE_DOI = "10.1029/2025JB033222"
+BASE_METHOD = "causal_forward_guided_event_neural_v2"
+SUBSET_METHOD = "causal_forward_guided_event_neural_v3"
 
 
 @dataclass(frozen=True)
@@ -206,7 +208,8 @@ def _expected_causal_latency(config: Mapping[str, Any]) -> int:
 
 
 def _validate_experiment_config(payload: Mapping[str, Any]) -> None:
-    if payload.get("method") != "causal_forward_guided_event_neural_v2":
+    method = str(payload.get("method"))
+    if method not in {BASE_METHOD, SUBSET_METHOD}:
         raise ValueError("unexpected experiment method")
     seeds = tuple(int(value) for value in payload["training"]["seeds"])
     if seeds != REQUIRED_SEEDS:
@@ -237,6 +240,42 @@ def _validate_experiment_config(payload: Mapping[str, Any]) -> None:
         raise ValueError("training horizons must be sorted and unique")
     if horizons[-1] != int(payload["target"]["final_horizon_sec"]):
         raise ValueError("training horizons must include the final horizon")
+    augmentation = payload["training"].get("station_subset_augmentation")
+    if method == SUBSET_METHOD:
+        if not isinstance(augmentation, Mapping) or not bool(
+            augmentation.get("enabled")
+        ):
+            raise ValueError("v3 requires station-subset augmentation")
+        variants = augmentation.get("random_variants_per_event")
+        if (
+            isinstance(variants, bool)
+            or not isinstance(variants, int)
+            or not 1 <= variants <= 16
+        ):
+            raise ValueError("random_variants_per_event must be in [1, 16]")
+        keep_fraction = float(augmentation.get("keep_fraction", float("nan")))
+        if not math.isfinite(keep_fraction) or not 0.0 < keep_fraction < 1.0:
+            raise ValueError("station subset keep_fraction must be in (0, 1)")
+        gate = payload.get("internal_test_gate")
+        if not isinstance(gate, Mapping):
+            raise ValueError("v3 requires an internal test gate")
+        for name in (
+            "baseline_online_mae",
+            "baseline_final_mae",
+            "minimum_online_improvement",
+            "minimum_final_improvement",
+        ):
+            value = float(gate.get(name, float("nan")))
+            if not math.isfinite(value) or value < 0.0:
+                raise ValueError(f"internal test gate {name} must be nonnegative")
+        if float(gate["baseline_online_mae"]) < float(
+            gate["minimum_online_improvement"]
+        ) or float(gate["baseline_final_mae"]) < float(
+            gate["minimum_final_improvement"]
+        ):
+            raise ValueError("internal test gate improvement exceeds its baseline")
+    elif isinstance(augmentation, Mapping) and bool(augmentation.get("enabled")):
+        raise ValueError("station-subset augmentation requires the v3 method")
 
 
 def _positive_scale(values: np.ndarray) -> np.ndarray:
@@ -427,6 +466,109 @@ def _build_examples(
     if not rows:
         raise ValueError("snapshot set is empty")
     return rows
+
+
+def _deterministic_station_subset_names(
+    station_names: Sequence[str],
+    *,
+    event: str,
+    seed: int,
+    random_variants_per_event: int,
+    keep_fraction: float,
+) -> tuple[tuple[str, ...], ...]:
+    names = tuple(sorted(str(name) for name in station_names))
+    if not names or len(names) != len(set(names)):
+        raise ValueError("station subset source must be non-empty and unique")
+    keep_count = max(1, min(len(names), int(math.ceil(len(names) * keep_fraction))))
+    variants = [names]
+    for variant in range(random_variants_per_event):
+        digest = hashlib.sha256(
+            f"{seed}\0{event}\0{variant}\0{keep_fraction:.12g}".encode("utf-8")
+        ).digest()
+        rng = random.Random(int.from_bytes(digest[:8], byteorder="big"))
+        variants.append(tuple(sorted(rng.sample(names, keep_count))))
+    return tuple(variants)
+
+
+def _build_training_examples(
+    events: Mapping[str, EventTrace],
+    *,
+    horizons: Iterable[int],
+    spec: CausalForwardGuidedSpec,
+    seed: int,
+    training: Mapping[str, Any],
+) -> tuple[list[SnapshotExample], dict[str, Any]]:
+    augmentation = training.get("station_subset_augmentation")
+    if not isinstance(augmentation, Mapping) or not bool(
+        augmentation.get("enabled")
+    ):
+        examples = _build_examples(events, horizons=horizons, spec=spec)
+        return examples, {
+            "enabled": False,
+            "canonical_included": True,
+            "random_variants_per_event": 0,
+            "keep_fraction": 1.0,
+            "example_count": len(examples),
+        }
+
+    random_variants = int(augmentation["random_variants_per_event"])
+    keep_fraction = float(augmentation["keep_fraction"])
+    horizon_values = tuple(int(value) for value in horizons)
+    rows: list[SnapshotExample] = []
+    subset_sizes: list[int] = []
+    subset_signatures: set[tuple[str, tuple[str, ...]]] = set()
+    expected_final_per_event = 1 + random_variants
+    final_count_by_event: dict[str, int] = defaultdict(int)
+    for event_name in sorted(events):
+        event = events[event_name]
+        by_station = {
+            station.observation.station: station for station in event.stations
+        }
+        subset_names = _deterministic_station_subset_names(
+            tuple(by_station),
+            event=event.event,
+            seed=seed,
+            random_variants_per_event=random_variants,
+            keep_fraction=keep_fraction,
+        )
+        for names in subset_names:
+            subset_sizes.append(len(names))
+            subset_signatures.add((event.event, names))
+            subset_event = EventTrace(
+                event=event.event,
+                magnitude=event.magnitude,
+                stations=tuple(by_station[name] for name in names),
+                stf_rate=event.stf_rate,
+                stf_encoded=event.stf_encoded,
+            )
+            for horizon in horizon_values:
+                example = _snapshot_example(
+                    subset_event,
+                    horizon_step=horizon,
+                    spec=spec,
+                )
+                if example is not None:
+                    rows.append(example)
+                    if example.horizon_step == spec.total_steps:
+                        final_count_by_event[event.event] += 1
+    if not rows:
+        raise ValueError("augmented training snapshot set is empty")
+    if set(final_count_by_event) != set(events) or any(
+        count != expected_final_per_event for count in final_count_by_event.values()
+    ):
+        raise ValueError("station subsets lack one final snapshot per variant")
+    return rows, {
+        "enabled": True,
+        "canonical_included": True,
+        "random_variants_per_event": random_variants,
+        "keep_fraction": keep_fraction,
+        "event_count": len(events),
+        "variant_count": len(events) * expected_final_per_event,
+        "unique_variant_count": len(subset_signatures),
+        "minimum_subset_station_count": min(subset_sizes),
+        "maximum_subset_station_count": max(subset_sizes),
+        "example_count": len(rows),
+    }
 
 
 def _collate_examples(
@@ -692,8 +834,8 @@ def _normalization_payload(
     final = [
         example for example in train_examples if example.horizon_step == spec.total_steps
     ]
-    if len(final) != len(train_events):
-        raise ValueError("training set lacks one final snapshot per event")
+    if {example.event for example in final} != set(train_events):
+        raise ValueError("training set lacks a final snapshot for one or more events")
     online = np.asarray(
         [example.online_features for example in train_examples], dtype=np.float32
     )
@@ -983,6 +1125,7 @@ def _train_seed(
     spec: CausalForwardGuidedSpec,
     runtime_config: dict[str, Any],
     training: Mapping[str, Any],
+    method: str,
     output_dir: Path,
     device: torch.device,
 ) -> dict[str, Any]:
@@ -990,13 +1133,21 @@ def _train_seed(
     random.seed(seed)
     np.random.seed(seed)
     horizons = tuple(int(value) for value in training["horizons_sec"])
+    train_examples, augmentation_audit = _build_training_examples(
+        split_events["train"],
+        horizons=horizons,
+        spec=spec,
+        seed=seed,
+        training=training,
+    )
     split_training_examples = {
-        name: _build_examples(
-            split_events[name],
-            horizons=horizons,
-            spec=spec,
-        )
-        for name in SPLIT_NAMES
+        "train": train_examples,
+        "validation": _build_examples(
+            split_events["validation"], horizons=horizons, spec=spec
+        ),
+        "test": _build_examples(
+            split_events["test"], horizons=horizons, spec=spec
+        ),
     }
     normalization = _normalization_payload(
         split_events["train"],
@@ -1086,6 +1237,7 @@ def _train_seed(
             if not name.startswith("anchor_branch.")
         ),
         "split_assignment_sha256": split_manifest["assignment_sha256"],
+        "station_subset_augmentation": augmentation_audit,
     }
     checkpoint = {
         "model_type": "causal_forward_guided_event_neural_v2",
@@ -1097,6 +1249,8 @@ def _train_seed(
             for name in ("lambda_MSE", "lambda_synth", "lambda_mag", "lambda_shape")
         },
         "reference_doi": REFERENCE_DOI,
+        "training_method": method,
+        "station_subset_augmentation": augmentation_audit,
         "summary": summary,
     }
     _atomic_torch_save(output_dir / "best_model.pth", checkpoint)
@@ -1190,6 +1344,39 @@ def _artifact_hashes(root: Path) -> dict[str, str]:
     }
 
 
+def _internal_test_gate(
+    selected_summary: Mapping[str, Any],
+    gate: Mapping[str, Any],
+) -> dict[str, Any]:
+    online_mae = float(
+        selected_summary["split_online_metrics"]["test"][
+            "event_equal_online_mae"
+        ]
+    )
+    final_mae = float(
+        selected_summary["split_final_metrics"]["test"]["event_mae"]
+    )
+    baseline_online = float(gate["baseline_online_mae"])
+    baseline_final = float(gate["baseline_final_mae"])
+    minimum_online_improvement = float(gate["minimum_online_improvement"])
+    minimum_final_improvement = float(gate["minimum_final_improvement"])
+    maximum_online = baseline_online - minimum_online_improvement
+    maximum_final = baseline_final - minimum_final_improvement
+    return {
+        "baseline_online_mae": baseline_online,
+        "baseline_final_mae": baseline_final,
+        "minimum_online_improvement": minimum_online_improvement,
+        "minimum_final_improvement": minimum_final_improvement,
+        "maximum_online_mae": maximum_online,
+        "maximum_final_mae": maximum_final,
+        "candidate_online_mae": online_mae,
+        "candidate_final_mae": final_mae,
+        "online_improvement": baseline_online - online_mae,
+        "final_improvement": baseline_final - final_mae,
+        "passed": online_mae <= maximum_online and final_mae <= maximum_final,
+    }
+
+
 def run(
     *,
     config_path: Path,
@@ -1201,12 +1388,11 @@ def run(
     _validate_experiment_config(experiment)
     _prepare_output_root(output_root)
     _atomic_write(output_root / "config.yaml", config_path.read_bytes())
+    method = str(experiment["method"])
     base_config_path = Path(experiment["base_config"]).resolve()
     event_root = Path(experiment["external_event_root"]).resolve()
     if not base_config_path.is_file():
         raise FileNotFoundError(f"base config not found: {base_config_path}")
-    if not event_root.is_dir():
-        raise FileNotFoundError(f"external event root not found: {event_root}")
     spec = CausalForwardGuidedSpec.from_dict(experiment["event_model"])
     loss_weights = dict(experiment["loss"])
     base_config = _runtime_base_config(
@@ -1273,6 +1459,7 @@ def run(
             spec=spec,
             runtime_config=runtime,
             training=training,
+            method=method,
             output_dir=seed_dir,
             device=device,
         )
@@ -1300,9 +1487,20 @@ def run(
     }
     _atomic_write(output_root / "selection.json", _json_bytes(selection))
 
+    gate_config = experiment.get("internal_test_gate")
+    internal_gate = (
+        None
+        if smoke or not isinstance(gate_config, Mapping)
+        else _internal_test_gate(seed_summaries[selected_seed], gate_config)
+    )
+    external_allowed = not smoke and (
+        internal_gate is None or bool(internal_gate["passed"])
+    )
     external_summary: dict[str, Any] | None = None
     external_input_sha256: dict[str, str] | None = None
-    if not smoke:
+    if external_allowed:
+        if not event_root.is_dir():
+            raise FileNotFoundError(f"external event root not found: {event_root}")
         checkpoint_path = output_root / f"seed_{selected_seed}" / "best_model.pth"
         selected_model = _load_checkpoint(checkpoint_path, device=device)
         external_input_sha256 = _external_input_hashes(event_root)
@@ -1366,9 +1564,12 @@ def run(
             <= float(experiment["target"]["final_event_mae_maximum"]),
         }
 
+    status = "smoke_complete" if smoke else "complete"
+    if internal_gate is not None and not bool(internal_gate["passed"]):
+        status = "internal_gate_failed"
     summary = {
-        "status": "smoke_complete" if smoke else "complete",
-        "method": "causal_forward_guided_event_neural_v2",
+        "status": status,
+        "method": method,
         "ablation": (
             "none"
             if float(loss_weights["lambda_synth"]) > 0.0
@@ -1386,7 +1587,7 @@ def run(
         "uses_future_waveform": False,
         "uses_final_peak_for_station_selection": False,
         "uses_ensemble": False,
-        "external_loaded_after_seed_selection": not smoke,
+        "external_loaded_after_seed_selection": external_summary is not None,
         "created_at_utc": _utc_now_iso(),
         "git_commit": current_git_commit(PROJECT_ROOT),
         "git_dirty": git_is_dirty(PROJECT_ROOT),
@@ -1399,6 +1600,7 @@ def run(
         "spec": spec.to_dict(),
         "loss": {name: float(value) for name, value in loss_weights.items()},
         "selection": selection,
+        "internal_test_gate": internal_gate,
         "seed_summaries": {str(seed): seed_summaries[seed] for seed in seeds},
         "external": external_summary,
     }
@@ -1439,8 +1641,16 @@ def main() -> None:
         smoke=bool(args.smoke),
     )
     selected = summary["selection"]["selected_seed"]
-    if summary["external"] is None:
+    if summary["status"] == "smoke_complete":
         print(f"causal forward-guided smoke complete; selected seed {selected}")
+    elif summary["external"] is None:
+        gate = summary["internal_test_gate"]
+        print(
+            "causal forward-guided run stopped at the internal gate; "
+            f"selected seed {selected}; "
+            f"test online/final MAE={gate['candidate_online_mae']:.6f}/"
+            f"{gate['candidate_final_mae']:.6f}"
+        )
     else:
         print(
             "causal forward-guided run complete; "

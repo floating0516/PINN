@@ -10,6 +10,8 @@ from src.models.causal_forward_guided import (
 )
 from src.training.loss_stf_rate_v2 import CausalEventSTFRateWaveformLossV2
 from scripts.experiments.run_causal_forward_guided_event_neural import (
+    _deterministic_station_subset_names,
+    _internal_test_gate,
     _load_yaml,
     _validate_experiment_config,
 )
@@ -164,3 +166,48 @@ def test_full_and_no_synth_configs_differ_only_in_forward_weight() -> None:
     assert no_synth["loss"]["lambda_synth"] == 0.0
     full["loss"]["lambda_synth"] = 0.0
     assert full == no_synth
+
+
+def test_station_subset_protocol_is_deterministic_and_gated() -> None:
+    config = _load_yaml(
+        Path(
+            "configs/experiments/"
+            "causal_forward_guided_event_neural_station_subset.yaml"
+        )
+    )
+    _validate_experiment_config(config)
+    names = tuple(f"S{index:02d}" for index in range(12))
+    first = _deterministic_station_subset_names(
+        names,
+        event="synthetic",
+        seed=73,
+        random_variants_per_event=3,
+        keep_fraction=0.25,
+    )
+    second = _deterministic_station_subset_names(
+        tuple(reversed(names)),
+        event="synthetic",
+        seed=73,
+        random_variants_per_event=3,
+        keep_fraction=0.25,
+    )
+
+    assert first == second
+    assert first[0] == names
+    assert len(first) == 4
+    assert all(len(subset) == 3 for subset in first[1:])
+    assert len(set(first[1:])) == 3
+
+    selected = {
+        "split_online_metrics": {
+            "test": {"event_equal_online_mae": 0.34},
+        },
+        "split_final_metrics": {"test": {"event_mae": 0.22}},
+    }
+    gate = _internal_test_gate(selected, config["internal_test_gate"])
+    assert gate["passed"] is True
+    assert gate["maximum_online_mae"] == pytest.approx(0.34460540654650135)
+    assert gate["maximum_final_mae"] == pytest.approx(0.22999810987903227)
+
+    selected["split_final_metrics"]["test"]["event_mae"] = 0.24
+    assert _internal_test_gate(selected, config["internal_test_gate"])["passed"] is False

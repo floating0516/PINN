@@ -1,0 +1,60 @@
+method: causal_forward_guided_event_neural_v3
+base_config: /home/lihe/PINN_Mag/runs/phase9-usgs-relabel-20260723T051044Z-bb6d640/formal/campaign/usgs_priority/seed_42/models/20260723_132023/config.yaml
+external_event_root: /home/lihe/PINN_Mag/incoming/legacy-task17/GNSS_EQDATA
+event_model:
+  top_k: 5
+  distance_exponents: [0.5, 0.75, 1.0, 1.25]
+  upper_quantile: 0.9
+  duration_sec: 200
+  sample_rate_hz: 1.0
+  causal_latency_samples: 6
+  hidden_dim: 64
+  num_tcn_blocks: 4
+  transformer_num_layers: 2
+  transformer_num_heads: 4
+  dropout: 0.1
+  magnitude_residual_scale: 0.25
+  magnitude_residual_gate: linear_to_anchor
+  minimum_peak_cm: 0.00001
+loss:
+  lambda_MSE: 1.0
+  lambda_synth: 0.5
+  lambda_mag: 1.0
+  lambda_shape: 0.1
+training:
+  seeds: [17, 42, 73]
+  horizons_sec: [20, 30, 40, 50, 60, 75, 90, 105, 120, 140, 160, 180, 200]
+  anchor_epochs: 3000
+  anchor_learning_rate: 0.005
+  anchor_l2_alpha: 10.0
+  deep_epochs: 120
+  deep_learning_rate: 0.0005
+  deep_weight_decay: 0.0001
+  batch_size: 16
+  evaluation_batch_size: 64
+  gradient_clip_norm: 1.0
+  station_subset_augmentation:
+    enabled: true
+    random_variants_per_event: 3
+    keep_fraction: 0.25
+selection:
+  primary_metric: validation_online_mae
+  tie_break_metric: validation_final_mae
+  use_ensemble: false
+internal_test_gate:
+  baseline_online_mae: 0.34460540654650135
+  baseline_final_mae: 0.23999810987903228
+  minimum_online_improvement: 0.0
+  minimum_final_improvement: 0.01
+audit:
+  expected_event_count: 31
+  expected_station_count: 4165
+  expected_external_event_count: 8
+  expected_external_station_count: 159
+  expected_external_rejected_station_count: 11
+target:
+  final_horizon_sec: 200
+  final_event_mae_maximum: 0.15
+reference:
+  doi: 10.1029/2025JB033222
+  forward_equations: [3, 4, 7, 8, 10]
