@@ -257,6 +257,13 @@ def validate_config_v2(config: dict[str, Any]) -> None:
     if rate_representation != "log1p":
         raise ValueError("第二版主管线要求 training.rate_representation=log1p")
 
+    sampling_exists, event_balanced_sampling = _lookup(
+        config,
+        ("training", "event_balanced_sampling"),
+    )
+    if sampling_exists and not isinstance(event_balanced_sampling, bool):
+        raise ValueError("training.event_balanced_sampling must be boolean")
+
     distance_mode = _required(config, ("physics", "distance_mode"))
     if distance_mode != "hypocentral":
         raise ValueError("第二版主配置要求 physics.distance_mode=hypocentral")

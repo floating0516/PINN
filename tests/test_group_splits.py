@@ -272,3 +272,48 @@ def test_within_event_station_keeps_each_event_in_training(
     assert manifest["catalog_mw_summary"]["test"]["count"] == len(
         test_loader.dataset
     )
+
+
+def test_within_event_station_balanced_sampler_is_event_equal_and_resumable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dataset(monkeypatch)
+    config = _loader_config("within_event_station")
+
+    first, first_validation, first_test, _ = get_data_loaders_v2(config)
+    assert isinstance(first.sampler, WeightedRandomSampler)
+    assert first.sampler.replacement is True
+    assert first.sampler.num_samples == len(first.dataset)
+    assert not isinstance(first_validation.sampler, WeightedRandomSampler)
+    assert not isinstance(first_test.sampler, WeightedRandomSampler)
+
+    event_weight_sums: dict[str, float] = defaultdict(float)
+    for subset_position, weight in enumerate(first.sampler.weights):
+        dataset_index = first.dataset.indices[subset_position]
+        event = first.dataset.dataset.samples[dataset_index]["event"]
+        event_weight_sums[event] += float(weight)
+    assert len(set(round(value, 12) for value in event_weight_sums.values())) == 1
+
+    def sampled_stations(loader) -> list[str]:
+        return [
+            str(station)
+            for batch in loader
+            for station in batch["station"]
+        ]
+
+    first_epoch = sampled_stations(first)
+    resume_state = first.generator.get_state().clone()
+    second_epoch = sampled_stations(first)
+
+    replay, _, _, _ = get_data_loaders_v2(config)
+    assert sampled_stations(replay) == first_epoch
+    assert sampled_stations(replay) == second_epoch
+
+    resumed, _, _, _ = get_data_loaders_v2(config)
+    resumed.generator.set_state(resume_state)
+    assert sampled_stations(resumed) == second_epoch
+
+    different_seed = _loader_config("within_event_station")
+    different_seed["training"]["random_seed"] = 43
+    other, _, _, _ = get_data_loaders_v2(different_seed)
+    assert sampled_stations(other) != first_epoch

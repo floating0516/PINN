@@ -32,6 +32,12 @@ PHASE25_CONFIG_PATH = (
     / "experiments"
     / "manuscript_station_stf_usgs_dual_range_stem.yaml"
 )
+PHASE26_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_event_balanced.yaml"
+)
 CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
@@ -118,6 +124,12 @@ def _selected_train_summary(
             "none",
             "asinh_residual",
         ),
+        (
+            PHASE26_CONFIG_PATH,
+            campaign.EVENT_BALANCED_SAMPLING_AXIS,
+            False,
+            True,
+        ),
     ],
 )
 def test_formal_configs_and_variants_have_one_scientific_difference(
@@ -142,6 +154,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
     if expected_axis in {
         campaign.SCHEDULER_T0_AXIS,
         campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS,
+        campaign.EVENT_BALANCED_SAMPLING_AXIS,
     }:
         assert {
             variant["model"]["stf_output_parameterization"]
@@ -151,7 +164,10 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
             variant["training"]["scheduler_T_mult"]
             for variant in variants.values()
         } == {2}
-    if expected_axis == campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS:
+    if expected_axis in {
+        campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS,
+        campaign.EVENT_BALANCED_SAMPLING_AXIS,
+    }:
         assert {
             variant["training"]["scheduler_T0"] for variant in variants.values()
         } == {15}
@@ -163,6 +179,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         (PHASE23_CONFIG_PATH, campaign.STF_OUTPUT_PARAMETERIZATION_AXIS),
         (PHASE24_CONFIG_PATH, campaign.SCHEDULER_T0_AXIS),
         (PHASE25_CONFIG_PATH, campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS),
+        (PHASE26_CONFIG_PATH, campaign.EVENT_BALANCED_SAMPLING_AXIS),
     ],
 )
 def test_formal_config_rejects_a_second_scientific_change(
@@ -215,6 +232,33 @@ def test_phase25_axis_uses_an_explicit_none_baseline_marker() -> None:
     phase23_with_marker["model"]["radial_dynamic_range_stem"] = "none"
     with pytest.raises(ValueError, match="formal config must describe"):
         campaign.validate_formal_config(phase23_with_marker)
+
+
+def test_phase26_axis_requires_an_explicit_campaign_marker() -> None:
+    config = _config(PHASE26_CONFIG_PATH)
+
+    assert (
+        campaign.variant_axis_from_config(config)
+        == campaign.EVENT_BALANCED_SAMPLING_AXIS
+    )
+    assert "radial_dynamic_range_stem" not in config["model"]
+
+    without_marker = copy.deepcopy(config)
+    del without_marker["campaign"]
+    assert (
+        campaign.variant_axis_from_config(without_marker)
+        == campaign.SCHEDULER_T0_AXIS
+    )
+
+    candidate_as_baseline = copy.deepcopy(config)
+    candidate_as_baseline["training"]["event_balanced_sampling"] = True
+    with pytest.raises(ValueError, match="event_balanced_sampling=False"):
+        campaign.validate_formal_config(candidate_as_baseline)
+
+    unknown_axis = copy.deepcopy(config)
+    unknown_axis["campaign"]["variant_axis"] = "unknown"
+    with pytest.raises(ValueError, match="unsupported formal campaign axis"):
+        campaign.validate_formal_config(unknown_axis)
 
 
 def test_split_contract_is_frozen_for_all_three_seeds() -> None:
@@ -314,6 +358,27 @@ def test_phase23_legacy_seed_summary_without_new_axis_fields_resumes(
     assert resumed == legacy_summary
 
 
+def test_phase26_seed_summary_requires_sampling_provenance(tmp_path: Path) -> None:
+    references: dict[str, dict[str, str]] = {}
+    for name in ("checkpoint", "config", "split", "training_log", "run_manifest"):
+        artifact_path = tmp_path / f"{name}.artifact"
+        artifact_path.write_text(name, encoding="utf-8")
+        references[name] = _artifact(artifact_path)
+    summary = {
+        "seed": 17,
+        campaign.VALIDATION_METRIC: 0.2,
+        **references,
+    }
+
+    assert campaign._seed_summary_is_valid(summary)
+    assert not campaign._seed_summary_is_valid(summary, require_sampling=True)
+
+    sampling_path = tmp_path / "sampling.json"
+    sampling_path.write_text("{}\n", encoding="utf-8")
+    summary["sampling"] = _artifact(sampling_path)
+    assert campaign._seed_summary_is_valid(summary, require_sampling=True)
+
+
 def _logged_scheduler_learning_rates(scheduler_t0: int) -> list[float]:
     parameter = torch.nn.Parameter(torch.tensor(0.0))
     optimizer = torch.optim.AdamW([parameter], lr=1.0e-4)
@@ -377,6 +442,76 @@ def test_locked_test_loader_raises_on_iteration() -> None:
         iter(locked)
 
 
+def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -> None:
+    class SamplingDataset(torch.utils.data.Dataset):
+        def __init__(self) -> None:
+            events = [f"E{index:02d}" for index in range(30)] + ["E30"] * 1758
+            self.samples = [
+                {"event": event, "station": f"S{index:04d}"}
+                for index, event in enumerate(events)
+            ]
+
+        def __len__(self) -> int:
+            return len(self.samples)
+
+        def __getitem__(self, index: int) -> int:
+            return index
+
+    dataset = SamplingDataset()
+    subset = torch.utils.data.Subset(dataset, range(len(dataset)))
+    counts: dict[str, int] = {}
+    for row in dataset.samples:
+        event = str(row["event"])
+        counts[event] = counts.get(event, 0) + 1
+    weights = [1.0 / counts[str(row["event"])] for row in dataset.samples]
+    generator = torch.Generator().manual_seed(17)
+    sampler = torch.utils.data.WeightedRandomSampler(
+        weights,
+        num_samples=len(dataset),
+        replacement=True,
+        generator=generator,
+    )
+    loader = torch.utils.data.DataLoader(
+        subset,
+        batch_size=64,
+        sampler=sampler,
+        generator=generator,
+    )
+    state_before = generator.get_state().clone()
+
+    manifest = campaign._training_sampling_manifest(
+        loader,
+        {"training": {"event_balanced_sampling": True}},
+    )
+
+    assert torch.equal(generator.get_state(), state_before)
+    assert manifest["mode"] == "event_equal_with_replacement"
+    assert manifest["sampler_class"] == "WeightedRandomSampler"
+    assert manifest["replacement"] is True
+    assert manifest["draw_count"] == 1788
+    assert manifest["event_count"] == 31
+    assert manifest["expected_event_draws_minimum"] == pytest.approx(1788 / 31)
+    assert manifest["expected_event_draws_maximum"] == pytest.approx(1788 / 31)
+    assert manifest["expected_unique_record_count"] < 1788
+    assert len(manifest["sample_weight_sha256"]) == 64
+
+    baseline_generator = torch.Generator().manual_seed(17)
+    baseline_loader = torch.utils.data.DataLoader(
+        subset,
+        batch_size=64,
+        shuffle=True,
+        generator=baseline_generator,
+    )
+    baseline = campaign._training_sampling_manifest(
+        baseline_loader,
+        {"training": {"event_balanced_sampling": False}},
+    )
+    assert baseline["mode"] == "station_uniform_without_replacement"
+    assert baseline["sampler_class"] == "RandomSampler"
+    assert baseline["replacement"] is False
+    assert baseline["expected_unique_record_count"] == pytest.approx(1788)
+
+
 @pytest.mark.parametrize(
     (
         "formal_config_path",
@@ -384,6 +519,7 @@ def test_locked_test_loader_raises_on_iteration() -> None:
         "expected_parameterizations",
         "expected_scheduler_t0s",
         "expected_stems",
+        "expected_event_balanced",
     ),
     [
         (
@@ -392,6 +528,7 @@ def test_locked_test_loader_raises_on_iteration() -> None:
             ("direct", "moment_shape_factorized"),
             (15, 15),
             ("none", "none"),
+            (False, False),
         ),
         (
             PHASE24_CONFIG_PATH,
@@ -399,6 +536,7 @@ def test_locked_test_loader_raises_on_iteration() -> None:
             ("moment_shape_factorized", "moment_shape_factorized"),
             (15, 195),
             ("none", "none"),
+            (False, False),
         ),
         (
             PHASE25_CONFIG_PATH,
@@ -406,6 +544,15 @@ def test_locked_test_loader_raises_on_iteration() -> None:
             ("moment_shape_factorized", "moment_shape_factorized"),
             (15, 15),
             ("none", "asinh_residual"),
+            (False, False),
+        ),
+        (
+            PHASE26_CONFIG_PATH,
+            campaign.EVENT_BALANCED_SAMPLING_AXIS,
+            ("moment_shape_factorized", "moment_shape_factorized"),
+            (15, 15),
+            ("none", "none"),
+            (False, True),
         ),
     ],
 )
@@ -415,6 +562,7 @@ def test_train_stage_selects_from_validation_without_test_or_external(
     expected_parameterizations: tuple[str, str],
     expected_scheduler_t0s: tuple[int, int],
     expected_stems: tuple[str, str],
+    expected_event_balanced: tuple[bool, bool],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -500,6 +648,10 @@ def test_train_stage_selects_from_validation_without_test_or_external(
         summary["variants"][name]["radial_dynamic_range_stem"]
         for name in variant_names
     ) == expected_stems
+    assert tuple(
+        summary["variants"][name]["event_balanced_sampling"]
+        for name in variant_names
+    ) == expected_event_balanced
     assert summary["variants"]["candidate"]["scientific_diff_from_baseline"] == [
         ".".join(campaign.VARIANT_AXIS_PATHS[expected_axis])
     ]

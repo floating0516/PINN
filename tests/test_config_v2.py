@@ -117,6 +117,14 @@ def test_manuscript_point_two_hz_filter_passes() -> None:
     validate_config_v2(config)
 
 
+def test_source_aligned_workflow_rejects_string_event_balanced_flag() -> None:
+    config = _minimal_v2()
+    config["training"]["event_balanced_sampling"] = "false"
+
+    with pytest.raises(ValueError, match="event_balanced_sampling"):
+        validate_config_v2(config)
+
+
 def test_waveform_components_default_to_radial() -> None:
     config = _minimal_v2()
 

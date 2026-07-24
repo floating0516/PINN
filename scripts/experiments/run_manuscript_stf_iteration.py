@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import copy
 import csv
+import hashlib
 import io
 import json
 import math
@@ -13,7 +15,12 @@ import tempfile
 from typing import Any, Iterable, Mapping, Sequence
 
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import (
+    DataLoader,
+    RandomSampler,
+    Subset,
+    WeightedRandomSampler,
+)
 import yaml
 
 
@@ -60,6 +67,7 @@ SEEDS = (17, 42, 73)
 STF_OUTPUT_PARAMETERIZATION_AXIS = "stf_output_parameterization"
 SCHEDULER_T0_AXIS = "scheduler_T0"
 RADIAL_DYNAMIC_RANGE_STEM_AXIS = "radial_dynamic_range_stem"
+EVENT_BALANCED_SAMPLING_AXIS = "event_balanced_sampling"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
         "baseline": "direct",
@@ -73,11 +81,16 @@ VARIANT_AXES = {
         "baseline": "none",
         "candidate": "asinh_residual",
     },
+    EVENT_BALANCED_SAMPLING_AXIS: {
+        "baseline": False,
+        "candidate": True,
+    },
 }
 VARIANT_AXIS_PATHS = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: ("model", "stf_output_parameterization"),
     SCHEDULER_T0_AXIS: ("training", "scheduler_T0"),
     RADIAL_DYNAMIC_RANGE_STEM_AXIS: ("model", "radial_dynamic_range_stem"),
+    EVENT_BALANCED_SAMPLING_AXIS: ("training", "event_balanced_sampling"),
 }
 # Backward-compatible alias for the Phase23 campaign and its persisted tests.
 VARIANTS = VARIANT_AXES[STF_OUTPUT_PARAMETERIZATION_AXIS]
@@ -286,6 +299,25 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
     parameterization = model.get("stf_output_parameterization")
     scheduler_t0 = training.get("scheduler_T0")
     stem_is_explicit = "radial_dynamic_range_stem" in model
+    campaign = base_config.get("campaign", {})
+    if not isinstance(campaign, Mapping):
+        raise ValueError("formal config campaign marker must be a mapping")
+    explicit_axis = campaign.get("variant_axis")
+    if explicit_axis is not None:
+        if explicit_axis != EVENT_BALANCED_SAMPLING_AXIS:
+            raise ValueError(f"unsupported formal campaign axis: {explicit_axis!r}")
+        if (
+            parameterization != "moment_shape_factorized"
+            or scheduler_t0 != 15
+            or stem_is_explicit
+            or training.get("event_balanced_sampling") is not False
+        ):
+            raise ValueError(
+                "Phase26 event-balanced baseline requires factorized STF, "
+                "scheduler_T0=15, the original radial stem, and "
+                "event_balanced_sampling=false"
+            )
+        return EVENT_BALANCED_SAMPLING_AXIS
     if (
         parameterization == "direct"
         and scheduler_t0 == 15
@@ -304,7 +336,8 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
     raise ValueError(
         "formal config must describe the Phase23 direct baseline or the "
         "Phase24 factorized/T0=15 baseline or the Phase25 factorized/T0=15 "
-        "baseline with explicit radial dynamic-range stem"
+        "baseline with explicit radial dynamic-range stem or the explicitly "
+        "marked Phase26 event-balanced baseline"
     )
 
 
@@ -410,6 +443,93 @@ def _runtime_config(
     )
     validate_config_v2(runtime)
     return runtime
+
+
+def _training_sampling_manifest(
+    train_loader: DataLoader[Any],
+    config: Mapping[str, Any],
+) -> dict[str, Any]:
+    dataset = train_loader.dataset
+    if not isinstance(dataset, Subset):
+        raise TypeError("formal training loader must wrap a Subset")
+    samples = getattr(dataset.dataset, "samples", None)
+    if not isinstance(samples, list):
+        raise TypeError("formal training dataset must expose sample metadata")
+
+    sample_rows = [samples[int(index)] for index in dataset.indices]
+    events = [str(row["event"]) for row in sample_rows]
+    stations = [str(row["station"]) for row in sample_rows]
+    counts = Counter(events)
+    if (
+        len(events) != EXPECTED_SPLIT_COUNTS[0]
+        or len(counts) != EXPECTED_EVENT_COUNT
+    ):
+        raise ValueError("formal training sampling cohort changed")
+
+    enabled = bool(config["training"]["event_balanced_sampling"])
+    sampler = train_loader.sampler
+    if enabled:
+        if not isinstance(sampler, WeightedRandomSampler):
+            raise TypeError("event-balanced training requires WeightedRandomSampler")
+        if not sampler.replacement:
+            raise ValueError("event-balanced training must sample with replacement")
+        weights = [float(value) for value in sampler.weights.tolist()]
+        expected_weights = [1.0 / counts[event] for event in events]
+        if any(
+            not math.isclose(actual, expected, rel_tol=0.0, abs_tol=1.0e-12)
+            for actual, expected in zip(weights, expected_weights, strict=True)
+        ):
+            raise ValueError("event-balanced sampler weights changed")
+        mode = "event_equal_with_replacement"
+    else:
+        if not isinstance(sampler, RandomSampler) or sampler.replacement:
+            raise TypeError(
+                "baseline training requires shuffled sampling without replacement"
+            )
+        weights = [1.0] * len(events)
+        mode = "station_uniform_without_replacement"
+
+    draw_count = int(sampler.num_samples)
+    if draw_count != len(events):
+        raise ValueError("formal sampler draw count changed")
+    if sampler.generator is not train_loader.generator:
+        raise ValueError("sampler and DataLoader must share their seeded generator")
+
+    total_weight = sum(weights)
+    event_weights: dict[str, float] = {event: 0.0 for event in counts}
+    for event, weight in zip(events, weights, strict=True):
+        event_weights[event] += weight
+    event_draws = [
+        draw_count * value / total_weight for value in event_weights.values()
+    ]
+    if enabled:
+        record_probabilities = [weight / total_weight for weight in weights]
+        expected_unique = sum(
+            1.0 - (1.0 - probability) ** draw_count
+            for probability in record_probabilities
+        )
+    else:
+        expected_unique = float(draw_count)
+    weight_rows = [
+        {"event": event, "station": station, "weight": weight}
+        for event, station, weight in zip(events, stations, weights, strict=True)
+    ]
+    return {
+        "schema_version": 1,
+        "mode": mode,
+        "event_balanced_sampling": enabled,
+        "sampler_class": type(sampler).__name__,
+        "replacement": bool(sampler.replacement),
+        "draw_count": draw_count,
+        "record_count": len(events),
+        "event_count": len(counts),
+        "event_record_count_minimum": min(counts.values()),
+        "event_record_count_maximum": max(counts.values()),
+        "expected_event_draws_minimum": min(event_draws),
+        "expected_event_draws_maximum": max(event_draws),
+        "expected_unique_record_count": expected_unique,
+        "sample_weight_sha256": hashlib.sha256(_json_bytes(weight_rows)).hexdigest(),
+    }
 
 
 def _assert_split_manifest(manifest: Mapping[str, Any], *, seed: int) -> None:
@@ -682,10 +802,16 @@ def _read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(stream))
 
 
-def _seed_summary_is_valid(summary: Mapping[str, Any]) -> bool:
+def _seed_summary_is_valid(
+    summary: Mapping[str, Any],
+    *,
+    require_sampling: bool = False,
+) -> bool:
     try:
         for name in ("checkpoint", "config", "split", "training_log", "run_manifest"):
             _validate_artifact(summary[name], label=name)
+        if require_sampling or "sampling" in summary:
+            _validate_artifact(summary["sampling"], label="sampling")
         return int(summary["seed"]) in SEEDS and math.isfinite(
             float(summary[VALIDATION_METRIC])
         )
@@ -706,7 +832,15 @@ def _train_one_seed(
     seed_summary_path = seed_root / "seed_summary.json"
     if seed_summary_path.is_file():
         summary = _load_json(seed_summary_path)
-        if resume and _seed_summary_is_valid(summary):
+        campaign = config.get("campaign", {})
+        require_sampling = (
+            isinstance(campaign, Mapping)
+            and campaign.get("variant_axis") == EVENT_BALANCED_SAMPLING_AXIS
+        )
+        if resume and _seed_summary_is_valid(
+            summary,
+            require_sampling=require_sampling,
+        ):
             return summary
         if not resume:
             raise FileExistsError(f"seed output already exists: {seed_root}")
@@ -723,6 +857,12 @@ def _train_one_seed(
     _assert_split_manifest(split_manifest, seed=seed)
     frozen_split = _load_json(frozen_split_path)
     _assert_same_split(split_manifest, frozen_split)
+    sampling_manifest_path = seed_root / "sampling_manifest.json"
+    _atomic_json(
+        sampling_manifest_path,
+        _training_sampling_manifest(train_loader, runtime),
+        overwrite=resume,
+    )
     locked_loaders = (
         train_loader,
         validation_loader,
@@ -754,6 +894,9 @@ def _train_one_seed(
         "radial_dynamic_range_stem": str(
             config["model"].get("radial_dynamic_range_stem", "none")
         ),
+        "event_balanced_sampling": bool(
+            config["training"]["event_balanced_sampling"]
+        ),
         "seed": seed,
         **checkpoint_selection,
         "checkpoint": _artifact(verified["checkpoint_path"]),
@@ -761,6 +904,7 @@ def _train_one_seed(
         "split": _artifact(result["split_manifest_path"]),
         "training_log": _artifact(log_path),
         "run_manifest": _artifact(result["run_manifest_path"]),
+        "sampling": _artifact(sampling_manifest_path),
         "last_checkpoint": _artifact(result["last_checkpoint_path"]),
         "split_assignment_sha256": split_manifest["assignment_sha256"],
         "parameter_count": int(verified["parameter_count"]),
@@ -822,6 +966,9 @@ def run_train(
             "scheduler_T0": int(variant_config["training"]["scheduler_T0"]),
             "radial_dynamic_range_stem": str(
                 variant_config["model"].get("radial_dynamic_range_stem", "none")
+            ),
+            "event_balanced_sampling": bool(
+                variant_config["training"]["event_balanced_sampling"]
             ),
             "scientific_diff_from_baseline": sorted(
                 _config_diff_paths(variants["baseline"], variant_config)
