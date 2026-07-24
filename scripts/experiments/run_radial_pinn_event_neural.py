@@ -472,6 +472,9 @@ def _train_head(
     )
     linear_alpha = float(training_config["linear_ridge_alpha"])
     nonlinear_alpha = float(training_config["nonlinear_l2_alpha"])
+    linear_warmup_epochs = int(training_config["linear_warmup_epochs"])
+    if not 0 <= linear_warmup_epochs < epochs:
+        raise ValueError("linear_warmup_epochs must be in [0, epochs)")
     gradient_clip = float(training_config["gradient_clip_norm"])
     best_epoch = 0
     best_validation_mae = float("inf")
@@ -481,20 +484,26 @@ def _train_head(
         model.train()
         optimizer.zero_grad(set_to_none=True)
         linear, nonlinear = model.standardized_components(train_x)
-        fit_loss = F.mse_loss(linear + nonlinear, train_y_standardized)
+        nonlinear_active = epoch > linear_warmup_epochs
+        active_nonlinear = nonlinear if nonlinear_active else nonlinear.detach() * 0.0
+        fit_loss = F.mse_loss(
+            linear + active_nonlinear,
+            train_y_standardized,
+        )
         linear_penalty = (
             linear_alpha
             / len(train_events)
             * model.linear_branch.weight.square().sum()
         )
+        raw_nonlinear_penalty = sum(
+            parameter.square().sum()
+            for parameter in model.nonlinear_branch.parameters()
+            if parameter.ndim >= 2
+        )
         nonlinear_penalty = (
-            nonlinear_alpha
-            / len(train_events)
-            * sum(
-                parameter.square().sum()
-                for parameter in model.nonlinear_branch.parameters()
-                if parameter.ndim >= 2
-            )
+            nonlinear_alpha / len(train_events) * raw_nonlinear_penalty
+            if nonlinear_active
+            else raw_nonlinear_penalty.detach() * 0.0
         )
         loss = fit_loss + linear_penalty + nonlinear_penalty
         if not torch.isfinite(loss):
@@ -529,7 +538,7 @@ def _train_head(
                 "learning_rate": float(optimizer.param_groups[0]["lr"]),
             }
         )
-        if validation_mae < best_validation_mae:
+        if epoch >= linear_warmup_epochs and validation_mae < best_validation_mae:
             best_validation_mae = validation_mae
             best_epoch = epoch
             best_state = {
@@ -571,6 +580,7 @@ def _train_head(
         ),
         "feature_count": len(radial_pinn_event_feature_names(spec)),
         "training_event_count": len(train_events),
+        "linear_warmup_epochs": linear_warmup_epochs,
         "split_metrics": split_metrics,
     }
     return model, audit, prediction_rows, log_rows
@@ -585,7 +595,7 @@ def _checkpoint_payload(
     source_paths: Mapping[int, Mapping[str, Path]],
 ) -> dict[str, Any]:
     return {
-        "model_type": "radial_pinn_event_neural_v1",
+        "model_type": "radial_pinn_event_neural_v2",
         "framework": "pytorch",
         "deep_learning": True,
         "uses_ridge_prediction": False,
@@ -609,7 +619,7 @@ def run(*, config_path: Path, output_root: Path) -> dict[str, Any]:
     if output_root.exists():
         raise FileExistsError(f"output root already exists: {output_root}")
     experiment_config = _load_yaml(config_path)
-    if experiment_config.get("method") != "radial_pinn_event_neural_v1":
+    if experiment_config.get("method") != "radial_pinn_event_neural_v2":
         raise ValueError("unsupported experiment method")
     paths, base_configs = _validated_paths(experiment_config)
     spec = _event_spec(experiment_config)
@@ -751,7 +761,7 @@ def run(*, config_path: Path, output_root: Path) -> dict[str, Any]:
     )
     summary = {
         "status": "complete",
-        "method": "radial_pinn_event_neural_v1",
+        "method": "radial_pinn_event_neural_v2",
         "framework": "pytorch",
         "deep_learning": True,
         "uses_ridge_prediction": False,

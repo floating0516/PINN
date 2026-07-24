@@ -233,8 +233,11 @@ class RadialPINNEventNet(nn.Module):
             torch.tensor(float(target_scale), dtype=torch.float32),
         )
         feature_count = int(mean.numel())
+        self.amplitude_feature_count = 2 * len(spec.distance_exponents) + 2
+        if self.amplitude_feature_count >= feature_count:
+            raise ValueError("event features must include PINN residual inputs")
         hidden_dim = int(spec.hidden_dim)
-        self.linear_branch = nn.Linear(feature_count, 1)
+        self.linear_branch = nn.Linear(self.amplitude_feature_count, 1)
         self.nonlinear_branch = nn.Sequential(
             nn.Linear(feature_count, hidden_dim),
             nn.LayerNorm(hidden_dim),
@@ -245,6 +248,8 @@ class RadialPINNEventNet(nn.Module):
             nn.Dropout(float(spec.dropout)),
             nn.Linear(hidden_dim, 1),
         )
+        nn.init.zeros_(self.nonlinear_branch[-1].weight)
+        nn.init.zeros_(self.nonlinear_branch[-1].bias)
 
     def standardized_components(
         self,
@@ -253,7 +258,9 @@ class RadialPINNEventNet(nn.Module):
         if features.ndim != 2 or features.shape[1] != self.feature_mean.numel():
             raise ValueError("features must have shape (batch, feature_count)")
         standardized = (features - self.feature_mean) / self.feature_scale
-        linear = self.linear_branch(standardized).squeeze(-1)
+        linear = self.linear_branch(
+            standardized[:, : self.amplitude_feature_count]
+        ).squeeze(-1)
         nonlinear = (
             float(self.spec.nonlinear_scale)
             * self.nonlinear_branch(standardized).squeeze(-1)

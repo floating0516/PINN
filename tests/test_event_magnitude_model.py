@@ -64,11 +64,36 @@ def test_radial_pinn_event_net_is_nonlinear_and_backpropagates() -> None:
 
     assert predictions.shape == (4,)
     assert linear.shape == nonlinear.shape == (4,)
-    assert not torch.equal(nonlinear, torch.zeros_like(nonlinear))
+    assert model.linear_branch.in_features == 10
+    assert torch.equal(nonlinear, torch.zeros_like(nonlinear))
     assert all(
         parameter.grad is not None and torch.isfinite(parameter.grad).all()
         for parameter in model.parameters()
     )
+    assert torch.count_nonzero(model.nonlinear_branch[-1].weight.grad) > 0
+
+
+def test_pinn_features_only_change_the_nonlinear_residual() -> None:
+    spec = RadialPINNEventSpec(hidden_dim=8, dropout=0.0)
+    feature_count = len(radial_pinn_event_feature_names(spec))
+    model = RadialPINNEventNet(
+        feature_mean=np.zeros(feature_count),
+        feature_scale=np.ones(feature_count),
+        target_mean=7.0,
+        target_scale=1.0,
+        spec=spec,
+    ).eval()
+    with torch.no_grad():
+        model.nonlinear_branch[-1].weight.fill_(0.1)
+    baseline = torch.zeros(1, feature_count)
+    changed = baseline.clone()
+    changed[:, 10:] = 1.0
+
+    baseline_linear, baseline_nonlinear = model.standardized_components(baseline)
+    changed_linear, changed_nonlinear = model.standardized_components(changed)
+
+    assert torch.equal(baseline_linear, changed_linear)
+    assert not torch.equal(baseline_nonlinear, changed_nonlinear)
 
 
 def test_radial_pinn_event_checkpoint_round_trip() -> None:

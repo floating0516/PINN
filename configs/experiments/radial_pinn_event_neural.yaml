@@ -1,4 +1,4 @@
-method: radial_pinn_event_neural_v1
+method: radial_pinn_event_neural_v2
 base_models:
   17:
     model_dir: /home/lihe/PINN_Mag/runs/phase9-usgs-relabel-20260723T051044Z-bb6d640/formal/campaign/usgs_priority/seed_17/models/20260723_131557
@@ -15,13 +15,14 @@ event_model:
   upper_quantile: 0.9
   hidden_dim: 32
   dropout: 0.05
-  nonlinear_scale: 0.25
+  nonlinear_scale: 0.1
 training:
   head_seeds: [17, 42, 73]
   epochs: 3000
   learning_rate: 0.005
   linear_ridge_alpha: 10.0
-  nonlinear_l2_alpha: 1.0
+  nonlinear_l2_alpha: 10.0
+  linear_warmup_epochs: 1000
   gradient_clip_norm: 5.0
   checkpoint_metric: validation_event_mae
 target:
