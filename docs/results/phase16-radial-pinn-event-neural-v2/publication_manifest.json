@@ -1,0 +1,74 @@
+{
+  "inputs": {
+    "comparison_metrics": {
+      "path": "/home/lihe/PINN_Mag/runs/phase14-radial-event-ridge-20260723T170354Z-a629228/publication/method_metrics.csv",
+      "sha256": "8bc15f24ecb05dd8857bf2e47868dd56409dc01025a8901a3cdad9d2a4596fe8"
+    },
+    "phase16_events": {
+      "path": "/home/lihe/PINN_Mag/runs/phase16-radial-pinn-event-neural-v2-20260724T042259Z-fd40706/ensemble_external_event_predictions.csv",
+      "sha256": "fd1280945b91dc687d59064685b3ef51d84cf5bd2aaf1388c0dbef448bffe93c"
+    },
+    "phase16_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase16-radial-pinn-event-neural-v2-20260724T042259Z-fd40706/summary.json",
+      "sha256": "9094843036b808c4a78237da2cbebf76a8fe3254afa64e86dd69e057138fe8af"
+    },
+    "seed_17_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase16-radial-pinn-event-neural-v2-20260724T042259Z-fd40706/seed_17/training_log.csv",
+      "sha256": "c4471b3eb4f9d0745390d6933abbed7ecb383487de8e64a633a244e16f4bd1df"
+    },
+    "seed_42_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase16-radial-pinn-event-neural-v2-20260724T042259Z-fd40706/seed_42/training_log.csv",
+      "sha256": "a705eb5faa971c348e3b41d6cce592d624733108607eb55a71c600b6d1754513"
+    },
+    "seed_73_training_log": {
+      "path": "/home/lihe/PINN_Mag/runs/phase16-radial-pinn-event-neural-v2-20260724T042259Z-fd40706/seed_73/training_log.csv",
+      "sha256": "9bb0168361c3259440f9bf4081afc6d4ff4d18bb8327a2d2f7b77ed70528dab7"
+    }
+  },
+  "outputs": {
+    "01_training_dynamics.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/figures/01_training_dynamics.pdf",
+      "sha256": "cc411a714037dcde92024db614510f109d75b3a7d5d427f7a4d9df1899d04807"
+    },
+    "01_training_dynamics.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/figures/01_training_dynamics.png",
+      "sha256": "82f4454fc09213429efd17a41fcb6830833e6ad33b89fde5209000a585d76098"
+    },
+    "02_external_event_performance.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/figures/02_external_event_performance.pdf",
+      "sha256": "96ff2c34105cefb95d61da53cbdc52bfc4ecae966aeb5b63bd6c36776bc83cf2"
+    },
+    "02_external_event_performance.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/figures/02_external_event_performance.png",
+      "sha256": "2fdf5071f3656c43cd6d908674653d3244fd5419b47d2a70570f91837d95cf96"
+    },
+    "03_method_comparison.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/figures/03_method_comparison.pdf",
+      "sha256": "2740b5ed7869fd781f3da1198079bb0d22061496cbb9947aee9a995202ea1b9e"
+    },
+    "03_method_comparison.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/figures/03_method_comparison.png",
+      "sha256": "b1e9bc391c34f464e2f252d41ed1791536b3668a5041237d2be9e7b3828cbcad"
+    },
+    "04_station_and_neural_contribution.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/figures/04_station_and_neural_contribution.pdf",
+      "sha256": "cca874c0988bc637002fb30705ae2ddc45237c75e3e542dff713b32cefef3685"
+    },
+    "04_station_and_neural_contribution.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/figures/04_station_and_neural_contribution.png",
+      "sha256": "a43c7f555d44ce3554a4eed05d23135ffc87a72192076f8eddbed6d87e8021a8"
+    },
+    "README.md": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/README.md",
+      "sha256": "5df2d2f04fcb158ebc9ce41df8b306e6185c83ab3f9741a88a351518d0592e80"
+    },
+    "event_predictions.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/event_predictions.csv",
+      "sha256": "712b5de3ab018646d9094d32a453fbbeb177524b482d9f764c0617236fa7f57f"
+    },
+    "method_metrics.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase16-radial-pinn-event-neural-v2/method_metrics.csv",
+      "sha256": "21f58270b74b48fdf82fb1c7337b56a0c272ea30ad2cb2f90f939efe9faf5df6"
+    }
+  }
+}
