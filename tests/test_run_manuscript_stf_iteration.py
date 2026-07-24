@@ -44,11 +44,24 @@ PHASE27_CONFIG_PATH = (
     / "experiments"
     / "manuscript_station_stf_usgs_event_loss_weighted.yaml"
 )
+PHASE28_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_absolute_magnitude.yaml"
+)
 CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
 def _config(path: Path = CONFIG_PATH) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def _nested_value(config: dict[str, Any], path: tuple[str, ...]) -> Any:
+    value: Any = config
+    for key in path:
+        value = value[key]
+    return value
 
 
 def _write_json(path: Path, payload: Any) -> None:
@@ -142,6 +155,12 @@ def _selected_train_summary(
             campaign.REPLACEMENT_SAMPLING_ESTIMATOR,
             campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR,
         ),
+        (
+            PHASE28_CONFIG_PATH,
+            campaign.MAGNITUDE_PENALTY_AXIS,
+            "squared",
+            "absolute",
+        ),
     ],
 )
 def test_formal_configs_and_variants_have_one_scientific_difference(
@@ -156,9 +175,9 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
     variants = campaign.build_variant_configs(config)
 
     assert campaign.variant_axis_from_config(config) == expected_axis
-    section, key = campaign.VARIANT_AXIS_PATHS[expected_axis]
-    assert variants["baseline"][section][key] == baseline_value
-    assert variants["candidate"][section][key] == candidate_value
+    path = campaign.VARIANT_AXIS_PATHS[expected_axis]
+    assert _nested_value(variants["baseline"], path) == baseline_value
+    assert _nested_value(variants["candidate"], path) == candidate_value
     assert campaign._config_diff_paths(
         variants["baseline"],
         variants["candidate"],
@@ -168,6 +187,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS,
         campaign.EVENT_BALANCED_SAMPLING_AXIS,
         campaign.EVENT_BALANCE_ESTIMATOR_AXIS,
+        campaign.MAGNITUDE_PENALTY_AXIS,
     }:
         assert {
             variant["model"]["stf_output_parameterization"]
@@ -181,6 +201,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS,
         campaign.EVENT_BALANCED_SAMPLING_AXIS,
         campaign.EVENT_BALANCE_ESTIMATOR_AXIS,
+        campaign.MAGNITUDE_PENALTY_AXIS,
     }:
         assert {
             variant["training"]["scheduler_T0"] for variant in variants.values()
@@ -195,6 +216,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         (PHASE25_CONFIG_PATH, campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS),
         (PHASE26_CONFIG_PATH, campaign.EVENT_BALANCED_SAMPLING_AXIS),
         (PHASE27_CONFIG_PATH, campaign.EVENT_BALANCE_ESTIMATOR_AXIS),
+        (PHASE28_CONFIG_PATH, campaign.MAGNITUDE_PENALTY_AXIS),
     ],
 )
 def test_formal_config_rejects_a_second_scientific_change(
@@ -308,6 +330,39 @@ def test_phase27_axis_requires_the_phase26_candidate_as_baseline() -> None:
     disabled["training"]["event_balanced_sampling"] = False
     with pytest.raises(ValueError, match="Phase27 full-data objective baseline"):
         campaign.validate_formal_config(disabled)
+
+
+def test_phase28_axis_requires_the_phase27_candidate_as_baseline() -> None:
+    config = _config(PHASE28_CONFIG_PATH)
+
+    assert (
+        campaign.variant_axis_from_config(config)
+        == campaign.MAGNITUDE_PENALTY_AXIS
+    )
+    phase27_incumbent = campaign.build_variant_configs(
+        _config(PHASE27_CONFIG_PATH)
+    )["candidate"]
+    phase28_baseline = campaign.build_variant_configs(config)["baseline"]
+    phase27_incumbent.pop("campaign")
+    phase28_baseline.pop("campaign")
+    phase28_baseline["training"]["stf_rate_loss"].pop(
+        "magnitude_penalty"
+    )
+    assert phase28_baseline == phase27_incumbent
+
+    absolute_as_baseline = copy.deepcopy(config)
+    absolute_as_baseline["training"]["stf_rate_loss"][
+        "magnitude_penalty"
+    ] = "absolute"
+    with pytest.raises(ValueError, match="Phase28 magnitude-penalty baseline"):
+        campaign.validate_formal_config(absolute_as_baseline)
+
+    replacement_estimator = copy.deepcopy(config)
+    replacement_estimator["training"]["event_balance_estimator"] = (
+        campaign.REPLACEMENT_SAMPLING_ESTIMATOR
+    )
+    with pytest.raises(ValueError, match="Phase28 magnitude-penalty baseline"):
+        campaign.validate_formal_config(replacement_estimator)
 
 
 def test_split_contract_is_frozen_for_all_three_seeds() -> None:
@@ -426,6 +481,108 @@ def test_phase26_seed_summary_requires_sampling_provenance(tmp_path: Path) -> No
     sampling_path.write_text("{}\n", encoding="utf-8")
     summary["sampling"] = _artifact(sampling_path)
     assert campaign._seed_summary_is_valid(summary, require_sampling=True)
+    assert not campaign._seed_summary_is_valid(
+        summary,
+        require_sampling=True,
+        expected_magnitude_penalty="squared",
+    )
+    summary["magnitude_penalty"] = "squared"
+    assert campaign._seed_summary_is_valid(
+        summary,
+        require_sampling=True,
+        expected_magnitude_penalty="squared",
+    )
+
+
+def test_phase28_seed_summary_resume_is_bound_to_full_context(tmp_path: Path) -> None:
+    references: dict[str, dict[str, str]] = {}
+    for name in (
+        "checkpoint",
+        "training_log",
+        "run_manifest",
+        "sampling",
+    ):
+        artifact_path = tmp_path / f"{name}.artifact"
+        artifact_path.write_text(name, encoding="utf-8")
+        references[name] = _artifact(artifact_path)
+    split_path = tmp_path / "split.json"
+    _write_json(
+        split_path,
+        {
+            "seed": 17,
+            "protocol": "within_event_station",
+            "train_record_count": 1788,
+            "validation_record_count": 385,
+            "test_record_count": 385,
+            "assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[17],
+        },
+    )
+    references["split"] = _artifact(split_path)
+    expected_config = {
+        "training": {
+            "random_seed": 17,
+            "event_balance_estimator": "inverse_count_full_data",
+            "stf_rate_loss": {"magnitude_penalty": "squared"},
+        }
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(expected_config, sort_keys=False),
+        encoding="utf-8",
+    )
+    summary = {
+        "variant": "baseline",
+        "seed": 17,
+        "magnitude_penalty": "squared",
+        "split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[17],
+        campaign.VALIDATION_METRIC: 0.1,
+        "config": _artifact(config_path),
+        **references,
+    }
+    arguments = {
+        "require_sampling": True,
+        "expected_magnitude_penalty": "squared",
+        "expected_variant": "baseline",
+        "expected_seed": 17,
+        "expected_split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[17],
+        "expected_config": expected_config,
+    }
+
+    assert campaign._seed_summary_is_valid(summary, **arguments)
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "variant": "candidate"},
+        **arguments,
+    )
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "seed": 42},
+        **arguments,
+    )
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "split_assignment_sha256": "wrong"},
+        **arguments,
+    )
+    wrong_split_path = tmp_path / "wrong_split.json"
+    _write_json(
+        wrong_split_path,
+        {
+            "seed": 17,
+            "protocol": "within_event_station",
+            "train_record_count": 1788,
+            "validation_record_count": 385,
+            "test_record_count": 385,
+            "assignment_sha256": "wrong",
+        },
+    )
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "split": _artifact(wrong_split_path)},
+        **arguments,
+    )
+    changed_config = copy.deepcopy(expected_config)
+    changed_config["training"]["event_balance_estimator"] = "replacement_sampling"
+    assert not campaign._seed_summary_is_valid(
+        summary,
+        **{**arguments, "expected_config": changed_config},
+    )
 
 
 def _logged_scheduler_learning_rates(scheduler_t0: int) -> list[float]:
@@ -655,6 +812,15 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
             (True, True),
             ("replacement_sampling", "inverse_count_full_data"),
         ),
+        (
+            PHASE28_CONFIG_PATH,
+            campaign.MAGNITUDE_PENALTY_AXIS,
+            ("moment_shape_factorized", "moment_shape_factorized"),
+            (15, 15),
+            ("none", "none"),
+            (True, True),
+            ("inverse_count_full_data", "inverse_count_full_data"),
+        ),
     ],
 )
 def test_train_stage_selects_from_validation_without_test_or_external(
@@ -758,6 +924,15 @@ def test_train_stage_selects_from_validation_without_test_or_external(
         summary["variants"][name]["event_balance_estimator"]
         for name in variant_names
     ) == expected_estimators
+    expected_penalties = (
+        ("squared", "absolute")
+        if expected_axis == campaign.MAGNITUDE_PENALTY_AXIS
+        else ("squared", "squared")
+    )
+    assert tuple(
+        summary["variants"][name]["magnitude_penalty"]
+        for name in variant_names
+    ) == expected_penalties
     assert summary["variants"]["candidate"]["scientific_diff_from_baseline"] == [
         ".".join(campaign.VARIANT_AXIS_PATHS[expected_axis])
     ]

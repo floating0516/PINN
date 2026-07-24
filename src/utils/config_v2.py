@@ -195,6 +195,20 @@ def radial_dynamic_range_stem_from_config(config: dict[str, Any]) -> str:
     return value
 
 
+def magnitude_penalty_from_config(config: dict[str, Any]) -> str:
+    training = config.get("training", {}) or {}
+    loss_config = training.get("stf_rate_loss", {}) or {}
+    if not isinstance(loss_config, dict):
+        raise ValueError("training.stf_rate_loss must be a mapping")
+    value = loss_config.get("magnitude_penalty", "squared")
+    if not isinstance(value, str) or value not in {"squared", "absolute"}:
+        raise ValueError(
+            "training.stf_rate_loss.magnitude_penalty must be "
+            "squared or absolute"
+        )
+    return value
+
+
 def validate_config_v2(config: dict[str, Any]) -> None:
     if not isinstance(config, dict):
         raise ValueError("第二版配置必须是映射")
@@ -205,6 +219,7 @@ def validate_config_v2(config: dict[str, Any]) -> None:
 
     waveform_input_components_from_config(config)
     radial_dynamic_range_stem_from_config(config)
+    magnitude_penalty_from_config(config)
 
     for path in _FORBIDDEN_PATHS:
         exists, _ = _lookup(config, path)

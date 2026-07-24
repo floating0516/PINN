@@ -72,7 +72,14 @@ def test_model_keeps_tcn_transformer_and_ignores_unreleased_future() -> None:
     torch.testing.assert_close(first.stf_encoded, second.stf_encoded, rtol=0.0, atol=0.0)
 
 
-def test_shared_event_loss_preserves_all_four_terms_and_gradients() -> None:
+@pytest.mark.parametrize(
+    ("magnitude_penalty", "expected_magnitude_loss"),
+    [("squared", 0.04), ("absolute", 0.2)],
+)
+def test_shared_event_loss_preserves_all_four_terms_and_gradients(
+    magnitude_penalty: str,
+    expected_magnitude_loss: float,
+) -> None:
     config = yaml.safe_load(Path("configs/config_v2.yaml").read_text(encoding="utf-8"))
     config["training"]["stf_rate_loss"].update(
         lambda_MSE=1.0,
@@ -81,6 +88,7 @@ def test_shared_event_loss_preserves_all_four_terms_and_gradients() -> None:
         lambda_shape=0.1,
         radiation_pattern_mode="full",
         include_intermediate_field=False,
+        magnitude_penalty=magnitude_penalty,
     )
     criterion = CausalEventSTFRateWaveformLossV2(config)
     pred_rate = torch.full((1, 8), 0.2, requires_grad=True)
@@ -114,7 +122,10 @@ def test_shared_event_loss_preserves_all_four_terms_and_gradients() -> None:
     }
     assert metrics["L_MSE"] > 0.0
     assert metrics["L_synth"] > 0.0
-    assert metrics["L_mag"] > 0.0
+    assert metrics["L_mag"] == pytest.approx(
+        expected_magnitude_loss,
+        abs=1.0e-6,
+    )
     assert metrics["L_shape"] >= 0.0
     assert metrics["L_total"] == pytest.approx(
         metrics["L_MSE"]

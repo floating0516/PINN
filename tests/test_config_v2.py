@@ -8,6 +8,7 @@ from src.evaluation.evaluate import evaluate
 from src.evaluation.evaluate_unseen import evaluate_unseen_events
 from src.training.train import train
 from src.utils.config_v2 import (
+    magnitude_penalty_from_config,
     stf_m_ref_from_config,
     stf_output_steps_from_config,
     validate_config_on_startup,
@@ -108,6 +109,21 @@ def _active_station_v2() -> dict:
 
 def test_valid_v2_config_passes() -> None:
     validate_config_v2(_minimal_v2())
+
+
+def test_magnitude_penalty_defaults_and_validates() -> None:
+    config = _minimal_v2()
+    assert magnitude_penalty_from_config(config) == "squared"
+
+    for value in ("squared", "absolute"):
+        config["training"]["stf_rate_loss"]["magnitude_penalty"] = value
+        validate_config_v2(config)
+        assert magnitude_penalty_from_config(config) == value
+
+    for value in ("mae", "SQUARED", True, 1):
+        config["training"]["stf_rate_loss"]["magnitude_penalty"] = value
+        with pytest.raises(ValueError, match="magnitude_penalty"):
+            validate_config_v2(config)
 
 
 def test_manuscript_point_two_hz_filter_passes() -> None:

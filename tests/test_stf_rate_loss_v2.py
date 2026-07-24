@@ -116,6 +116,81 @@ def test_weighted_four_term_loss_uses_batch_mean_not_weight_sum() -> None:
         assert torch.isfinite(gradient).all()
 
 
+def test_explicit_squared_magnitude_penalty_is_exactly_backward_compatible() -> None:
+    default_arguments = _analytic_weighted_loss_arguments()
+    explicit_arguments = _analytic_weighted_loss_arguments()
+
+    default_loss, default_metrics = pinn_loss_stf_rate_v2(
+        **default_arguments,
+        sample_weights=torch.tensor([2.0, 4.0]),
+    )
+    explicit_loss, explicit_metrics = pinn_loss_stf_rate_v2(
+        **explicit_arguments,
+        sample_weights=torch.tensor([2.0, 4.0]),
+        magnitude_penalty="squared",
+    )
+    default_loss.backward()
+    explicit_loss.backward()
+
+    assert torch.equal(default_loss, explicit_loss)
+    assert default_metrics == explicit_metrics
+    for name in ("rate_hat", "pred_rate_encoded", "pred_catalog_mw"):
+        default_tensor = default_arguments[name]
+        explicit_tensor = explicit_arguments[name]
+        assert isinstance(default_tensor, torch.Tensor)
+        assert isinstance(explicit_tensor, torch.Tensor)
+        assert torch.equal(default_tensor.grad, explicit_tensor.grad)
+
+
+def test_weighted_absolute_magnitude_penalty_changes_only_l_mag() -> None:
+    squared_arguments = _analytic_weighted_loss_arguments()
+    absolute_arguments = _analytic_weighted_loss_arguments()
+
+    squared_loss, squared_metrics = pinn_loss_stf_rate_v2(
+        **squared_arguments,
+        sample_weights=torch.tensor([2.0, 4.0]),
+        magnitude_penalty="squared",
+    )
+    absolute_loss, absolute_metrics = pinn_loss_stf_rate_v2(
+        **absolute_arguments,
+        sample_weights=torch.tensor([2.0, 4.0]),
+        magnitude_penalty="absolute",
+    )
+    absolute_loss.backward()
+
+    assert squared_metrics["L_mag"] == pytest.approx(19.0)
+    assert absolute_metrics["L_mag"] == pytest.approx(7.0)
+    assert absolute_metrics["L_total"] == pytest.approx(17.275)
+    assert absolute_loss.item() == pytest.approx(17.275)
+    for name in ("L_MSE", "L_synth", "L_shape", "window_mw_mean"):
+        assert absolute_metrics[name] == squared_metrics[name]
+    predicted_magnitude = absolute_arguments["pred_catalog_mw"]
+    assert isinstance(predicted_magnitude, torch.Tensor)
+    assert torch.equal(predicted_magnitude.grad, torch.tensor([-1.0, -2.0]))
+
+
+def test_unweighted_absolute_magnitude_penalty_is_mean_absolute_error() -> None:
+    arguments = _analytic_weighted_loss_arguments()
+
+    _, metrics = pinn_loss_stf_rate_v2(
+        **arguments,
+        magnitude_penalty="absolute",
+    )
+
+    assert metrics["L_mag"] == pytest.approx(2.0)
+
+
+def test_invalid_magnitude_penalty_is_rejected_without_targets() -> None:
+    arguments = _analytic_weighted_loss_arguments()
+    arguments["true_mag"] = None
+
+    with pytest.raises(ValueError, match="magnitude_penalty"):
+        pinn_loss_stf_rate_v2(
+            **arguments,
+            magnitude_penalty="huber",
+        )
+
+
 def test_unit_sample_weights_match_unweighted_four_term_loss() -> None:
     arguments = _analytic_weighted_loss_arguments()
 
@@ -262,7 +337,10 @@ def test_magnitude_loss_uses_scalar_head_not_window_integral() -> None:
     )
 
 
-def test_legacy_v2_integral_magnitude_loss_keeps_rate_gradient() -> None:
+@pytest.mark.parametrize("magnitude_penalty", ["squared", "absolute"])
+def test_legacy_v2_integral_magnitude_loss_keeps_rate_gradient(
+    magnitude_penalty: str,
+) -> None:
     config = _v2_config()
     config.pop("workflow")
     config["physics"]["delay_mode"] = "absolute"
@@ -271,6 +349,7 @@ def test_legacy_v2_integral_magnitude_loss_keeps_rate_gradient() -> None:
         lambda_synth=0.0,
         lambda_mag=1.0,
         lambda_shape=0.0,
+        magnitude_penalty=magnitude_penalty,
     )
     criterion = STFRateWaveformLossV2(config)
     pred_stf = torch.full((1, 4), 0.3, requires_grad=True)
@@ -290,6 +369,55 @@ def test_legacy_v2_integral_magnitude_loss_keeps_rate_gradient() -> None:
 
     assert pred_stf.grad is not None
     assert torch.count_nonzero(pred_stf.grad) > 0
+
+
+def test_weighted_absolute_integral_magnitude_masks_nonfinite_target_gradient() -> None:
+    rate_hat = torch.full((2, 2), 1.0e18, requires_grad=True)
+    window_magnitude = moment_magnitude_from_rate(
+        rate_hat.detach(),
+        torch.ones(2),
+    )
+
+    loss, metrics = pinn_loss_stf_rate_v2(
+        rate_hat=rate_hat,
+        pred_rate_encoded=torch.zeros(2, 2, requires_grad=True),
+        rate_ref_encoded=None,
+        rate_ref_physical=None,
+        u_obs=torch.zeros(2, 2),
+        source_dt_sec=torch.ones(2),
+        observation_dt_sec=torch.ones(2),
+        source_distance_m=torch.ones(2),
+        waveform_valid_mask=torch.ones(2, 2, dtype=torch.bool),
+        travel_time=ConstantVelocityTravelTime(2.0, 1.0),
+        rho=1.0,
+        theta_deg=torch.zeros(2),
+        phi_slip_deg=torch.zeros(2),
+        amplitude_gain=1.0,
+        lambda_MSE=0.0,
+        lambda_synth=0.0,
+        lambda_mag=1.0,
+        lambda_shape=0.0,
+        has_ref=None,
+        true_mag=torch.stack(
+            (window_magnitude[0] - 1.0, torch.tensor(float("nan")))
+        ),
+        pred_catalog_mw=None,
+        include_intermediate=False,
+        radiation_mode="simplified",
+        include_far_P=False,
+        include_far_S=False,
+        include_intermediate_P=False,
+        include_intermediate_S=False,
+        sample_weights=torch.tensor([2.0, 4.0]),
+        magnitude_penalty="absolute",
+    )
+    loss.backward()
+
+    assert metrics["L_mag"] == pytest.approx(2.0)
+    assert rate_hat.grad is not None
+    assert torch.isfinite(rate_hat.grad).all()
+    assert torch.count_nonzero(rate_hat.grad[0]) > 0
+    assert torch.count_nonzero(rate_hat.grad[1]) == 0
 
 
 def test_source_stf_loss_uses_absolute_p_and_s_delays() -> None:

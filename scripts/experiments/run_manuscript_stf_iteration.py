@@ -59,7 +59,10 @@ from src.evaluation.evaluate_delayed_prefix import (  # noqa: E402
 from src.models.model import PINNModel  # noqa: E402
 from src.training.loss_stf_rate_v2 import STFRateWaveformLossV2  # noqa: E402
 from src.training.train import _prepare_v2_batch  # noqa: E402
-from src.utils.config_v2 import validate_config_v2  # noqa: E402
+from src.utils.config_v2 import (  # noqa: E402
+    magnitude_penalty_from_config,
+    validate_config_v2,
+)
 from src.utils.device import get_preferred_device  # noqa: E402
 from src.utils.provenance import (  # noqa: E402
     current_git_commit,
@@ -75,6 +78,7 @@ SCHEDULER_T0_AXIS = "scheduler_T0"
 RADIAL_DYNAMIC_RANGE_STEM_AXIS = "radial_dynamic_range_stem"
 EVENT_BALANCED_SAMPLING_AXIS = "event_balanced_sampling"
 EVENT_BALANCE_ESTIMATOR_AXIS = "event_balance_estimator"
+MAGNITUDE_PENALTY_AXIS = "magnitude_penalty"
 STATION_UNIFORM_ESTIMATOR = "station_uniform"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
@@ -97,6 +101,10 @@ VARIANT_AXES = {
         "baseline": REPLACEMENT_SAMPLING_ESTIMATOR,
         "candidate": INVERSE_COUNT_FULL_DATA_ESTIMATOR,
     },
+    MAGNITUDE_PENALTY_AXIS: {
+        "baseline": "squared",
+        "candidate": "absolute",
+    },
 }
 VARIANT_AXIS_PATHS = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: ("model", "stf_output_parameterization"),
@@ -104,6 +112,11 @@ VARIANT_AXIS_PATHS = {
     RADIAL_DYNAMIC_RANGE_STEM_AXIS: ("model", "radial_dynamic_range_stem"),
     EVENT_BALANCED_SAMPLING_AXIS: ("training", "event_balanced_sampling"),
     EVENT_BALANCE_ESTIMATOR_AXIS: ("training", "event_balance_estimator"),
+    MAGNITUDE_PENALTY_AXIS: (
+        "training",
+        "stf_rate_loss",
+        "magnitude_penalty",
+    ),
 }
 # Backward-compatible alias for the Phase23 campaign and its persisted tests.
 VARIANTS = VARIANT_AXES[STF_OUTPUT_PARAMETERIZATION_AXIS]
@@ -318,6 +331,10 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
     scheduler_t0 = training.get("scheduler_T0")
     stem_is_explicit = "radial_dynamic_range_stem" in model
     estimator_is_explicit = "event_balance_estimator" in training
+    loss_config = training.get("stf_rate_loss")
+    if not isinstance(loss_config, Mapping):
+        raise ValueError("formal config is missing training.stf_rate_loss")
+    magnitude_penalty_is_explicit = "magnitude_penalty" in loss_config
     campaign = base_config.get("campaign", {})
     if not isinstance(campaign, Mapping):
         raise ValueError("formal config campaign marker must be a mapping")
@@ -329,6 +346,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 or scheduler_t0 != 15
                 or stem_is_explicit
                 or estimator_is_explicit
+                or magnitude_penalty_is_explicit
                 or training.get("event_balanced_sampling") is not False
             ):
                 raise ValueError(
@@ -342,6 +360,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 parameterization != "moment_shape_factorized"
                 or scheduler_t0 != 15
                 or stem_is_explicit
+                or magnitude_penalty_is_explicit
                 or training.get("event_balanced_sampling") is not True
                 or training.get("event_balance_estimator")
                 != REPLACEMENT_SAMPLING_ESTIMATOR
@@ -353,6 +372,24 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                     "event_balance_estimator='replacement_sampling'"
                 )
             return EVENT_BALANCE_ESTIMATOR_AXIS
+        if explicit_axis == MAGNITUDE_PENALTY_AXIS:
+            if (
+                parameterization != "moment_shape_factorized"
+                or scheduler_t0 != 15
+                or stem_is_explicit
+                or training.get("event_balanced_sampling") is not True
+                or training.get("event_balance_estimator")
+                != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                or loss_config.get("magnitude_penalty") != "squared"
+            ):
+                raise ValueError(
+                    "Phase28 magnitude-penalty baseline requires factorized "
+                    "STF, scheduler_T0=15, the original radial stem, "
+                    "event_balanced_sampling=true, "
+                    "event_balance_estimator='inverse_count_full_data', and "
+                    "magnitude_penalty='squared'"
+                )
+            return MAGNITUDE_PENALTY_AXIS
         else:
             raise ValueError(f"unsupported formal campaign axis: {explicit_axis!r}")
     if (
@@ -360,12 +397,14 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         and scheduler_t0 == 15
         and not stem_is_explicit
         and not estimator_is_explicit
+        and not magnitude_penalty_is_explicit
     ):
         return STF_OUTPUT_PARAMETERIZATION_AXIS
     if (
         parameterization == "moment_shape_factorized"
         and scheduler_t0 == 15
         and not estimator_is_explicit
+        and not magnitude_penalty_is_explicit
     ):
         if stem_is_explicit:
             if model.get("radial_dynamic_range_stem") == "none":
@@ -379,7 +418,8 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         "formal config must describe the Phase23 direct baseline or the "
         "Phase24 factorized/T0=15 baseline or the Phase25 factorized/T0=15 "
         "baseline with explicit radial dynamic-range stem or the explicitly "
-        "marked Phase26/Phase27 event-balance baselines"
+        "marked Phase26/Phase27 event-balance baselines or Phase28 magnitude "
+        "penalty baseline"
     )
 
 
@@ -390,8 +430,15 @@ def build_variant_configs(
     variants: dict[str, dict[str, Any]] = {}
     for name, value in VARIANT_AXES[axis].items():
         config = copy.deepcopy(dict(base_config))
-        section, key = VARIANT_AXIS_PATHS[axis]
-        config[section][key] = value
+        path = VARIANT_AXIS_PATHS[axis]
+        node: Any = config
+        for key in path[:-1]:
+            if not isinstance(node, dict) or not isinstance(node.get(key), dict):
+                raise ValueError(
+                    f"formal config is missing {'.'.join(path[:-1])}"
+                )
+            node = node[key]
+        node[path[-1]] = value
         variants[name] = config
     differences = _config_diff_paths(variants["baseline"], variants["candidate"])
     expected = {".".join(VARIANT_AXIS_PATHS[axis])}
@@ -465,7 +512,8 @@ def validate_formal_config(config: dict[str, Any]) -> None:
     _require_exact(
         config,
         ("training", "event_balanced_sampling"),
-        variant_axis == EVENT_BALANCE_ESTIMATOR_AXIS,
+        variant_axis
+        in {EVENT_BALANCE_ESTIMATOR_AXIS, MAGNITUDE_PENALTY_AXIS},
     )
     build_variant_configs(config)
 
@@ -497,6 +545,10 @@ def event_balance_estimator_from_config(config: Mapping[str, Any]) -> str:
     if not bool(training["event_balanced_sampling"]):
         return STATION_UNIFORM_ESTIMATOR
     return resolve_event_balance_estimator(training)
+
+
+def magnitude_penalty_from_formal_config(config: Mapping[str, Any]) -> str:
+    return magnitude_penalty_from_config(dict(config))
 
 
 def _training_sampling_manifest(
@@ -898,6 +950,9 @@ def _smoke_one_device(
         "loss": float(loss.detach().cpu()),
         "metrics": metrics,
         "event_balance_estimator": event_balance_estimator_from_config(config),
+        "magnitude_penalty": magnitude_penalty_from_formal_config(
+            config
+        ),
         "sample_weights_exercised": sample_weights is not None,
         "passed": True,
     }
@@ -993,16 +1048,54 @@ def _seed_summary_is_valid(
     summary: Mapping[str, Any],
     *,
     require_sampling: bool = False,
+    expected_magnitude_penalty: str | None = None,
+    expected_variant: str | None = None,
+    expected_seed: int | None = None,
+    expected_split_assignment_sha256: str | None = None,
+    expected_config: Mapping[str, Any] | None = None,
 ) -> bool:
     try:
         for name in ("checkpoint", "config", "split", "training_log", "run_manifest"):
             _validate_artifact(summary[name], label=name)
         if require_sampling or "sampling" in summary:
             _validate_artifact(summary["sampling"], label="sampling")
+        if (
+            expected_magnitude_penalty is not None
+            and summary.get("magnitude_penalty")
+            != expected_magnitude_penalty
+        ):
+            return False
+        if (
+            expected_variant is not None
+            and summary.get("variant") != expected_variant
+        ):
+            return False
+        if (
+            expected_seed is not None
+            and int(summary.get("seed")) != expected_seed
+        ):
+            return False
+        if (
+            expected_split_assignment_sha256 is not None
+            and summary.get("split_assignment_sha256")
+            != expected_split_assignment_sha256
+        ):
+            return False
+        if expected_split_assignment_sha256 is not None:
+            if expected_seed is None:
+                return False
+            persisted_split = _load_json(Path(str(summary["split"]["path"])))
+            _assert_split_manifest(persisted_split, seed=expected_seed)
+        if expected_config is not None:
+            config_path = Path(str(summary["config"]["path"]))
+            with config_path.open(encoding="utf-8") as stream:
+                persisted_config = yaml.safe_load(stream)
+            if persisted_config != dict(expected_config):
+                return False
         return int(summary["seed"]) in SEEDS and math.isfinite(
             float(summary[VALIDATION_METRIC])
         )
-    except (KeyError, OSError, TypeError, ValueError):
+    except (KeyError, OSError, TypeError, ValueError, yaml.YAMLError):
         return False
 
 
@@ -1026,11 +1119,36 @@ def _train_one_seed(
             in {
                 EVENT_BALANCED_SAMPLING_AXIS,
                 EVENT_BALANCE_ESTIMATOR_AXIS,
+                MAGNITUDE_PENALTY_AXIS,
             }
+        )
+        expected_magnitude_penalty = (
+            magnitude_penalty_from_formal_config(config)
+            if isinstance(campaign, Mapping)
+            and campaign.get("variant_axis") == MAGNITUDE_PENALTY_AXIS
+            else None
+        )
+        phase28_resume = expected_magnitude_penalty is not None
+        expected_runtime_config = (
+            _runtime_config(
+                config,
+                run_root=seed_root,
+                seed=seed,
+                dataset_manifest=dataset_manifest,
+            )
+            if phase28_resume
+            else None
         )
         if resume and _seed_summary_is_valid(
             summary,
             require_sampling=require_sampling,
+            expected_magnitude_penalty=expected_magnitude_penalty,
+            expected_variant=variant if phase28_resume else None,
+            expected_seed=seed if phase28_resume else None,
+            expected_split_assignment_sha256=(
+                EXPECTED_SPLIT_SHA256[seed] if phase28_resume else None
+            ),
+            expected_config=expected_runtime_config,
         ):
             return summary
         if not resume:
@@ -1089,6 +1207,9 @@ def _train_one_seed(
             config["training"]["event_balanced_sampling"]
         ),
         "event_balance_estimator": event_balance_estimator_from_config(config),
+        "magnitude_penalty": magnitude_penalty_from_formal_config(
+            config
+        ),
         "seed": seed,
         **checkpoint_selection,
         "checkpoint": _artifact(verified["checkpoint_path"]),
@@ -1163,6 +1284,9 @@ def run_train(
                 variant_config["training"]["event_balanced_sampling"]
             ),
             "event_balance_estimator": event_balance_estimator_from_config(
+                variant_config
+            ),
+            "magnitude_penalty": magnitude_penalty_from_formal_config(
                 variant_config
             ),
             "scientific_diff_from_baseline": sorted(

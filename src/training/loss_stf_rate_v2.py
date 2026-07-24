@@ -12,7 +12,11 @@ from src.physics.travel_time import (
     travel_time_from_config,
 )
 from src.training.time_sampling import sample_source_history
-from src.utils.config_v2 import stf_m_ref_from_config, validate_config_v2
+from src.utils.config_v2 import (
+    magnitude_penalty_from_config,
+    stf_m_ref_from_config,
+    validate_config_v2,
+)
 
 
 def _batch_vector(
@@ -393,6 +397,7 @@ def pinn_loss_stf_rate_v2(
     include_intermediate_S: bool,
     origin_aligned: bool = False,
     sample_weights: torch.Tensor | None = None,
+    magnitude_penalty: str = "squared",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch_size = rate_hat.shape[0]
     if pred_rate_encoded.shape != rate_hat.shape:
@@ -404,6 +409,8 @@ def pinn_loss_stf_rate_v2(
         batch_size=batch_size,
         reference=rate_hat,
     )
+    if magnitude_penalty not in {"squared", "absolute"}:
+        raise ValueError("magnitude_penalty must be squared or absolute")
     angles_theta = _batch_vector(
         theta_deg,
         batch_size=batch_size,
@@ -515,13 +522,26 @@ def pinn_loss_stf_rate_v2(
         )
         finite = torch.isfinite(true_mag.reshape(-1))
         if torch.any(finite):
-            if weights is None:
-                L_mag = F.mse_loss(
+            if magnitude_penalty == "squared":
+                if weights is None:
+                    L_mag = F.mse_loss(
+                        predicted_magnitude[finite],
+                        true_mag.reshape(-1)[finite],
+                    )
+                else:
+                    magnitude_per_sample = F.mse_loss(
+                        predicted_magnitude[finite],
+                        true_mag.reshape(-1)[finite],
+                        reduction="none",
+                    )
+                    L_mag = (weights[finite] * magnitude_per_sample).mean()
+            elif weights is None:
+                L_mag = F.l1_loss(
                     predicted_magnitude[finite],
                     true_mag.reshape(-1)[finite],
                 )
             else:
-                magnitude_per_sample = F.mse_loss(
+                magnitude_per_sample = F.l1_loss(
                     predicted_magnitude[finite],
                     true_mag.reshape(-1)[finite],
                     reduction="none",
@@ -574,8 +594,11 @@ def causal_event_stf_rate_loss_v2(
     include_far_S: bool,
     include_intermediate_P: bool,
     include_intermediate_S: bool,
+    magnitude_penalty: str = "squared",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Apply the original four losses to a shared origin-aligned event STF."""
+    if magnitude_penalty not in {"squared", "absolute"}:
+        raise ValueError("magnitude_penalty must be squared or absolute")
     if rate_hat.ndim != 2 or pred_rate_encoded.shape != rate_hat.shape:
         raise ValueError("event STF predictions must have shape (batch, source_time)")
     batch_size = rate_hat.shape[0]
@@ -652,10 +675,16 @@ def causal_event_stf_rate_loss_v2(
         selected_observed,
         selected_valid,
     )
-    L_mag = F.mse_loss(
-        pred_catalog_mw.reshape(batch_size),
-        true_mag.reshape(batch_size),
-    )
+    if magnitude_penalty == "squared":
+        L_mag = F.mse_loss(
+            pred_catalog_mw.reshape(batch_size),
+            true_mag.reshape(batch_size),
+        )
+    else:
+        L_mag = F.l1_loss(
+            pred_catalog_mw.reshape(batch_size),
+            true_mag.reshape(batch_size),
+        )
     L_shape = _shape_loss(rate_hat, rate_ref_physical)
     total_loss = (
         float(lambda_MSE) * L_MSE
@@ -686,6 +715,7 @@ class CausalEventSTFRateWaveformLossV2(nn.Module):
         self.lambda_synth = float(loss_config["lambda_synth"])
         self.lambda_mag = float(loss_config["lambda_mag"])
         self.lambda_shape = float(loss_config["lambda_shape"])
+        self.magnitude_penalty = magnitude_penalty_from_config(config)
         self.rate_representation = str(
             config["training"]["rate_representation"]
         ).lower()
@@ -773,6 +803,7 @@ class CausalEventSTFRateWaveformLossV2(nn.Module):
             include_far_S=self.include_far_S,
             include_intermediate_P=self.include_intermediate_P,
             include_intermediate_S=self.include_intermediate_S,
+            magnitude_penalty=self.magnitude_penalty,
         )
 
 
@@ -789,6 +820,9 @@ class STFRateWaveformLossV2(nn.Module):
         self.lambda_synth = float(loss_config["lambda_synth"])
         self.lambda_mag = float(loss_config["lambda_mag"])
         self.lambda_shape = float(loss_config["lambda_shape"])
+        self.magnitude_penalty = magnitude_penalty_from_config(
+            config
+        )
         self.rate_representation = str(
             config["training"]["rate_representation"]
         ).lower()
@@ -901,4 +935,5 @@ class STFRateWaveformLossV2(nn.Module):
             include_intermediate_S=self.include_intermediate_S,
             origin_aligned=self.origin_aligned,
             sample_weights=sample_weights,
+            magnitude_penalty=self.magnitude_penalty,
         )
