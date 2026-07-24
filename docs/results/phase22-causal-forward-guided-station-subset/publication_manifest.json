@@ -1,0 +1,98 @@
+{
+  "inputs": {
+    "baseline_external_final_predictions": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/external_final_event_predictions.csv",
+      "sha256": "7568237806901783a1c0743b1b9ae566d582a6ebef4feaad0a782197a9622082"
+    },
+    "baseline_selected_test_predictions": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/seed_73/test_online_predictions.csv",
+      "sha256": "89a8626faa5ebd52fc5827c26b3acfe4cb0d99374eefc2ebd36b9b8058eb3b6a"
+    },
+    "baseline_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/selection.json",
+      "sha256": "a2fbf556a5858727c1585db9ae40db1c7aa259ae22033300f2e2202478a94902"
+    },
+    "baseline_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase19-forward-guided-gated-20260724T101745Z-c7c1736/summary.json",
+      "sha256": "e0a138fc72f4e6bf07d1476377a7dbd7950036a5ca29038058c1a578b62333e1"
+    },
+    "candidate_config": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/config.yaml",
+      "sha256": "1d8afb490231c6441802687a5f817df06ad661544ff99c95739bd968cc9366e8"
+    },
+    "candidate_external_final_predictions": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/external_final_event_predictions.csv",
+      "sha256": "716fa00fe285e21d499e271dc7353d1c5a15872058e5c849664293b449de5b80"
+    },
+    "candidate_seed_17_split": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/seed_17/split.json",
+      "sha256": "02074808c5da48fc9f68c1c23abe3722ae49bb6bee22539269f41757d5475df3"
+    },
+    "candidate_seed_17_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/seed_17/summary.json",
+      "sha256": "eb0901f493c5e4fefac5717b731375189e1457a2b2312e1415c3fa9dfd5d712d"
+    },
+    "candidate_seed_42_split": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/seed_42/split.json",
+      "sha256": "19e85aae45a436aeb057838573a06d14c0a87f845d26078840332aed0066825e"
+    },
+    "candidate_seed_42_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/seed_42/summary.json",
+      "sha256": "819244b22bd6e7b290f371e08b8d1371338ebd2738e403320bb20683db053c56"
+    },
+    "candidate_seed_73_split": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/seed_73/split.json",
+      "sha256": "0969dc024eb2ba6e57479b9baaab82761affd5b91c8c033c52019ebc8e97987c"
+    },
+    "candidate_seed_73_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/seed_73/summary.json",
+      "sha256": "902c8f9c7e38a76dbdbe592a0a8074630c7ea172d0b66a062556b16422e18f7f"
+    },
+    "candidate_selected_test_predictions": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/seed_73/test_online_predictions.csv",
+      "sha256": "d39db52c8c99c453615a116bf773009423cac64f29fcf2cdb6d95726a63319ee"
+    },
+    "candidate_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/selection.json",
+      "sha256": "6e9e76c6eeb5e1a25b42dfa6f5cef4e840cbb6ce0a206abe46df00e1d71a1e80"
+    },
+    "candidate_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase22-forward-guided-station-subset-20260724T113401Z-8884db2/summary.json",
+      "sha256": "c5c462ad59826d2aeb7c1284b5898e11868b3825f53e287a3aace24713e2cc6f"
+    }
+  },
+  "outputs": {
+    "01_internal_metrics.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase22-causal-forward-guided-station-subset/figures/01_internal_metrics.pdf",
+      "sha256": "e969a2d6537c355842ff6a0bfebd26d5c9832f13caea26f550dd72a46b185b4b"
+    },
+    "01_internal_metrics.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase22-causal-forward-guided-station-subset/figures/01_internal_metrics.png",
+      "sha256": "1046086644a9c771cecb70ab2ae36a482ad30f56a22b55d189031a9e624906dd"
+    },
+    "02_internal_event_errors.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase22-causal-forward-guided-station-subset/figures/02_internal_event_errors.pdf",
+      "sha256": "dfbfa6f4f6eca3ee1d5ede82dd75ef0ff8af69c11969e7ec886ef8aff61fbcd5"
+    },
+    "02_internal_event_errors.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase22-causal-forward-guided-station-subset/figures/02_internal_event_errors.png",
+      "sha256": "1b98fc5557d10de81228e08ee0be7238930170a14e689b05abaa9ac38e108b5f"
+    },
+    "README.md": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase22-causal-forward-guided-station-subset/README.md",
+      "sha256": "49dd2b98dc231e994f28031bb45ce1e6f9c020e3208174b80a9414add3e9d38a"
+    },
+    "external_final_event_comparison.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase22-causal-forward-guided-station-subset/external_final_event_comparison.csv",
+      "sha256": "4d364fb58f620987651b0cf2191938e80234b12227b7879c42af539c3277497f"
+    },
+    "internal_test_final_event_comparison.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase22-causal-forward-guided-station-subset/internal_test_final_event_comparison.csv",
+      "sha256": "f1ad3bde9d50a1f598a5428201ffe1577ad624437301e0a061203c0f99f051d1"
+    },
+    "seed_metrics.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase22-causal-forward-guided-station-subset/seed_metrics.csv",
+      "sha256": "94385a74126eccfa60f593c0c9764d2060cae630e93d7117119804736e9f292e"
+    }
+  }
+}
