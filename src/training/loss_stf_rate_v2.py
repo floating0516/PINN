@@ -335,6 +335,7 @@ def pinn_loss_stf_rate_v2(
     include_far_S: bool,
     include_intermediate_P: bool,
     include_intermediate_S: bool,
+    origin_aligned: bool = False,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch_size = rate_hat.shape[0]
     if pred_rate_encoded.shape != rate_hat.shape:
@@ -384,6 +385,7 @@ def pinn_loss_stf_rate_v2(
         include_far_S=include_far_S,
         include_intermediate_P=include_intermediate_P,
         include_intermediate_S=include_intermediate_S,
+        origin_aligned=origin_aligned,
     )
     L_synth = masked_normalized_waveform_mse(
         u_hat,
@@ -698,6 +700,7 @@ class STFRateWaveformLossV2(nn.Module):
         ).lower()
         self.stf_m_ref = stf_m_ref_from_config(config)
         physics = config["physics"]
+        self.origin_aligned = str(physics["delay_mode"]) == "absolute"
         self.rho = float(physics["rho"])
         self.alpha = float(physics["alpha"])
         self.beta = float(physics["beta"])
@@ -801,4 +804,5 @@ class STFRateWaveformLossV2(nn.Module):
             include_far_S=self.include_far_S,
             include_intermediate_P=self.include_intermediate_P,
             include_intermediate_S=self.include_intermediate_S,
+            origin_aligned=self.origin_aligned,
         )

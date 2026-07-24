@@ -110,6 +110,13 @@ def test_valid_v2_config_passes() -> None:
     validate_config_v2(_minimal_v2())
 
 
+def test_manuscript_point_two_hz_filter_passes() -> None:
+    config = _minimal_v2()
+    config["dataset"]["filter"]["cutoff_hz"] = 0.2
+
+    validate_config_v2(config)
+
+
 def test_waveform_components_default_to_radial() -> None:
     config = _minimal_v2()
 
@@ -266,7 +273,7 @@ def test_v2_rejects_invalid_fixed_semantics(
     ("path", "value", "message"),
     [
         (("dataset", "filter", "type"), "highpass", "filter.type"),
-        (("dataset", "filter", "cutoff_hz"), 0.2, "filter.cutoff_hz"),
+        (("dataset", "filter", "cutoff_hz"), 0.15, "filter.cutoff_hz"),
         (("dataset", "filter", "num_taps"), 5, "filter.num_taps"),
         (("dataset", "stf", "start_sec"), 1.0, "stf.start_sec"),
         (("dataset", "stf", "duration_sec"), 0.0, "stf.duration_sec"),

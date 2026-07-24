@@ -117,11 +117,17 @@ def load_matrix_configs(config_dir: str | Path) -> dict[str, dict[str, Any]]:
         for path in root.glob("V2-*.yaml")
         if path.name != "V2-SELECTED.yaml"
     }
-    if actual_files != expected_files:
+    known_non_matrix_files = {
+        "V2-USGS-EVENT-BALANCED.yaml",
+        "V2-USGS-EVENT-CHECKPOINT.yaml",
+    }
+    missing_files = expected_files - actual_files
+    unexpected_files = actual_files - expected_files - known_non_matrix_files
+    if missing_files or unexpected_files:
         raise ValueError(
             "matrix config files differ: "
-            f"missing={sorted(expected_files - actual_files)}, "
-            f"extra={sorted(actual_files - expected_files)}"
+            f"missing={sorted(missing_files)}, "
+            f"unexpected={sorted(unexpected_files)}"
         )
     configs = {
         experiment_id: _load_yaml(root / f"{experiment_id}.yaml")

@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -58,6 +59,37 @@ class PINNModel(nn.Module):
             raise ValueError(
                 f'unsupported rate_representation: {rate_representation}'
             )
+
+        self.stf_output_parameterization = str(
+            config['model'].get('stf_output_parameterization', 'direct')
+        ).lower()
+        if self.stf_output_parameterization not in {
+            'direct',
+            'moment_shape_factorized',
+        }:
+            raise ValueError(
+                'model.stf_output_parameterization must be direct or '
+                'moment_shape_factorized'
+            )
+        self.factorized_source_dt_sec: float | None = None
+        self.factorized_m_ref: float | None = None
+        if self.stf_output_parameterization == 'moment_shape_factorized':
+            if pipeline_version != 2:
+                raise ValueError(
+                    'moment_shape_factorized requires pipeline_version=2'
+                )
+            if rate_representation != 'log1p':
+                raise ValueError(
+                    'moment_shape_factorized requires log1p rate representation'
+                )
+            if bool(config['model'].get('predict_catalog_mw', False)):
+                raise ValueError(
+                    'moment_shape_factorized forbids an independent catalog Mw head'
+                )
+            self.factorized_source_dt_sec = 1.0 / float(
+                config['dataset']['sample_rate_hz']
+            )
+            self.factorized_m_ref = float(config['dataset']['stf']['m_ref'])
 
         self.use_meta = bool(config['model'].get('use_meta', True))
         if self.use_meta:
@@ -122,18 +154,42 @@ class PINNModel(nn.Module):
         self.post_transformer_norm = nn.LayerNorm(self.hidden_dim)
 
         # 序列输出头：生成随时间变化的矩率序列 dot_M0(t)
-        rate_head_layers = [
+        rate_head_layers: list[nn.Module] = [
             nn.Linear(self.hidden_dim, max(16, self.hidden_dim // 4)),
             nn.GELU(),
             nn.Dropout(self.dropout_p),
             nn.Linear(max(16, self.hidden_dim // 4), 1),
         ]
-        if rate_representation == 'linear':
-            rate_head_layers.append(nn.Softplus())
-        elif rate_representation == 'log1p':
-            rate_head_layers.append(nn.ReLU())
-        self.rate_head = nn.Sequential(*rate_head_layers)
-        if bool(config['model'].get('predict_catalog_mw', False)):
+        if self.stf_output_parameterization == 'direct':
+            if rate_representation == 'linear':
+                rate_head_layers.append(nn.Softplus())
+            elif rate_representation == 'log1p':
+                rate_head_layers.append(nn.ReLU())
+            self.rate_head: nn.Sequential | None = nn.Sequential(
+                *rate_head_layers
+            )
+            self.shape_head: nn.Sequential | None = None
+            self.log10_moment_head: nn.Sequential | None = None
+        else:
+            self.rate_head = None
+            self.shape_head = nn.Sequential(*rate_head_layers)
+            magnitude_hidden = max(16, self.hidden_dim // 4)
+            self.log10_moment_head = nn.Sequential(
+                nn.Linear(self.hidden_dim, magnitude_hidden),
+                nn.GELU(),
+                nn.Dropout(self.dropout_p),
+                nn.Linear(magnitude_hidden, 1),
+            )
+            nn.init.zeros_(self.log10_moment_head[-1].weight)
+            nn.init.constant_(
+                self.log10_moment_head[-1].bias,
+                1.5 * 8.0 + 9.1,
+            )
+
+        if (
+            self.stf_output_parameterization == 'direct'
+            and bool(config['model'].get('predict_catalog_mw', False))
+        ):
             magnitude_hidden = max(16, self.hidden_dim // 4)
             self.magnitude_head: nn.Sequential | None = nn.Sequential(
                 nn.Linear(self.hidden_dim, magnitude_hidden),
@@ -230,8 +286,50 @@ class PINNModel(nn.Module):
         return seq
 
     def _predict_stf(self, sequence: torch.Tensor) -> torch.Tensor:
+        if self.stf_output_parameterization == 'moment_shape_factorized':
+            stf_encoded, _ = self._predict_factorized_stf(sequence)
+            return stf_encoded
         sequence = self._resize_source_time(sequence)
+        if self.rate_head is None:
+            raise RuntimeError('direct STF head is unavailable')
         return self.rate_head(sequence).squeeze(-1)
+
+    def _predict_factorized_stf(
+        self,
+        sequence: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if (
+            self.shape_head is None
+            or self.log10_moment_head is None
+            or self.factorized_source_dt_sec is None
+            or self.factorized_m_ref is None
+        ):
+            raise RuntimeError('factorized STF head is unavailable')
+
+        shape_sequence = self._resize_source_time(sequence)
+        shape_logits = self.shape_head(shape_sequence).squeeze(-1)
+        positive_shape = F.softplus(shape_logits)
+        normalized_shape = positive_shape / (
+            positive_shape.sum(dim=1, keepdim=True)
+            * self.factorized_source_dt_sec
+        ).clamp_min(torch.finfo(positive_shape.dtype).tiny)
+
+        log10_moment = self.log10_moment_head(
+            sequence.mean(dim=1)
+        ).squeeze(-1)
+        ln_10 = math.log(10.0)
+        log_rate_over_reference = (
+            log10_moment.unsqueeze(1) * ln_10
+            + torch.log(
+                normalized_shape.clamp_min(
+                    torch.finfo(normalized_shape.dtype).tiny
+                )
+            )
+            - math.log(self.factorized_m_ref)
+        )
+        stf_encoded = F.softplus(log_rate_over_reference) / ln_10
+        catalog_mw = (2.0 / 3.0) * (log10_moment - 9.1)
+        return stf_encoded, catalog_mw
 
     def _predict_tangential_magnitude_residual(
         self,
@@ -254,6 +352,13 @@ class PINNModel(nn.Module):
         x: torch.Tensor,
         meta: Optional[torch.Tensor] = None,
     ) -> PINNPrediction:
+        if self.stf_output_parameterization == 'moment_shape_factorized':
+            sequence = self._encode_sequence(x, meta)
+            stf_encoded, catalog_mw = self._predict_factorized_stf(sequence)
+            return PINNPrediction(
+                stf_encoded=stf_encoded,
+                catalog_mw=catalog_mw,
+            )
         if self.magnitude_head is None:
             raise RuntimeError("catalog magnitude head is disabled")
         sequence = self._encode_sequence(x, meta)
@@ -307,9 +412,15 @@ class PINNModel(nn.Module):
         seq_time = feat.transpose(1, 2)
         seq_time = self._resize_source_time(seq_time)
         shapes['to_time'] = list(seq_time.shape)
-        rate = self.rate_head(seq_time)
-        shapes['rate_head'] = list(rate.shape)
-        out = rate.squeeze(-1)
+        if self.stf_output_parameterization == 'moment_shape_factorized':
+            out, _ = self._predict_factorized_stf(seq)
+            shapes['shape_head'] = [*out.shape, 1]
+        else:
+            if self.rate_head is None:
+                raise RuntimeError('direct STF head is unavailable')
+            rate = self.rate_head(seq_time)
+            shapes['rate_head'] = list(rate.shape)
+            out = rate.squeeze(-1)
         shapes['output'] = list(out.shape)
         return {'shapes': shapes, 'output': out}
 

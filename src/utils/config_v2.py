@@ -196,8 +196,11 @@ def validate_config_v2(config: dict[str, Any]) -> None:
         raise ValueError("第二版主管线要求 dataset.filter.type=lowpass")
 
     cutoff_hz = _as_float(config, ("dataset", "filter", "cutoff_hz"))
-    if cutoff_hz != 0.1:
-        raise ValueError("第二版主管线要求 dataset.filter.cutoff_hz == 0.1")
+    if cutoff_hz not in {0.1, 0.2}:
+        raise ValueError(
+            "dataset.filter.cutoff_hz must be 0.1 for the corrected legacy "
+            "contract or 0.2 for the manuscript contract"
+        )
 
     num_taps_path = ("dataset", "filter", "num_taps")
     num_taps = _as_int(config, num_taps_path)

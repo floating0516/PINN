@@ -26,6 +26,10 @@ import yaml
 sys.path.insert(0, str(__import__('pathlib').Path(__file__).resolve().parent.parent))
 
 from src.models.model import PINNModel
+from src.training.loss_stf_rate_v2 import (
+    STFRateWaveformLossV2,
+    moment_magnitude_from_rate,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -73,6 +77,30 @@ def _make_meta(B: int, device: torch.device) -> torch.Tensor:
     return meta
 
 
+def _factorized_config() -> dict:
+    config = yaml.safe_load(
+        Path("configs/experiments_v2/V2-BASE.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    config["model"].update(
+        {
+            "hidden_dim": 32,
+            "num_layers": 1,
+            "num_tcn_blocks": 2,
+            "transformer_num_layers": 1,
+            "dropout": 0.0,
+            "stf_output_parameterization": "moment_shape_factorized",
+        }
+    )
+    return config
+
+
+def _decode_factorized_rate(encoded: torch.Tensor, config: dict) -> torch.Tensor:
+    m_ref = float(config["dataset"]["stf"]["m_ref"])
+    return m_ref * torch.expm1(encoded * math.log(10.0))
+
+
 # ---------------------------------------------------------------------------
 # 测试 1：输出形状
 # 验证：模型输出张量的形状是否符合预期的 (批次大小, 时间步数)
@@ -107,6 +135,209 @@ def test_output_length_can_differ_from_input_length():
         output = model(x, meta=meta)
 
     assert output.shape == (2, 300)
+
+
+def test_default_direct_head_matches_explicit_direct_and_state_keys() -> None:
+    default_config = _make_config(
+        hidden_dim=32,
+        num_tcn_blocks=2,
+        transformer_num_layers=1,
+        dropout=0.0,
+    )
+    explicit_config = copy.deepcopy(default_config)
+    explicit_config["model"]["stf_output_parameterization"] = "direct"
+
+    torch.manual_seed(19)
+    default_model = PINNModel(default_config).eval()
+    torch.manual_seed(19)
+    explicit_model = PINNModel(explicit_config).eval()
+
+    assert default_model.state_dict().keys() == explicit_model.state_dict().keys()
+    assert not any(
+        "shape_head" in key or "log10_moment_head" in key
+        for key in default_model.state_dict()
+    )
+    explicit_model.load_state_dict(default_model.state_dict(), strict=True)
+
+    waveform = torch.randn(2, 1, 40)
+    metadata = _make_meta(2, torch.device("cpu"))
+    with torch.no_grad():
+        default_output = default_model(waveform, meta=metadata)
+        explicit_output = explicit_model(waveform, meta=metadata)
+    torch.testing.assert_close(
+        default_output,
+        explicit_output,
+        rtol=0.0,
+        atol=0.0,
+    )
+
+
+def test_factorized_head_integral_matches_its_moment_scale() -> None:
+    config = _factorized_config()
+    model = PINNModel(config).eval()
+    waveform = torch.randn(3, 1, 200)
+    metadata = _make_meta(3, torch.device("cpu"))
+
+    with torch.no_grad():
+        prediction = model.predict_heads(waveform, meta=metadata)
+        physical_rate = _decode_factorized_rate(
+            prediction.stf_encoded,
+            config,
+        )
+
+    source_dt_sec = 1.0 / float(config["dataset"]["sample_rate_hz"])
+    integrated_moment = physical_rate.sum(dim=1) * source_dt_sec
+    expected_moment = torch.pow(
+        10.0,
+        1.5 * prediction.catalog_mw + 9.1,
+    )
+    integrated_mw = (2.0 / 3.0) * (
+        torch.log10(integrated_moment) - 9.1
+    )
+
+    assert torch.isfinite(prediction.stf_encoded).all()
+    assert torch.all(prediction.stf_encoded >= 0.0)
+    assert torch.all(physical_rate >= 0.0)
+    torch.testing.assert_close(
+        integrated_moment,
+        expected_moment,
+        rtol=2.0e-5,
+        atol=0.0,
+    )
+    torch.testing.assert_close(
+        integrated_mw,
+        prediction.catalog_mw,
+        rtol=0.0,
+        atol=2.0e-5,
+    )
+    torch.testing.assert_close(
+        prediction.catalog_mw,
+        torch.full_like(prediction.catalog_mw, 8.0),
+        rtol=0.0,
+        atol=1.0e-6,
+    )
+
+
+def test_factorized_head_has_finite_gradients_and_batch_independence() -> None:
+    config = _factorized_config()
+    model = PINNModel(config).train()
+    assert model.log10_moment_head is not None
+    with torch.no_grad():
+        model.log10_moment_head[-1].weight.fill_(0.01)
+    waveform = torch.randn(2, 1, 200, requires_grad=True)
+    metadata = _make_meta(2, torch.device("cpu"))
+
+    prediction = model.predict_heads(waveform, meta=metadata)
+    (prediction.stf_encoded.mean() + prediction.catalog_mw.mean()).backward()
+
+    assert waveform.grad is not None and torch.isfinite(waveform.grad).all()
+    for parameter in model.parameters():
+        assert parameter.grad is not None
+        assert torch.isfinite(parameter.grad).all()
+
+    model.eval()
+    first_waveform = waveform[:1].detach()
+    first_metadata = metadata[:1]
+    other_waveform = torch.full_like(first_waveform, 1.0e6)
+    other_metadata = metadata[:1].clone()
+    other_metadata[:, 0] = math.log(10.0)
+    with torch.no_grad():
+        alone = model.predict_heads(
+            first_waveform,
+            meta=first_metadata,
+        )
+        batched = model.predict_heads(
+            torch.cat((first_waveform, other_waveform), dim=0),
+            meta=torch.cat((first_metadata, other_metadata), dim=0),
+        )
+    torch.testing.assert_close(
+        alone.stf_encoded,
+        batched.stf_encoded[:1],
+        rtol=1.0e-5,
+        atol=1.0e-6,
+    )
+    torch.testing.assert_close(
+        alone.catalog_mw,
+        batched.catalog_mw[:1],
+        rtol=1.0e-6,
+        atol=1.0e-6,
+    )
+
+
+def test_factorized_head_integral_survives_training_loss_decoder() -> None:
+    config = _factorized_config()
+    model = PINNModel(config).eval()
+    assert model.log10_moment_head is not None
+    with torch.no_grad():
+        model.log10_moment_head[-1].weight.fill_(0.01)
+        prediction = model.predict_heads(
+            torch.randn(3, 1, 200),
+            meta=_make_meta(3, torch.device("cpu")),
+        )
+    criterion = STFRateWaveformLossV2(config)
+    decoded_rate = criterion._decode_rate(prediction.stf_encoded)
+    integrated_mw = moment_magnitude_from_rate(
+        decoded_rate,
+        torch.ones(3),
+    )
+
+    assert float(prediction.stf_encoded.max()) < 6.0
+    torch.testing.assert_close(
+        integrated_mw,
+        prediction.catalog_mw,
+        rtol=0.0,
+        atol=2.0e-5,
+    )
+
+
+def test_factorized_head_checkpoint_reload_is_strict() -> None:
+    config = _factorized_config()
+    torch.manual_seed(23)
+    source_model = PINNModel(config).eval()
+    reloaded_model = PINNModel(config).eval()
+    incompatible = reloaded_model.load_state_dict(
+        source_model.state_dict(),
+        strict=True,
+    )
+    assert incompatible.missing_keys == []
+    assert incompatible.unexpected_keys == []
+
+    waveform = torch.randn(2, 1, 200)
+    metadata = _make_meta(2, torch.device("cpu"))
+    with torch.no_grad():
+        expected = source_model.predict_heads(waveform, meta=metadata)
+        actual = reloaded_model.predict_heads(waveform, meta=metadata)
+    torch.testing.assert_close(
+        actual.stf_encoded,
+        expected.stf_encoded,
+        rtol=0.0,
+        atol=0.0,
+    )
+    torch.testing.assert_close(
+        actual.catalog_mw,
+        expected.catalog_mw,
+        rtol=0.0,
+        atol=0.0,
+    )
+
+
+def test_factorized_head_rejects_incompatible_configurations() -> None:
+    legacy = _make_config()
+    legacy["model"][
+        "stf_output_parameterization"
+    ] = "moment_shape_factorized"
+    with pytest.raises(ValueError, match="requires pipeline_version=2"):
+        PINNModel(legacy)
+
+    independent_magnitude = _factorized_config()
+    independent_magnitude["model"]["predict_catalog_mw"] = True
+    with pytest.raises(ValueError, match="forbids an independent catalog Mw head"):
+        PINNModel(independent_magnitude)
+
+    linear_rate = _factorized_config()
+    linear_rate["training"]["rate_representation"] = "linear"
+    with pytest.raises(ValueError):
+        PINNModel(linear_rate)
 
 
 def test_predict_heads_returns_station_stf_and_catalog_magnitude() -> None:

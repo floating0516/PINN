@@ -312,7 +312,18 @@ def get_data_loaders_v2(
         num_workers=num_workers,
     )
     split_manifest = _split_manifest(protocol, seed, samples, split)
-    if config.get("workflow") == "station_random_shifted_stf":
+    strict_split_audit = bool(
+        training.get("strict_within_event_split_audit", False)
+    )
+    if (
+        config.get("workflow") == "station_random_shifted_stf"
+        or strict_split_audit
+    ):
+        if protocol != "within_event_station":
+            raise ValueError(
+                "strict within-event split audit requires "
+                "training.split_protocol=within_event_station"
+            )
         _validate_active_split_manifest(
             split_manifest,
             validation_fraction=validation_fraction,

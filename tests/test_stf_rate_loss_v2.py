@@ -11,6 +11,7 @@ from scripts.plotting.plot_training_curves import build_loss_summary
 from src.training.loss_stf_rate_v2 import (
     STFRateWaveformLossV2,
     compute_physical_coefficients,
+    forward_displacement_from_origin_rate,
     masked_normalized_waveform_mse,
     moment_magnitude_from_rate,
 )
@@ -105,6 +106,7 @@ def test_v2_loss_is_finite_differentiable_and_has_no_nonnegative_term() -> None:
     }
     assert not hasattr(criterion, "lambda_nonneg")
     assert criterion.amplitude_gain == 1.0
+    assert criterion.origin_aligned is False
 
 
 def test_magnitude_loss_uses_scalar_head_not_window_integral() -> None:
@@ -167,6 +169,79 @@ def test_legacy_v2_integral_magnitude_loss_keeps_rate_gradient() -> None:
 
     assert pred_stf.grad is not None
     assert torch.count_nonzero(pred_stf.grad) > 0
+
+
+def test_source_stf_loss_uses_absolute_p_and_s_delays() -> None:
+    config = _v2_config()
+    config.pop("workflow")
+    config["physics"].update(
+        {
+            "alpha": 3.0,
+            "beta": 1.5,
+            "delay_mode": "absolute",
+        }
+    )
+    config["training"]["stf_rate_loss"].update(
+        {
+            "lambda_MSE": 0.0,
+            "lambda_synth": 1.0,
+            "lambda_mag": 0.0,
+            "lambda_shape": 0.0,
+            "include_intermediate_field": False,
+            "include_far_field_P": True,
+            "include_far_field_S": True,
+            "radiation_pattern_mode": "simplified",
+        }
+    )
+    criterion = STFRateWaveformLossV2(config)
+    physical_rate = torch.tensor([[0.0, 1.0e18, 0.0, 0.0]])
+    encoded_rate = torch.log10(1.0 + physical_rate / criterion.stf_m_ref)
+    distance = torch.tensor([3.0])
+    zeros = torch.zeros(1)
+    ones = torch.ones(1)
+    coefficients = compute_physical_coefficients(
+        distance,
+        criterion.rho,
+        criterion.alpha,
+        criterion.beta,
+        ones,
+        ones,
+        ones,
+        ones,
+        amplitude_gain=criterion.amplitude_gain,
+    )
+    observed = forward_displacement_from_origin_rate(
+        physical_rate,
+        source_dt_sec=torch.ones(1),
+        observation_dt_sec=torch.ones(1),
+        observation_steps=6,
+        source_distance_m=distance,
+        travel_time=criterion.travel_time,
+        C_int_P=coefficients[0],
+        C_int_S=coefficients[1],
+        C_far_P=coefficients[2],
+        C_far_S=coefficients[3],
+        include_intermediate=False,
+        include_far_P=True,
+        include_far_S=True,
+        include_intermediate_P=True,
+        include_intermediate_S=True,
+    )
+
+    loss, metrics = criterion(
+        encoded_rate,
+        radial_obs=observed,
+        source_distance_m=distance,
+        theta_deg=zeros,
+        phi_slip_deg=zeros,
+        source_dt_sec=torch.ones(1),
+        observation_dt_sec=torch.ones(1),
+        waveform_valid_mask=torch.ones(1, 6, dtype=torch.bool),
+    )
+
+    assert criterion.origin_aligned is True
+    assert metrics["L_synth"] == pytest.approx(0.0, abs=1.0e-12)
+    assert loss.item() == pytest.approx(0.0, abs=1.0e-12)
 
 
 def test_v2_batch_preparation_uses_explicit_fields() -> None:
