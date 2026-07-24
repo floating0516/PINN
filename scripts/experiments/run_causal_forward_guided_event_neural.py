@@ -206,7 +206,7 @@ def _expected_causal_latency(config: Mapping[str, Any]) -> int:
 
 
 def _validate_experiment_config(payload: Mapping[str, Any]) -> None:
-    if payload.get("method") != "causal_forward_guided_event_neural_v1":
+    if payload.get("method") != "causal_forward_guided_event_neural_v2":
         raise ValueError("unexpected experiment method")
     seeds = tuple(int(value) for value in payload["training"]["seeds"])
     if seeds != REQUIRED_SEEDS:
@@ -954,7 +954,7 @@ def _load_checkpoint(
     device: torch.device,
 ) -> CausalForwardGuidedEventNet:
     payload = torch.load(path, map_location=device, weights_only=False)
-    if payload.get("model_type") != "causal_forward_guided_event_neural_v1":
+    if payload.get("model_type") != "causal_forward_guided_event_neural_v2":
         raise ValueError("unexpected checkpoint model type")
     spec = CausalForwardGuidedSpec.from_dict(payload["spec"])
     state = payload["model_state_dict"]
@@ -1088,7 +1088,7 @@ def _train_seed(
         "split_assignment_sha256": split_manifest["assignment_sha256"],
     }
     checkpoint = {
-        "model_type": "causal_forward_guided_event_neural_v1",
+        "model_type": "causal_forward_guided_event_neural_v2",
         "model_state_dict": model.state_dict(),
         "spec": spec.to_dict(),
         "feature_names": list(causal_event_feature_names(spec.event_spec)),
@@ -1368,7 +1368,7 @@ def run(
 
     summary = {
         "status": "smoke_complete" if smoke else "complete",
-        "method": "causal_forward_guided_event_neural_v1",
+        "method": "causal_forward_guided_event_neural_v2",
         "framework": "pytorch",
         "deep_learning": True,
         "input_components": ["R"],

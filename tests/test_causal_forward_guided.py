@@ -118,3 +118,26 @@ def test_shared_event_loss_preserves_all_four_terms_and_gradients() -> None:
     )
     assert pred_rate.grad is not None and torch.isfinite(pred_rate.grad).all()
     assert pred_mw.grad is not None and torch.isfinite(pred_mw.grad).all()
+
+
+def test_magnitude_residual_is_nonzero_early_and_exactly_zero_at_final() -> None:
+    spec = _spec()
+    model = _model(spec).eval()
+    with torch.no_grad():
+        model.magnitude_residual_head[-1].bias.fill_(1.0)
+    radial = torch.ones(2, 2, spec.total_steps) * 0.01
+    online_features = torch.zeros(2, spec.feature_count)
+    online_features[0, spec.event_spec.time_fraction_index] = 0.5
+    online_features[1, spec.event_spec.time_fraction_index] = 1.0
+
+    prediction = model(
+        radial_m=radial,
+        waveform_valid_mask=torch.ones_like(radial, dtype=torch.bool),
+        station_metadata=torch.zeros(2, 2, 5),
+        station_mask=torch.ones(2, 2, dtype=torch.bool),
+        observed_steps=torch.tensor([4, spec.total_steps]),
+        online_features=online_features,
+    )
+
+    assert prediction.magnitude_residual[0].abs().item() > 0.0
+    assert prediction.magnitude_residual[1].item() == 0.0

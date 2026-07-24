@@ -1,4 +1,4 @@
-method: causal_forward_guided_event_neural_v1
+method: causal_forward_guided_event_neural_v2
 base_config: /home/lihe/PINN_Mag/runs/phase9-usgs-relabel-20260723T051044Z-bb6d640/formal/campaign/usgs_priority/seed_42/models/20260723_132023/config.yaml
 external_event_root: /home/lihe/PINN_Mag/incoming/legacy-task17/GNSS_EQDATA
 event_model:
@@ -14,6 +14,7 @@ event_model:
   transformer_num_heads: 4
   dropout: 0.1
   magnitude_residual_scale: 0.25
+  magnitude_residual_gate: linear_to_anchor
   minimum_peak_cm: 0.00001
 loss:
   lambda_MSE: 1.0

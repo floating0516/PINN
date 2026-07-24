@@ -27,6 +27,7 @@ class CausalForwardGuidedSpec:
     transformer_num_heads: int = 4
     dropout: float = 0.1
     magnitude_residual_scale: float = 0.25
+    magnitude_residual_gate: str = "linear_to_anchor"
     minimum_peak_cm: float = 1.0e-5
 
     def __post_init__(self) -> None:
@@ -53,6 +54,8 @@ class CausalForwardGuidedSpec:
             or self.magnitude_residual_scale <= 0.0
         ):
             raise ValueError("magnitude_residual_scale must be positive and finite")
+        if self.magnitude_residual_gate != "linear_to_anchor":
+            raise ValueError("magnitude_residual_gate must be linear_to_anchor")
         self.event_spec
 
     @property
@@ -96,6 +99,7 @@ class CausalForwardGuidedSpec:
             "transformer_num_heads": int(self.transformer_num_heads),
             "dropout": float(self.dropout),
             "magnitude_residual_scale": float(self.magnitude_residual_scale),
+            "magnitude_residual_gate": self.magnitude_residual_gate,
             "minimum_peak_cm": float(self.minimum_peak_cm),
         }
 
@@ -439,8 +443,14 @@ class CausalForwardGuidedEventNet(nn.Module):
         engineered = self.online_feature_embed(online_standardized)
         event_hidden = self.event_fusion(torch.cat((station_summary, engineered), dim=1))
         anchor_standardized = self.standardized_anchor(online_features)
-        residual_standardized = float(self.spec.magnitude_residual_scale) * torch.tanh(
-            self.magnitude_residual_head(event_hidden).squeeze(-1)
+        time_fraction = online_features[
+            :, self.spec.event_spec.time_fraction_index
+        ].clamp(0.0, 1.0)
+        residual_gate = 1.0 - time_fraction
+        residual_standardized = (
+            float(self.spec.magnitude_residual_scale)
+            * residual_gate
+            * torch.tanh(self.magnitude_residual_head(event_hidden).squeeze(-1))
         )
         anchor_mw = self.target_mean + self.target_scale * anchor_standardized
         magnitude_residual = self.target_scale * residual_standardized
