@@ -26,6 +26,12 @@ PHASE24_CONFIG_PATH = (
     / "experiments"
     / "manuscript_station_stf_usgs_monotonic_cosine.yaml"
 )
+PHASE25_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_dual_range_stem.yaml"
+)
 CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
@@ -106,6 +112,12 @@ def _selected_train_summary(
             15,
             195,
         ),
+        (
+            PHASE25_CONFIG_PATH,
+            campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS,
+            "none",
+            "asinh_residual",
+        ),
     ],
 )
 def test_formal_configs_and_variants_have_one_scientific_difference(
@@ -127,7 +139,10 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         variants["baseline"],
         variants["candidate"],
     ) == {".".join(campaign.VARIANT_AXIS_PATHS[expected_axis])}
-    if expected_axis == campaign.SCHEDULER_T0_AXIS:
+    if expected_axis in {
+        campaign.SCHEDULER_T0_AXIS,
+        campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS,
+    }:
         assert {
             variant["model"]["stf_output_parameterization"]
             for variant in variants.values()
@@ -136,6 +151,10 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
             variant["training"]["scheduler_T_mult"]
             for variant in variants.values()
         } == {2}
+    if expected_axis == campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS:
+        assert {
+            variant["training"]["scheduler_T0"] for variant in variants.values()
+        } == {15}
 
 
 @pytest.mark.parametrize(
@@ -143,6 +162,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
     [
         (PHASE23_CONFIG_PATH, campaign.STF_OUTPUT_PARAMETERIZATION_AXIS),
         (PHASE24_CONFIG_PATH, campaign.SCHEDULER_T0_AXIS),
+        (PHASE25_CONFIG_PATH, campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS),
     ],
 )
 def test_formal_config_rejects_a_second_scientific_change(
@@ -165,6 +185,36 @@ def test_phase24_axis_requires_scheduler_t0_15_baseline() -> None:
 
     with pytest.raises(ValueError, match="Phase24 factorized/T0=15 baseline"):
         campaign.validate_formal_config(config)
+
+
+def test_phase25_axis_uses_an_explicit_none_baseline_marker() -> None:
+    config = _config(PHASE25_CONFIG_PATH)
+
+    assert campaign._config_diff_paths(
+        _config(PHASE24_CONFIG_PATH),
+        config,
+    ) == {"model.radial_dynamic_range_stem"}
+    assert (
+        campaign.variant_axis_from_config(config)
+        == campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS
+    )
+
+    without_marker = copy.deepcopy(config)
+    del without_marker["model"]["radial_dynamic_range_stem"]
+    assert (
+        campaign.variant_axis_from_config(without_marker)
+        == campaign.SCHEDULER_T0_AXIS
+    )
+
+    candidate_as_baseline = copy.deepcopy(config)
+    candidate_as_baseline["model"]["radial_dynamic_range_stem"] = "asinh_residual"
+    with pytest.raises(ValueError, match="Phase25 formal baseline requires explicit"):
+        campaign.validate_formal_config(candidate_as_baseline)
+
+    phase23_with_marker = _config(PHASE23_CONFIG_PATH)
+    phase23_with_marker["model"]["radial_dynamic_range_stem"] = "none"
+    with pytest.raises(ValueError, match="formal config must describe"):
+        campaign.validate_formal_config(phase23_with_marker)
 
 
 def test_split_contract_is_frozen_for_all_three_seeds() -> None:
@@ -260,6 +310,7 @@ def test_phase23_legacy_seed_summary_without_new_axis_fields_resumes(
 
     assert "variant_axis" not in resumed
     assert "scheduler_T0" not in resumed
+    assert "radial_dynamic_range_stem" not in resumed
     assert resumed == legacy_summary
 
 
@@ -332,6 +383,7 @@ def test_locked_test_loader_raises_on_iteration() -> None:
         "expected_axis",
         "expected_parameterizations",
         "expected_scheduler_t0s",
+        "expected_stems",
     ),
     [
         (
@@ -339,12 +391,21 @@ def test_locked_test_loader_raises_on_iteration() -> None:
             campaign.STF_OUTPUT_PARAMETERIZATION_AXIS,
             ("direct", "moment_shape_factorized"),
             (15, 15),
+            ("none", "none"),
         ),
         (
             PHASE24_CONFIG_PATH,
             campaign.SCHEDULER_T0_AXIS,
             ("moment_shape_factorized", "moment_shape_factorized"),
             (15, 195),
+            ("none", "none"),
+        ),
+        (
+            PHASE25_CONFIG_PATH,
+            campaign.RADIAL_DYNAMIC_RANGE_STEM_AXIS,
+            ("moment_shape_factorized", "moment_shape_factorized"),
+            (15, 15),
+            ("none", "asinh_residual"),
         ),
     ],
 )
@@ -353,6 +414,7 @@ def test_train_stage_selects_from_validation_without_test_or_external(
     expected_axis: str,
     expected_parameterizations: tuple[str, str],
     expected_scheduler_t0s: tuple[int, int],
+    expected_stems: tuple[str, str],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -434,6 +496,10 @@ def test_train_stage_selects_from_validation_without_test_or_external(
     assert tuple(
         summary["variants"][name]["scheduler_T0"] for name in variant_names
     ) == expected_scheduler_t0s
+    assert tuple(
+        summary["variants"][name]["radial_dynamic_range_stem"]
+        for name in variant_names
+    ) == expected_stems
     assert summary["variants"]["candidate"]["scientific_diff_from_baseline"] == [
         ".".join(campaign.VARIANT_AXIS_PATHS[expected_axis])
     ]

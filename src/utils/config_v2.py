@@ -172,6 +172,26 @@ def waveform_input_components_from_config(
     return components
 
 
+def radial_dynamic_range_stem_from_config(config: dict[str, Any]) -> str:
+    model = config.get("model", {}) or {}
+    value = model.get("radial_dynamic_range_stem", "none")
+    if not isinstance(value, str) or value not in {
+        "none",
+        "asinh_residual",
+    }:
+        raise ValueError(
+            "model.radial_dynamic_range_stem must be none or asinh_residual"
+        )
+    if (
+        value == "asinh_residual"
+        and waveform_input_components_from_config(config) != ("radial",)
+    ):
+        raise ValueError(
+            "model.radial_dynamic_range_stem=asinh_residual requires R-only input"
+        )
+    return value
+
+
 def validate_config_v2(config: dict[str, Any]) -> None:
     if not isinstance(config, dict):
         raise ValueError("第二版配置必须是映射")
@@ -181,6 +201,7 @@ def validate_config_v2(config: dict[str, Any]) -> None:
         raise ValueError("pipeline_version 必须为 2")
 
     waveform_input_components_from_config(config)
+    radial_dynamic_range_stem_from_config(config)
 
     for path in _FORBIDDEN_PATHS:
         exists, _ = _lookup(config, path)

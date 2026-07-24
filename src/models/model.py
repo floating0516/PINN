@@ -5,13 +5,32 @@ import torch.nn as nn
 import torch.nn.functional as F
 from typing import Optional
 
-from src.utils.config_v2 import waveform_input_components_from_config
+from src.utils.config_v2 import (
+    radial_dynamic_range_stem_from_config,
+    waveform_input_components_from_config,
+)
 
 
 @dataclass(frozen=True)
 class PINNPrediction:
     stf_encoded: torch.Tensor
     catalog_mw: torch.Tensor
+
+
+class RadialAsinhZeroConv(nn.Module):
+    """Zero-initialized wide-dynamic-range residual for the radial stem."""
+
+    def __init__(self, hidden_dim: int) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(hidden_dim, 1, 7))
+
+    def forward(self, radial: torch.Tensor) -> torch.Tensor:
+        if radial.ndim != 3 or radial.size(1) != 1:
+            raise ValueError(
+                'radial asinh residual expects input shape (B, 1, T)'
+            )
+        compressed = torch.asinh(radial / 0.01)
+        return F.conv1d(compressed, self.weight, bias=None, padding=3)
 
 
 class PINNModel(nn.Module):
@@ -100,6 +119,9 @@ class PINNModel(nn.Module):
 
         # 嵌入层：将配置的波形分量映射到隐藏维度
         self.input_components = waveform_input_components_from_config(config)
+        self.radial_dynamic_range_stem = (
+            radial_dynamic_range_stem_from_config(config)
+        )
         self.input_channels = len(self.input_components)
         self.input_fusion = str(
             config['model'].get('input_fusion', 'early')
@@ -243,6 +265,21 @@ class PINNModel(nn.Module):
                     if not name.startswith('tangential_'):
                         parameter.requires_grad_(False)
 
+        # Register last so common initialization and RNG streams stay unchanged.
+        self.radial_asinh_zero_conv: RadialAsinhZeroConv | None
+        if self.radial_dynamic_range_stem == 'asinh_residual':
+            self.radial_asinh_zero_conv = RadialAsinhZeroConv(self.hidden_dim)
+        else:
+            self.radial_asinh_zero_conv = None
+
+    def _embed_backbone_input(self, backbone_input: torch.Tensor) -> torch.Tensor:
+        pre_activation = self.embed[0](backbone_input)
+        if self.radial_asinh_zero_conv is not None:
+            pre_activation = pre_activation + self.radial_asinh_zero_conv(
+                backbone_input
+            )
+        return self.embed[2](self.embed[1](pre_activation))
+
     def _resize_source_time(self, seq_time: torch.Tensor) -> torch.Tensor:
         if (
             self.output_time_steps is None
@@ -269,7 +306,7 @@ class PINNModel(nn.Module):
             backbone_input = x[:, :1].contiguous()
         else:
             backbone_input = x
-        feat = self.embed(backbone_input)    # (B, C, T)
+        feat = self._embed_backbone_input(backbone_input)  # (B, C, T)
         for block in self.tcn_blocks:
             feat = block(feat)               # (B, C, T)
         feat = self.se(feat)                 # (B, C, T)
@@ -392,7 +429,7 @@ class PINNModel(nn.Module):
         backbone_input = (
             x[:, :1].contiguous() if self.gated_tangential_residual else x
         )
-        feat = self.embed(backbone_input)
+        feat = self._embed_backbone_input(backbone_input)
         shapes['embed'] = list(feat.shape)
         for i, block in enumerate(self.tcn_blocks):
             feat = block(feat)

@@ -59,6 +59,7 @@ from src.utils.provenance import (  # noqa: E402
 SEEDS = (17, 42, 73)
 STF_OUTPUT_PARAMETERIZATION_AXIS = "stf_output_parameterization"
 SCHEDULER_T0_AXIS = "scheduler_T0"
+RADIAL_DYNAMIC_RANGE_STEM_AXIS = "radial_dynamic_range_stem"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
         "baseline": "direct",
@@ -68,10 +69,15 @@ VARIANT_AXES = {
         "baseline": 15,
         "candidate": 195,
     },
+    RADIAL_DYNAMIC_RANGE_STEM_AXIS: {
+        "baseline": "none",
+        "candidate": "asinh_residual",
+    },
 }
 VARIANT_AXIS_PATHS = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: ("model", "stf_output_parameterization"),
     SCHEDULER_T0_AXIS: ("training", "scheduler_T0"),
+    RADIAL_DYNAMIC_RANGE_STEM_AXIS: ("model", "radial_dynamic_range_stem"),
 }
 # Backward-compatible alias for the Phase23 campaign and its persisted tests.
 VARIANTS = VARIANT_AXES[STF_OUTPUT_PARAMETERIZATION_AXIS]
@@ -279,13 +285,26 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         raise ValueError("formal config is missing training")
     parameterization = model.get("stf_output_parameterization")
     scheduler_t0 = training.get("scheduler_T0")
-    if parameterization == "direct" and scheduler_t0 == 15:
+    stem_is_explicit = "radial_dynamic_range_stem" in model
+    if (
+        parameterization == "direct"
+        and scheduler_t0 == 15
+        and not stem_is_explicit
+    ):
         return STF_OUTPUT_PARAMETERIZATION_AXIS
     if parameterization == "moment_shape_factorized" and scheduler_t0 == 15:
+        if stem_is_explicit:
+            if model.get("radial_dynamic_range_stem") == "none":
+                return RADIAL_DYNAMIC_RANGE_STEM_AXIS
+            raise ValueError(
+                "Phase25 formal baseline requires explicit "
+                "model.radial_dynamic_range_stem='none'"
+            )
         return SCHEDULER_T0_AXIS
     raise ValueError(
         "formal config must describe the Phase23 direct baseline or the "
-        "Phase24 factorized/T0=15 baseline"
+        "Phase24 factorized/T0=15 baseline or the Phase25 factorized/T0=15 "
+        "baseline with explicit radial dynamic-range stem"
     )
 
 
@@ -732,6 +751,9 @@ def _train_one_seed(
         "variant": variant,
         "parameterization": config["model"]["stf_output_parameterization"],
         "scheduler_T0": int(config["training"]["scheduler_T0"]),
+        "radial_dynamic_range_stem": str(
+            config["model"].get("radial_dynamic_range_stem", "none")
+        ),
         "seed": seed,
         **checkpoint_selection,
         "checkpoint": _artifact(verified["checkpoint_path"]),
@@ -798,6 +820,9 @@ def run_train(
                 "stf_output_parameterization"
             ],
             "scheduler_T0": int(variant_config["training"]["scheduler_T0"]),
+            "radial_dynamic_range_stem": str(
+                variant_config["model"].get("radial_dynamic_range_stem", "none")
+            ),
             "scientific_diff_from_baseline": sorted(
                 _config_diff_paths(variants["baseline"], variant_config)
             ),
