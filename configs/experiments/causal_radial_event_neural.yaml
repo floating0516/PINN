@@ -1,0 +1,35 @@
+method: causal_radial_event_neural_v1
+base_config: /home/lihe/PINN_Mag/runs/phase9-usgs-relabel-20260723T051044Z-bb6d640/formal/campaign/usgs_priority/seed_42/models/20260723_132023/config.yaml
+external_event_root: /home/lihe/PINN_Mag/incoming/legacy-task17/GNSS_EQDATA
+event_model:
+  top_k: 5
+  distance_exponents: [0.5, 0.75, 1.0, 1.25]
+  upper_quantile: 0.9
+  duration_sec: 200
+  sample_rate_hz: 1.0
+  causal_latency_samples: 6
+  hidden_dim: 32
+  dropout: 0.05
+  prefix_residual_scale: 0.25
+  minimum_peak_cm: 0.00001
+training:
+  head_seeds: [17, 42, 73]
+  anchor_epochs: 3000
+  prefix_epochs: 1500
+  anchor_learning_rate: 0.005
+  prefix_learning_rate: 0.001
+  anchor_l2_alpha: 10.0
+  prefix_l2_alpha: 10.0
+  gradient_clip_norm: 5.0
+selection:
+  primary_metric: validation_online_mae
+  tie_break_metric: validation_final_mae
+  use_ensemble: false
+audit:
+  expected_event_count: 31
+  expected_station_count: 4165
+  expected_external_event_count: 8
+  expected_external_station_count: 159
+target:
+  final_horizon_sec: 200
+  final_event_mae_maximum: 0.15
