@@ -7,6 +7,9 @@ from typing import Any
 import numpy as np
 
 
+EXACT_TIME_TOLERANCE_SEC = 1.0e-8
+
+
 @dataclass(frozen=True)
 class WaveformConfig:
     sample_rate_hz: float
@@ -207,7 +210,6 @@ def preprocess_waveform(
         config.start_sec
         + np.arange(sample_count, dtype=np.float64) * dt_sec
     )
-    interpolated = np.interp(grid, clean_time, centered_values)
 
     supported = (grid >= clean_time[0]) & (grid <= clean_time[-1])
     left = np.searchsorted(clean_time, grid, side="right") - 1
@@ -217,7 +219,7 @@ def preprocess_waveform(
         grid,
         clean_time[left_safe],
         rtol=0.0,
-        atol=1.0e-8,
+        atol=EXACT_TIME_TOLERANCE_SEC,
     )
     right = left + 1
     right_in_bounds = (right >= 0) & (right < clean_time.size)
@@ -226,7 +228,7 @@ def preprocess_waveform(
         grid,
         clean_time[right_safe],
         rtol=0.0,
-        atol=1.0e-8,
+        atol=EXACT_TIME_TOLERANCE_SEC,
     )
     exact = exact_left | exact_right
     interior = supported & left_in_bounds & right_in_bounds
@@ -240,7 +242,17 @@ def preprocess_waveform(
     )
     valid_mask = supported & gap_ok
 
-    network_values = np.where(valid_mask, interpolated, 0.0)
+    if config.max_interpolation_gap_sec == 0.0:
+        resampled = np.zeros_like(grid)
+        resampled[exact_left] = centered_values[left_safe[exact_left]]
+        exact_right_only = exact_right & ~exact_left
+        resampled[exact_right_only] = centered_values[
+            right_safe[exact_right_only]
+        ]
+    else:
+        resampled = np.interp(grid, clean_time, centered_values)
+
+    network_values = np.where(valid_mask, resampled, 0.0)
     filtered = _fir_lowpass(network_values, config)
     filtered = np.where(valid_mask, filtered, 0.0)
     valid_fraction = float(np.mean(valid_mask))

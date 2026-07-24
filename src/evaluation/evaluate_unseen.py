@@ -5,7 +5,7 @@ import csv
 import gzip
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -45,7 +45,11 @@ from src.data.metadata import build_metadata_tensor
 from src.data.metadata import metadata_distance_from_config
 from src.data.model_input import assemble_model_input
 from src.data.sample_builder import SampleRejected, build_station_sample
-from src.data.waveform import WaveformConfig, waveform_config_from_v2
+from src.data.waveform import (
+    EXACT_TIME_TOLERANCE_SEC,
+    WaveformConfig,
+    waveform_config_from_v2,
+)
 from src.evaluation.evaluate import (
     _evaluation_time_steps,
     _ensure_time_steps,
@@ -110,9 +114,17 @@ def _format_event_display_name(*, event_name: str, event_dir_name: str, magnitud
     return f"{place} M{float(magnitude):.1f}"
 
 
-def load_event_bundle(event_dir: str | Path) -> EventBundle:
+def load_event_bundle(
+    event_dir: str | Path,
+    *,
+    waveform_available_before_sec: float | None = None,
+) -> EventBundle:
     event_path = Path(event_dir)
     meta = json.loads((event_path / "event.json").read_text(encoding="utf-8"))
+    if waveform_available_before_sec is not None and not math.isfinite(
+        waveform_available_before_sec
+    ):
+        raise ValueError("waveform_available_before_sec must be finite")
 
     station_meta: dict[str, dict[str, float]] = {}
     with (event_path / "stations.csv").open("r", encoding="utf-8", newline="") as f:
@@ -135,24 +147,47 @@ def load_event_bundle(event_dir: str | Path) -> EventBundle:
             if component not in {"E", "N", "U"}:
                 continue
             offset = float(row["Time_Offset_s"])
+            if (
+                waveform_available_before_sec is not None
+                and offset >= waveform_available_before_sec
+            ):
+                continue
             value_m = float(row["Value_m"])
             item = per_station.setdefault(
                 station,
-                {"t": [], "E": [], "N": [], "U": []},
+                {
+                    "t_E": [],
+                    "t_N": [],
+                    "t_U": [],
+                    "E": [],
+                    "N": [],
+                    "U": [],
+                },
             )
-            if component == "E":
-                item["t"].append(offset)
+            item[f"t_{component}"].append(offset)
             item[component].append(value_m)
 
     stations: list[StationWaveform] = []
     for station, payload in per_station.items():
-        t = np.asarray(payload["t"], dtype=np.float32)
-        e_m = np.asarray(payload["E"], dtype=np.float32)
-        n_m = np.asarray(payload["N"], dtype=np.float32)
-        if len(t) == 0 or not (len(t) == len(e_m) == len(n_m)):
+        def ordered_component(name: str) -> tuple[np.ndarray, np.ndarray]:
+            times = np.asarray(payload[f"t_{name}"], dtype=np.float64)
+            values = np.asarray(payload[name], dtype=np.float32)
+            order = np.argsort(times, kind="mergesort")
+            return times[order], values[order]
+
+        t, e_m = ordered_component("E")
+        t_north, n_m = ordered_component("N")
+        t_up, u_values = ordered_component("U")
+        if (
+            len(t) == 0
+            or not (len(t) == len(t_north) == len(e_m) == len(n_m))
+            or not np.allclose(t, t_north, rtol=0.0, atol=1.0e-9)
+        ):
             continue
         if len(payload["U"]) == len(t):
-            u_m = np.asarray(payload["U"], dtype=np.float32)
+            if not np.allclose(t, t_up, rtol=0.0, atol=1.0e-9):
+                continue
+            u_m = u_values
         elif len(payload["U"]) == 0:
             u_m = np.zeros_like(t, dtype=np.float32)
         else:
@@ -591,16 +626,74 @@ def _station_sample_from_bundle(
         radial_peak_min_cm = float(radial_peak_min_cm_override)
     if waveform_config is None:
         waveform_config = waveform_config_from_v2(config)
+    effective_waveform_config = _phase_preserving_external_waveform_config(
+        station,
+        waveform_config,
+    )
     try:
-        return build_station_sample(
+        sample = build_station_sample(
             record_from_external_bundle(bundle, station),
             units="m",
-            waveform_config=waveform_config,
+            waveform_config=effective_waveform_config,
             alpha_m_per_s=float(config["physics"]["alpha"]),
             radial_peak_min_cm=radial_peak_min_cm,
         )
     except SampleRejected:
         return None
+    sample["waveform_start_sec"] = float(effective_waveform_config.start_sec)
+    sample["waveform_phase_adjusted"] = not math.isclose(
+        effective_waveform_config.start_sec,
+        waveform_config.start_sec,
+        rel_tol=0.0,
+        abs_tol=1.0e-12,
+    )
+    sample["waveform_max_interpolation_gap_sec"] = float(
+        effective_waveform_config.max_interpolation_gap_sec
+    )
+    return sample
+
+
+def _phase_preserving_external_waveform_config(
+    station: StationWaveform,
+    config: WaveformConfig,
+) -> WaveformConfig:
+    if not math.isclose(
+        config.max_interpolation_gap_sec,
+        0.0,
+        rel_tol=0.0,
+        abs_tol=0.0,
+    ):
+        return config
+
+    times = np.asarray(station.t, dtype=np.float64)
+    finite_times = np.unique(times[np.isfinite(times)])
+    if finite_times.size == 0:
+        return config
+    tolerance = EXACT_TIME_TOLERANCE_SEC
+    first_index = int(
+        np.searchsorted(
+            finite_times,
+            config.start_sec - tolerance,
+            side="left",
+        )
+    )
+    if first_index >= finite_times.size:
+        return config
+    first_sample = float(finite_times[first_index])
+    target_dt = 1.0 / config.sample_rate_hz
+    phase_offset = first_sample - config.start_sec
+    if phase_offset < -tolerance or phase_offset >= target_dt:
+        return config
+    if abs(phase_offset) <= tolerance:
+        return config
+    if first_index == 0 or not math.isclose(
+        first_sample - float(finite_times[first_index - 1]),
+        target_dt,
+        rel_tol=0.0,
+        abs_tol=tolerance,
+    ):
+        return config
+    return replace(config, start_sec=first_sample)
 
 
 def evaluate_unseen_events(
@@ -610,6 +703,7 @@ def evaluate_unseen_events(
     output_dir: str | Path,
     radial_peak_min_cm_override: float | None = None,
     save_plots: bool = True,
+    waveform_available_before_sec: float | None = None,
 ) -> dict[str, Any]:
     model_path = Path(model_dir) / "best_model.pth"
     config_path = Path(model_dir) / "config.yaml"
@@ -648,7 +742,13 @@ def evaluate_unseen_events(
 
     with torch.no_grad():
         for event_dir in event_dirs:
-            bundle = load_event_bundle(event_dir)
+            if waveform_available_before_sec is None:
+                bundle = load_event_bundle(event_dir)
+            else:
+                bundle = load_event_bundle(
+                    event_dir,
+                    waveform_available_before_sec=waveform_available_before_sec,
+                )
             event_label = _format_event_display_name(
                 event_name=bundle.event_name,
                 event_dir_name=bundle.event_dir_name,
@@ -701,6 +801,10 @@ def evaluate_unseen_events(
                     torch.tensor([sample["azimuth_deg"]], dtype=torch.float32, device=device),
                 )
                 sample_dt = float(sample["waveform_dt_sec"])
+                valid_sample_count = int(
+                    np.count_nonzero(sample["waveform_valid_mask"])
+                )
+                waveform_slot_count = int(len(sample["waveform_valid_mask"]))
                 source_dt = 1.0 / float(ds_cfg["sample_rate_hz"])
                 prediction = _predict_outputs(
                     model,
@@ -759,6 +863,26 @@ def evaluate_unseen_events(
                     "threshold_cm": threshold_cm,
                     "mechanism": bundle.mechanism,
                     "dt": sample_dt,
+                    "waveform_start_sec": float(sample["waveform_start_sec"]),
+                    "waveform_phase_adjusted": bool(
+                        sample["waveform_phase_adjusted"]
+                    ),
+                    "waveform_max_interpolation_gap_sec": float(
+                        sample["waveform_max_interpolation_gap_sec"]
+                    ),
+                    "waveform_slot_count": waveform_slot_count,
+                    "waveform_valid_sample_count": valid_sample_count,
+                    "waveform_masked_sample_count": (
+                        waveform_slot_count - valid_sample_count
+                    ),
+                    "waveform_valid_fraction": float(sample["valid_fraction"]),
+                    "waveform_raw_dt_sec": float(sample["raw_dt_sec"]),
+                    "waveform_baseline_source": str(sample["baseline_source"]),
+                    "waveform_available_before_sec": (
+                        float(waveform_available_before_sec)
+                        if waveform_available_before_sec is not None
+                        else float("nan")
+                    ),
                     "max_radial_cm": float(sample["radial_peak_cm"]),
                     "station_lat": float(station.latitude),
                     "station_lon": float(station.longitude),

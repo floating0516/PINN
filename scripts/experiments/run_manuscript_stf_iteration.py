@@ -121,6 +121,9 @@ FULL_OBSERVATION_HORIZON_SEC = 200.0
 FULL_RELEASE_TIME_SEC = (
     FULL_OBSERVATION_HORIZON_SEC + MANUSCRIPT_PROCESSING_DELAY_SEC
 )
+FORMAL_FIR_LOOKAHEAD_SEC = 3.0
+FORMAL_MIN_VALID_FRACTION = 0.99
+EXTERNAL_WAVEFORM_GRID_SCHEMA_VERSION = 2
 
 
 class LockedTestLoader:
@@ -1330,6 +1333,7 @@ def _evaluate_external_threshold(
         output_dir=output_dir / "raw",
         radial_peak_min_cm_override=threshold_cm,
         save_plots=False,
+        waveform_available_before_sec=FULL_OBSERVATION_HORIZON_SEC,
     )
     station_rows = [
         {
@@ -1359,6 +1363,66 @@ def _evaluate_external_threshold(
     ]
     if not station_rows or not event_rows:
         raise ValueError(f"external threshold {threshold_cm:g} produced no predictions")
+    waveform_starts = [float(row["waveform_start_sec"]) for row in station_rows]
+    interpolation_gaps = {
+        float(row["waveform_max_interpolation_gap_sec"])
+        for row in station_rows
+    }
+    if interpolation_gaps != {0.0}:
+        raise ValueError("formal external evaluation must not interpolate waveforms")
+    available_before_values = {
+        float(row["waveform_available_before_sec"]) for row in station_rows
+    }
+    if available_before_values != {FULL_OBSERVATION_HORIZON_SEC}:
+        raise ValueError("formal external waveform availability cutoff changed")
+    phase_adjusted_count = sum(
+        bool(row["waveform_phase_adjusted"]) for row in station_rows
+    )
+    slot_counts = {int(row["waveform_slot_count"]) for row in station_rows}
+    if slot_counts != {int(FULL_OBSERVATION_HORIZON_SEC)}:
+        raise ValueError("formal external waveform slot count changed")
+    valid_counts = [int(row["waveform_valid_sample_count"]) for row in station_rows]
+    masked_counts = [int(row["waveform_masked_sample_count"]) for row in station_rows]
+    valid_fractions = [float(row["waveform_valid_fraction"]) for row in station_rows]
+    if any(
+        valid + masked != int(FULL_OBSERVATION_HORIZON_SEC)
+        for valid, masked in zip(valid_counts, masked_counts, strict=True)
+    ):
+        raise ValueError("external valid and masked sample counts are inconsistent")
+    for valid, masked, fraction in zip(
+        valid_counts,
+        masked_counts,
+        valid_fractions,
+        strict=True,
+    ):
+        expected_fraction = valid / int(FULL_OBSERVATION_HORIZON_SEC)
+        if not math.isclose(fraction, expected_fraction, rel_tol=0.0, abs_tol=1.0e-12):
+            raise ValueError("external valid fraction disagrees with sample counts")
+        if fraction < FORMAL_MIN_VALID_FRACTION:
+            raise ValueError("external waveform violates the formal valid-fraction gate")
+    raw_dts = [float(row["waveform_raw_dt_sec"]) for row in station_rows]
+    if any(
+        not math.isclose(value, 1.0, rel_tol=0.0, abs_tol=1.0e-8)
+        for value in raw_dts
+    ):
+        raise ValueError("formal external waveforms must retain a 1 Hz raw grid")
+    baseline_source_counts: dict[str, int] = {}
+    for row in station_rows:
+        source = str(row["waveform_baseline_source"])
+        baseline_source_counts[source] = baseline_source_counts.get(source, 0) + 1
+    maximum_last_sample_sec = (
+        max(waveform_starts) + FULL_OBSERVATION_HORIZON_SEC - 1.0
+    )
+    maximum_filter_support_sec = (
+        maximum_last_sample_sec + FORMAL_FIR_LOOKAHEAD_SEC
+    )
+    if maximum_last_sample_sec >= FULL_OBSERVATION_HORIZON_SEC:
+        raise ValueError("external phase grid reads at or beyond the 200 s horizon")
+    if maximum_filter_support_sec >= FULL_RELEASE_TIME_SEC:
+        raise ValueError("external FIR support exceeds the five-second release budget")
+    event_names = sorted(str(row["event"]) for row in event_rows)
+    if len(set(event_names)) != len(event_names):
+        raise ValueError("external threshold produced duplicate event summaries")
     station_path = output_dir / "station_predictions_usgs.csv"
     event_path = output_dir / "event_predictions_usgs.csv"
     _atomic_write(station_path, _csv_bytes(station_rows), overwrite=resume)
@@ -1375,6 +1439,32 @@ def _evaluate_external_threshold(
         "threshold_cm": threshold_cm,
         "observation_horizon_sec": FULL_OBSERVATION_HORIZON_SEC,
         "release_time_sec": FULL_RELEASE_TIME_SEC,
+        "waveform_grid": {
+            "schema_version": EXTERNAL_WAVEFORM_GRID_SCHEMA_VERSION,
+            "mode": "raw_sample_phase_no_interpolation",
+            "configured_start_sec": 0.0,
+            "raw_input_available_before_sec": FULL_OBSERVATION_HORIZON_SEC,
+            "minimum_start_sec": min(waveform_starts),
+            "maximum_start_sec": max(waveform_starts),
+            "slot_count": int(FULL_OBSERVATION_HORIZON_SEC),
+            "minimum_valid_sample_count": min(valid_counts),
+            "maximum_masked_sample_count": max(masked_counts),
+            "minimum_valid_fraction": min(valid_fractions),
+            "raw_dt_sec_minimum": min(raw_dts),
+            "raw_dt_sec_maximum": max(raw_dts),
+            "baseline_source_counts": baseline_source_counts,
+            "maximum_last_sample_sec": maximum_last_sample_sec,
+            "fir_boundary_mode": "zero_padded_same",
+            "fir_nominal_lookahead_sec": FORMAL_FIR_LOOKAHEAD_SEC,
+            "nominal_maximum_filter_support_sec": maximum_filter_support_sec,
+            "release_margin_sec": (
+                FULL_RELEASE_TIME_SEC - maximum_filter_support_sec
+            ),
+            "max_interpolation_gap_sec": 0.0,
+            "phase_adjusted_station_count": phase_adjusted_count,
+            "station_count": len(station_rows),
+        },
+        "event_names": event_names,
         "station_metrics": station_metrics,
         "event_metrics": event_metrics,
         "station_predictions": _artifact(station_path),
@@ -1392,6 +1482,11 @@ def _load_completed_threshold(path: Path) -> dict[str, Any] | None:
         return None
     summary = _load_json(summary_path)
     try:
+        if (
+            int(summary["waveform_grid"]["schema_version"])
+            != EXTERNAL_WAVEFORM_GRID_SCHEMA_VERSION
+        ):
+            return None
         for name in (
             "station_predictions",
             "event_predictions",
@@ -1404,6 +1499,31 @@ def _load_completed_threshold(path: Path) -> dict[str, Any] | None:
     return summary
 
 
+def _external_coverage_gate(
+    threshold_summary: Mapping[str, Any],
+    label_rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    required_event_names = sorted(str(row["event"]) for row in label_rows)
+    observed_event_names = sorted(
+        str(event) for event in threshold_summary.get("event_names", [])
+    )
+    event_count = int(threshold_summary["event_metrics"]["count"])
+    missing_event_names = sorted(set(required_event_names) - set(observed_event_names))
+    unexpected_event_names = sorted(set(observed_event_names) - set(required_event_names))
+    return {
+        "passed": (
+            event_count == len(required_event_names)
+            and observed_event_names == required_event_names
+        ),
+        "event_count": event_count,
+        "required_event_count": len(required_event_names),
+        "observed_event_names": observed_event_names,
+        "required_event_names": required_event_names,
+        "missing_event_names": missing_event_names,
+        "unexpected_event_names": unexpected_event_names,
+    }
+
+
 def run_external(
     *,
     output_root: Path,
@@ -1413,6 +1533,14 @@ def run_external(
     stage_dir = _stage_dir(output_root, "external")
     completed = _prepare_stage(stage_dir, resume=resume)
     if completed is not None:
+        if (
+            int(completed.get("external_waveform_grid_schema_version", -1))
+            != EXTERNAL_WAVEFORM_GRID_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "completed external stage uses an obsolete waveform-grid schema; "
+                "preserve it and use a new output namespace"
+            )
         return completed
     internal = _require_stage(output_root, "internal")
     if internal.get("status") != "complete" or not bool(
@@ -1453,12 +1581,20 @@ def run_external(
                 resume=resume,
             )
         threshold_summaries[label] = result
-    cm0_event_count = int(threshold_summaries["cm0"]["event_metrics"]["count"])
-    coverage_passed = cm0_event_count == len(EXTERNAL_EVENT_NAMES)
+    coverage_gate = _external_coverage_gate(
+        threshold_summaries["cm0"],
+        label_rows,
+    )
+    coverage_passed = bool(coverage_gate["passed"])
     summary = {
         "stage": "external",
         "status": "complete" if coverage_passed else "cm0_coverage_gate_failed",
         "created_at_utc": utc_now_iso(),
+        "evaluation_git_commit": current_git_commit(PROJECT_ROOT),
+        "evaluation_git_dirty": git_is_dirty(PROJECT_ROOT),
+        "external_waveform_grid_schema_version": (
+            EXTERNAL_WAVEFORM_GRID_SCHEMA_VERSION
+        ),
         "internal_summary": _artifact(
             _stage_dir(output_root, "internal") / "summary.json"
         ),
@@ -1469,11 +1605,7 @@ def run_external(
         "release_time_sec": FULL_RELEASE_TIME_SEC,
         "input_sha256": input_hashes,
         "label_manifest": _artifact(label_manifest),
-        "cm0_coverage_gate": {
-            "passed": coverage_passed,
-            "event_count": cm0_event_count,
-            "required_event_count": len(EXTERNAL_EVENT_NAMES),
-        },
+        "cm0_coverage_gate": coverage_gate,
         "thresholds": threshold_summaries,
     }
     _finish_stage(stage_dir, summary, resume=resume)

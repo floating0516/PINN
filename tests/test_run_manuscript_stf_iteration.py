@@ -813,6 +813,42 @@ def test_external_gate_fails_before_external_evaluation(
     assert calls == 0
 
 
+def test_external_resume_rejects_obsolete_waveform_grid_schema(
+    tmp_path: Path,
+) -> None:
+    _mark_stage(
+        tmp_path,
+        "external",
+        {"status": "cm0_coverage_gate_failed"},
+    )
+
+    with pytest.raises(ValueError, match="obsolete waveform-grid schema"):
+        campaign.run_external(
+            output_root=tmp_path,
+            event_root=tmp_path / "events",
+            resume=True,
+        )
+
+
+def test_external_coverage_gate_requires_exact_frozen_event_identity() -> None:
+    labels = [{"event": "A"}, {"event": "B"}, {"event": "C"}]
+
+    complete = campaign._external_coverage_gate(
+        {"event_names": ["C", "A", "B"], "event_metrics": {"count": 3}},
+        labels,
+    )
+    wrong_identity = campaign._external_coverage_gate(
+        {"event_names": ["A", "B", "D"], "event_metrics": {"count": 3}},
+        labels,
+    )
+
+    assert complete["passed"] is True
+    assert complete["observed_event_names"] == ["A", "B", "C"]
+    assert wrong_identity["passed"] is False
+    assert wrong_identity["missing_event_names"] == ["C"]
+    assert wrong_identity["unexpected_event_names"] == ["D"]
+
+
 def test_external_threshold_summary_records_full_window_release(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -828,7 +864,23 @@ def test_external_threshold_summary_records_full_window_release(
         evaluate_unseen,
         "evaluate_unseen_events",
         lambda **_kwargs: {
-            "station_rows": [{"event": "E", "station": "S", "mw_pred": 7.0}],
+            "station_rows": [
+                {
+                    "event": "E",
+                    "station": "S",
+                    "mw_pred": 7.0,
+                    "waveform_start_sec": 0.4,
+                    "waveform_phase_adjusted": True,
+                    "waveform_max_interpolation_gap_sec": 0.0,
+                    "waveform_slot_count": 200,
+                    "waveform_valid_sample_count": 199,
+                    "waveform_masked_sample_count": 1,
+                    "waveform_valid_fraction": 0.995,
+                    "waveform_raw_dt_sec": 1.0,
+                    "waveform_baseline_source": "pre_event",
+                    "waveform_available_before_sec": 200.0,
+                }
+            ],
             "event_rows": [{"event": "E", "mw_pred_median": 7.0}],
             "station_csv": raw_station,
             "event_csv": raw_event,
@@ -856,6 +908,30 @@ def test_external_threshold_summary_records_full_window_release(
 
     assert summary["observation_horizon_sec"] == 200.0
     assert summary["release_time_sec"] == 205.0
+    assert summary["waveform_grid"] == {
+        "schema_version": campaign.EXTERNAL_WAVEFORM_GRID_SCHEMA_VERSION,
+        "mode": "raw_sample_phase_no_interpolation",
+        "configured_start_sec": 0.0,
+        "raw_input_available_before_sec": 200.0,
+        "minimum_start_sec": 0.4,
+        "maximum_start_sec": 0.4,
+        "slot_count": 200,
+        "minimum_valid_sample_count": 199,
+        "maximum_masked_sample_count": 1,
+        "minimum_valid_fraction": 0.995,
+        "raw_dt_sec_minimum": 1.0,
+        "raw_dt_sec_maximum": 1.0,
+        "baseline_source_counts": {"pre_event": 1},
+        "maximum_last_sample_sec": pytest.approx(199.4),
+        "fir_boundary_mode": "zero_padded_same",
+        "fir_nominal_lookahead_sec": 3.0,
+        "nominal_maximum_filter_support_sec": pytest.approx(202.4),
+        "release_margin_sec": pytest.approx(2.6),
+        "max_interpolation_gap_sec": 0.0,
+        "phase_adjusted_station_count": 1,
+        "station_count": 1,
+    }
+    assert summary["event_names"] == ["E"]
     persisted = json.loads(
         (tmp_path / "external" / "summary.json").read_text(encoding="utf-8")
     )

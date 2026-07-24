@@ -323,6 +323,38 @@ def test_outside_support_and_large_gaps_stay_masked_through_filtering() -> None:
     assert np.allclose(result.values_m, expected_values)
 
 
+def test_zero_gap_path_gathers_exact_nodes_and_never_interpolates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    time_sec = np.array([-3.0, -2.0, -1.0, 0.27, 1.27, 3.27])
+    values = np.array([10.0, 10.0, 10.0, 11.0, 12.0, 14.0])
+    config = _config(
+        start_sec=0.27,
+        duration_sec=4.0,
+        min_valid_fraction=0.0,
+        max_interpolation_gap_sec=0.0,
+    )
+    monkeypatch.setattr(
+        np,
+        "interp",
+        lambda *_args, **_kwargs: pytest.fail(
+            "strict zero-gap preprocessing must not call np.interp"
+        ),
+    )
+
+    result = preprocess_waveform(
+        time_sec,
+        values,
+        units="m",
+        p_arrival_sec=8.0,
+        config=config,
+    )
+
+    assert result.time_sec == pytest.approx([0.27, 1.27, 2.27, 3.27])
+    assert np.array_equal(result.valid_mask, [True, True, False, True])
+    assert result.values_m == pytest.approx([1.0, 2.0, 0.0, 4.0])
+
+
 def test_lowpass_uses_configured_windowed_sinc_fir() -> None:
     config = _config(filter_type="lowpass", num_taps=7, cutoff_hz=0.1)
     values = np.zeros(21)

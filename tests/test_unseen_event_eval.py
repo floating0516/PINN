@@ -19,6 +19,7 @@ from src.evaluation.evaluate_unseen import (
     EventBundle,
     StationWaveform,
     _format_event_display_name,
+    _phase_preserving_external_waveform_config,
     _station_sample_from_bundle,
     evaluate_unseen_events,
     load_event_bundle,
@@ -126,6 +127,7 @@ def test_load_event_bundle_reads_station_waveforms(tmp_path: Path):
     station = bundle.stations[0]
     assert station.station == "STA1"
     assert station.dt == pytest.approx(1.0)
+    assert station.t.dtype == np.float64
     assert station.e_m.tolist() == pytest.approx([0.001, 0.011, 0.021, 0.031])
     assert station.n_m.tolist() == pytest.approx([0.002, 0.012, 0.022, 0.032])
     assert station.u_m.tolist() == pytest.approx([0.003, 0.013, 0.023, 0.033])
@@ -162,6 +164,71 @@ def test_load_event_bundle_allows_missing_u_component(tmp_path: Path):
 
     assert len(bundle.stations) == 1
     assert bundle.stations[0].u_m.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.0])
+
+
+def test_load_event_bundle_rejects_component_time_grid_mismatch(tmp_path: Path):
+    event_dir = _write_event_dir(tmp_path, event_name="mismatched-grid")
+    waveform_path = event_dir / "waveforms.csv.gz"
+    rows = []
+    with gzip.open(waveform_path, "rt", encoding="utf-8", newline="") as f:
+        for row in csv.DictReader(f):
+            if row["Component"] == "N" and row["Time_Offset_s"] == "0.0":
+                row["Time_Offset_s"] = "0.25"
+            rows.append(row)
+    with gzip.open(waveform_path, "wt", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    bundle = load_event_bundle(event_dir)
+
+    assert bundle.stations == []
+
+
+def test_load_event_bundle_ignores_component_mismatch_after_observation_cutoff(
+    tmp_path: Path,
+):
+    event_dir = _write_event_dir(tmp_path, event_name="future-grid-mismatch")
+    waveform_path = event_dir / "waveforms.csv.gz"
+    rows = []
+    with gzip.open(waveform_path, "rt", encoding="utf-8", newline="") as f:
+        rows.extend(csv.DictReader(f))
+    rows.extend(
+        [
+            {
+                "Station": "STA1",
+                "Time_UTC": "2025-01-07T01:08:37Z",
+                "Time_Offset_s": "200.0",
+                "Component": "E",
+                "Value_m": "999",
+                "Sampling_Hz": "10",
+                "Source_File": "future.txt",
+            },
+            {
+                "Station": "STA1",
+                "Time_UTC": "2025-01-07T01:08:37.1Z",
+                "Time_Offset_s": "200.1",
+                "Component": "N",
+                "Value_m": "-999",
+                "Sampling_Hz": "10",
+                "Source_File": "future.txt",
+            },
+        ]
+    )
+    with gzip.open(waveform_path, "wt", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+    causal = load_event_bundle(
+        event_dir,
+        waveform_available_before_sec=200.0,
+    )
+
+    assert len(causal.stations) == 1
+    assert causal.stations[0].t == pytest.approx([-1.0, 0.0, 1.0, 2.0])
+    assert causal.stations[0].dt == pytest.approx(1.0)
+    assert load_event_bundle(event_dir).stations == []
 
 
 def test_load_event_bundle_preserves_iquique_canonical_value_m(tmp_path: Path):
@@ -239,6 +306,192 @@ def test_station_sample_exposes_max_radial_cm(tmp_path: Path):
     assert float(sample["radial_peak_cm"]) > 0.0
 
 
+@pytest.mark.parametrize("phase", [0.89, 5.0e-7])
+def test_external_strict_grid_preserves_fractional_raw_phase_without_interpolation(
+    phase: float,
+):
+    config = _external_v2_config()
+    config["dataset"]["waveform"].update(
+        {
+            "duration_sec": 3.0,
+            "min_valid_fraction": 1.0,
+            "max_interpolation_gap_sec": 0.0,
+        }
+    )
+    config["dataset"]["baseline"].update(
+        {
+            "pre_event_start_sec": -2.0,
+            "pre_event_end_sec": 0.0,
+            "min_samples": 2,
+        }
+    )
+    times = phase + np.arange(-2.0, 3.0)
+    bundle = EventBundle(
+        event_name="Fractional Phase",
+        magnitude=7.0,
+        latitude=0.0,
+        longitude=0.0,
+        depth_km=10.0,
+        mechanism="reverse",
+        stations=[],
+    )
+    station = StationWaveform(
+        station="STA",
+        latitude=0.1,
+        longitude=0.0,
+        t=times,
+        e_m=np.zeros_like(times),
+        n_m=np.array([-0.02, -0.01, 0.01, 0.02, 0.03]),
+        u_m=np.zeros_like(times),
+        dt=1.0,
+    )
+
+    sample = _station_sample_from_bundle(bundle, station, config)
+
+    assert sample is not None
+    assert sample["waveform_start_sec"] == pytest.approx(phase)
+    assert sample["waveform_phase_adjusted"] is True
+    assert sample["waveform_max_interpolation_gap_sec"] == 0.0
+    assert np.all(sample["waveform_valid_mask"])
+    assert sample["radial"] == pytest.approx([0.025, 0.035, 0.045])
+    assert station.t == pytest.approx(times)
+
+
+def test_external_phase_adapter_does_not_slide_past_a_missing_origin_sample():
+    config = waveform_config_from_v2(_external_v2_config())
+    station = StationWaveform(
+        station="STA",
+        latitude=0.1,
+        longitude=0.0,
+        t=np.array([-1.0, 1.0, 2.0, 3.0]),
+        e_m=np.zeros(4),
+        n_m=np.zeros(4),
+        u_m=np.zeros(4),
+        dt=1.0,
+    )
+
+    effective = _phase_preserving_external_waveform_config(station, config)
+
+    assert effective.start_sec == 0.0
+
+    exact_station = StationWaveform(
+        station="EXACT",
+        latitude=0.1,
+        longitude=0.0,
+        t=np.array([-1.0, 0.0, 1.0, 2.0]),
+        e_m=np.zeros(4),
+        n_m=np.zeros(4),
+        u_m=np.zeros(4),
+        dt=1.0,
+    )
+    assert _phase_preserving_external_waveform_config(exact_station, config) is config
+
+    tolerance_station = StationWaveform(
+        station="TOLERANCE",
+        latitude=0.1,
+        longitude=0.0,
+        t=np.array([-1.000000005, -0.000000005, 0.999999995, 1.999999995]),
+        e_m=np.zeros(4),
+        n_m=np.zeros(4),
+        u_m=np.zeros(4),
+        dt=1.0,
+    )
+    assert (
+        _phase_preserving_external_waveform_config(tolerance_station, config)
+        is config
+    )
+
+
+def test_external_phase_adapter_ignores_future_cadence_changes():
+    raw_config = _external_v2_config()
+    raw_config["dataset"]["waveform"]["max_interpolation_gap_sec"] = 0.0
+    config = waveform_config_from_v2(raw_config)
+    prefix = 0.3 + np.arange(-2.0, 3.0)
+    regular = np.concatenate([prefix, 0.3 + np.arange(3.0, 30.0)])
+    irregular_future = np.concatenate([prefix, 3.3 + 0.1 * np.arange(300)])
+
+    def station(times: np.ndarray) -> StationWaveform:
+        return StationWaveform(
+            station="STA",
+            latitude=0.1,
+            longitude=0.0,
+            t=times,
+            e_m=np.zeros_like(times),
+            n_m=np.zeros_like(times),
+            u_m=np.zeros_like(times),
+            dt=float(np.median(np.diff(times))),
+        )
+
+    regular_config = _phase_preserving_external_waveform_config(
+        station(regular),
+        config,
+    )
+    irregular_config = _phase_preserving_external_waveform_config(
+        station(irregular_future),
+        config,
+    )
+
+    assert regular_config.start_sec == pytest.approx(0.3)
+    assert irregular_config.start_sec == pytest.approx(0.3)
+
+
+def test_external_fractional_phase_uses_200_raw_slots_without_future_tail():
+    config = _external_v2_config()
+    config["dataset"]["waveform"].update(
+        {
+            "duration_sec": 200.0,
+            "min_valid_fraction": 0.99,
+            "max_interpolation_gap_sec": 0.0,
+        }
+    )
+    config["dataset"]["baseline"].update(
+        {
+            "pre_event_start_sec": -60.0,
+            "pre_event_end_sec": 0.0,
+            "min_samples": 10,
+        }
+    )
+    config["dataset"]["filter"].update(
+        {"type": "lowpass", "cutoff_hz": 0.2, "num_taps": 7}
+    )
+    phase = 0.355
+    times = phase + np.arange(-10.0, 207.0)
+    north = 0.001 * np.sin(0.05 * times)
+    changed_tail = north.copy()
+    changed_tail[times >= 200.0] = 1.0e6
+    bundle = EventBundle(
+        event_name="Causal Fractional Phase",
+        magnitude=7.0,
+        latitude=0.0,
+        longitude=0.0,
+        depth_km=10.0,
+        mechanism="reverse",
+        stations=[],
+    )
+
+    def station(values: np.ndarray) -> StationWaveform:
+        return StationWaveform(
+            station="STA",
+            latitude=0.1,
+            longitude=0.0,
+            t=times,
+            e_m=np.zeros_like(times),
+            n_m=values,
+            u_m=np.zeros_like(times),
+            dt=1.0,
+        )
+
+    original = _station_sample_from_bundle(bundle, station(north), config)
+    mutated = _station_sample_from_bundle(bundle, station(changed_tail), config)
+
+    assert original is not None
+    assert mutated is not None
+    assert original["waveform_start_sec"] == pytest.approx(phase)
+    assert len(original["radial"]) == 200
+    assert int(np.count_nonzero(original["waveform_valid_mask"])) == 200
+    np.testing.assert_array_equal(original["radial"], mutated["radial"])
+
+
 def test_active_unseen_evaluation_uses_catalog_head(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -313,6 +566,13 @@ def test_active_unseen_evaluation_uses_catalog_head(
         "theta_deg": 30.0,
         "azimuth_deg": 45.0,
         "waveform_dt_sec": 1.0,
+        "waveform_start_sec": 0.0,
+        "waveform_phase_adjusted": False,
+        "waveform_max_interpolation_gap_sec": 0.0,
+        "waveform_valid_mask": np.ones(200, dtype=bool),
+        "valid_fraction": 1.0,
+        "raw_dt_sec": 1.0,
+        "baseline_source": "pre_event",
         "radial_peak_cm": 3.0,
     }
     monkeypatch.setattr(
