@@ -9,6 +9,7 @@ from src.evaluation.evaluate_unseen import evaluate_unseen_events
 from src.training.train import train
 from src.utils.config_v2 import (
     magnitude_penalty_from_config,
+    moment_linear_skip_from_config,
     stf_m_ref_from_config,
     stf_output_steps_from_config,
     validate_config_on_startup,
@@ -124,6 +125,44 @@ def test_magnitude_penalty_defaults_and_validates() -> None:
         config["training"]["stf_rate_loss"]["magnitude_penalty"] = value
         with pytest.raises(ValueError, match="magnitude_penalty"):
             validate_config_v2(config)
+
+
+def test_moment_linear_skip_defaults_and_accepts_factorized_candidate() -> None:
+    config = _minimal_v2()
+    assert moment_linear_skip_from_config(config) is False
+    validate_config_v2(config)
+
+    config["model"] = {
+        "stf_output_parameterization": "moment_shape_factorized",
+        "moment_linear_skip": True,
+    }
+    assert moment_linear_skip_from_config(config) is True
+    validate_config_v2(config)
+
+
+@pytest.mark.parametrize("value", ["false", "true", 0, 1, None, []])
+def test_moment_linear_skip_requires_a_strict_boolean(value: object) -> None:
+    config = _minimal_v2()
+    config["model"] = {
+        "stf_output_parameterization": "moment_shape_factorized",
+        "moment_linear_skip": value,
+    }
+
+    with pytest.raises(ValueError, match="moment_linear_skip.*boolean"):
+        moment_linear_skip_from_config(config)
+    with pytest.raises(ValueError, match="moment_linear_skip.*boolean"):
+        validate_config_v2(config)
+
+
+def test_moment_linear_skip_rejects_direct_parameterization() -> None:
+    config = _minimal_v2()
+    config["model"] = {
+        "stf_output_parameterization": "direct",
+        "moment_linear_skip": True,
+    }
+
+    with pytest.raises(ValueError, match="requires.*moment_shape_factorized"):
+        validate_config_v2(config)
 
 
 def test_manuscript_point_two_hz_filter_passes() -> None:

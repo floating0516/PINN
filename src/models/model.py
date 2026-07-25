@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from typing import Optional
 
 from src.utils.config_v2 import (
+    moment_linear_skip_from_config,
     radial_dynamic_range_stem_from_config,
     waveform_input_components_from_config,
 )
@@ -31,6 +32,24 @@ class RadialAsinhZeroConv(nn.Module):
             )
         compressed = torch.asinh(radial / 0.01)
         return F.conv1d(compressed, self.weight, bias=None, padding=3)
+
+
+class MomentLinearSkip(nn.Module):
+    """Zero-initialized, bias-free residual for the factorized log moment."""
+
+    def __init__(self, hidden_dim: int) -> None:
+        super().__init__()
+        self.weight = nn.Parameter(torch.zeros(1, hidden_dim))
+
+    def forward(self, pooled_features: torch.Tensor) -> torch.Tensor:
+        if (
+            pooled_features.ndim != 2
+            or pooled_features.size(1) != self.weight.size(1)
+        ):
+            raise ValueError(
+                'moment linear skip expects input shape (B, hidden_dim)'
+            )
+        return F.linear(pooled_features, self.weight, bias=None)
 
 
 class PINNModel(nn.Module):
@@ -90,6 +109,7 @@ class PINNModel(nn.Module):
                 'model.stf_output_parameterization must be direct or '
                 'moment_shape_factorized'
             )
+        self.use_moment_linear_skip = moment_linear_skip_from_config(config)
         self.factorized_source_dt_sec: float | None = None
         self.factorized_m_ref: float | None = None
         if self.stf_output_parameterization == 'moment_shape_factorized':
@@ -265,12 +285,18 @@ class PINNModel(nn.Module):
                     if not name.startswith('tangential_'):
                         parameter.requires_grad_(False)
 
-        # Register last so common initialization and RNG streams stay unchanged.
+        # Register zero residuals last to preserve common state and RNG streams.
         self.radial_asinh_zero_conv: RadialAsinhZeroConv | None
         if self.radial_dynamic_range_stem == 'asinh_residual':
             self.radial_asinh_zero_conv = RadialAsinhZeroConv(self.hidden_dim)
         else:
             self.radial_asinh_zero_conv = None
+
+        self.moment_linear_skip: MomentLinearSkip | None
+        if self.use_moment_linear_skip:
+            self.moment_linear_skip = MomentLinearSkip(self.hidden_dim)
+        else:
+            self.moment_linear_skip = None
 
     def _embed_backbone_input(self, backbone_input: torch.Tensor) -> torch.Tensor:
         pre_activation = self.embed[0](backbone_input)
@@ -351,9 +377,12 @@ class PINNModel(nn.Module):
             * self.factorized_source_dt_sec
         ).clamp_min(torch.finfo(positive_shape.dtype).tiny)
 
-        log10_moment = self.log10_moment_head(
-            sequence.mean(dim=1)
-        ).squeeze(-1)
+        pooled_features = sequence.mean(dim=1)
+        log10_moment = self.log10_moment_head(pooled_features).squeeze(-1)
+        if self.moment_linear_skip is not None:
+            log10_moment = log10_moment + self.moment_linear_skip(
+                pooled_features
+            ).squeeze(-1)
         ln_10 = math.log(10.0)
         log_rate_over_reference = (
             log10_moment.unsqueeze(1) * ln_10

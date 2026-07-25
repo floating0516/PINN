@@ -62,6 +62,7 @@ from src.training.loss_stf_rate_v2 import STFRateWaveformLossV2  # noqa: E402
 from src.training.train import _prepare_v2_batch  # noqa: E402
 from src.utils.config_v2 import (  # noqa: E402
     magnitude_penalty_from_config,
+    moment_linear_skip_from_config,
     validate_config_v2,
 )
 from src.utils.device import get_preferred_device  # noqa: E402
@@ -81,6 +82,7 @@ EVENT_BALANCED_SAMPLING_AXIS = "event_balanced_sampling"
 EVENT_BALANCE_ESTIMATOR_AXIS = "event_balance_estimator"
 MAGNITUDE_PENALTY_AXIS = "magnitude_penalty"
 EVENT_BALANCE_EXPONENT_AXIS = "event_balance_exponent"
+MOMENT_LINEAR_SKIP_AXIS = "moment_linear_skip"
 STATION_UNIFORM_ESTIMATOR = "station_uniform"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
@@ -111,6 +113,10 @@ VARIANT_AXES = {
         "baseline": 1.0,
         "candidate": 0.5,
     },
+    MOMENT_LINEAR_SKIP_AXIS: {
+        "baseline": False,
+        "candidate": True,
+    },
 }
 VARIANT_AXIS_PATHS = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: ("model", "stf_output_parameterization"),
@@ -124,6 +130,7 @@ VARIANT_AXIS_PATHS = {
         "magnitude_penalty",
     ),
     EVENT_BALANCE_EXPONENT_AXIS: ("training", "event_balance_exponent"),
+    MOMENT_LINEAR_SKIP_AXIS: ("model", "moment_linear_skip"),
 }
 # Backward-compatible alias for the Phase23 campaign and its persisted tests.
 VARIANTS = VARIANT_AXES[STF_OUTPUT_PARAMETERIZATION_AXIS]
@@ -151,10 +158,27 @@ PHASE27_INCUMBENT_CHECKPOINT_SHA256_BY_SEED = {
     42: "1f596c161c9497961d5e3af3f903945b66a33097479edf6257e92b71980c8a91",
     73: "6e0587a8392660fe06d0c6b36343a1cb6fb274ac88b3fbe5b73a0c286399480f",
 }
+PHASE27_INCUMBENT_OBJECTIVE_WEIGHT_SHA256_BY_SEED = {
+    17: "3b365d2ffaa4b31da6802109d2948e8238aa9944e2321a86eea8d57f0e935f2d",
+    42: "63fc5b066b74950a04c92aeb802504dcd35c80f45f453f34ea554ebdafc9ff80",
+    73: "e74873eae50a4445ba8738ce017213fb25da7fd86713e8ab1e20c7216aa2aeec",
+}
+PHASE27_INCUMBENT_SAMPLE_WEIGHT_SHA256_BY_SEED = {
+    17: "c556a533e2a6c96888f5cb3927aab4c48af5575746a1d5c14ca8123f38ec8f9d",
+    42: "23c634370084be979caee0d28329b6c4be38c97dc2d1c049fc3fdc582bafc9e5",
+    73: "eab66f0502dc9632c8ccf9cad01e2f2f8fdbc30194442b691f8a341e116d6acd",
+}
 PHASE27_INCUMBENT_SELECTED_SEED = 17
 PHASE27_INCUMBENT_VALIDATION = PHASE27_INCUMBENT_VALIDATION_BY_SEED[
     PHASE27_INCUMBENT_SELECTED_SEED
 ]
+FROZEN_PHASE27_INCUMBENT_AXES = frozenset(
+    {EVENT_BALANCE_EXPONENT_AXIS, MOMENT_LINEAR_SKIP_AXIS}
+)
+PHASE30_PARAMETER_COUNT_BY_VARIANT = {
+    "baseline": 1_010_850,
+    "candidate": 1_010_978,
+}
 EXTERNAL_EVENT_NAMES = (
     "iquique-aftershock-2014-chile",
     "nepal-aftershock-2015",
@@ -351,6 +375,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
     parameterization = model.get("stf_output_parameterization")
     scheduler_t0 = training.get("scheduler_T0")
     stem_is_explicit = "radial_dynamic_range_stem" in model
+    moment_skip_is_explicit = "moment_linear_skip" in model
     estimator_is_explicit = "event_balance_estimator" in training
     exponent_is_explicit = "event_balance_exponent" in training
     loss_config = training.get("stf_rate_loss")
@@ -367,6 +392,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 parameterization != "moment_shape_factorized"
                 or scheduler_t0 != 15
                 or stem_is_explicit
+                or moment_skip_is_explicit
                 or estimator_is_explicit
                 or exponent_is_explicit
                 or magnitude_penalty_is_explicit
@@ -383,6 +409,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 parameterization != "moment_shape_factorized"
                 or scheduler_t0 != 15
                 or stem_is_explicit
+                or moment_skip_is_explicit
                 or exponent_is_explicit
                 or magnitude_penalty_is_explicit
                 or training.get("event_balanced_sampling") is not True
@@ -401,6 +428,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 parameterization != "moment_shape_factorized"
                 or scheduler_t0 != 15
                 or stem_is_explicit
+                or moment_skip_is_explicit
                 or exponent_is_explicit
                 or training.get("event_balanced_sampling") is not True
                 or training.get("event_balance_estimator")
@@ -420,6 +448,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 parameterization != "moment_shape_factorized"
                 or scheduler_t0 != 15
                 or stem_is_explicit
+                or moment_skip_is_explicit
                 or training.get("event_balanced_sampling") is not True
                 or training.get("event_balance_estimator")
                 != INVERSE_COUNT_FULL_DATA_ESTIMATOR
@@ -437,12 +466,36 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                     "magnitude penalty"
                 )
             return EVENT_BALANCE_EXPONENT_AXIS
+        if explicit_axis == MOMENT_LINEAR_SKIP_AXIS:
+            if (
+                parameterization != "moment_shape_factorized"
+                or scheduler_t0 != 15
+                or stem_is_explicit
+                or not moment_skip_is_explicit
+                or model.get("moment_linear_skip") is not False
+                or training.get("event_balanced_sampling") is not True
+                or training.get("event_balance_estimator")
+                != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                or exponent_is_explicit
+                or magnitude_penalty_is_explicit
+                or loss_config.get("magnitude_penalty", "squared") != "squared"
+            ):
+                raise ValueError(
+                    "Phase30 moment-linear-skip baseline requires factorized "
+                    "STF, scheduler_T0=15, the original radial stem, "
+                    "event_balanced_sampling=true, "
+                    "event_balance_estimator='inverse_count_full_data', the "
+                    "default p=1 and squared magnitude penalty, and "
+                    "model.moment_linear_skip=false"
+                )
+            return MOMENT_LINEAR_SKIP_AXIS
         else:
             raise ValueError(f"unsupported formal campaign axis: {explicit_axis!r}")
     if (
         parameterization == "direct"
         and scheduler_t0 == 15
         and not stem_is_explicit
+        and not moment_skip_is_explicit
         and not estimator_is_explicit
         and not exponent_is_explicit
         and not magnitude_penalty_is_explicit
@@ -451,6 +504,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
     if (
         parameterization == "moment_shape_factorized"
         and scheduler_t0 == 15
+        and not moment_skip_is_explicit
         and not estimator_is_explicit
         and not exponent_is_explicit
         and not magnitude_penalty_is_explicit
@@ -468,7 +522,8 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         "Phase24 factorized/T0=15 baseline or the Phase25 factorized/T0=15 "
         "baseline with explicit radial dynamic-range stem or the explicitly "
         "marked Phase26/Phase27 event-balance baselines or Phase28 magnitude "
-        "penalty baseline or Phase29 event-balance exponent baseline"
+        "penalty baseline or Phase29 event-balance exponent baseline or "
+        "Phase30 moment-linear-skip baseline"
     )
 
 
@@ -567,6 +622,7 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             EVENT_BALANCE_ESTIMATOR_AXIS,
             MAGNITUDE_PENALTY_AXIS,
             EVENT_BALANCE_EXPONENT_AXIS,
+            MOMENT_LINEAR_SKIP_AXIS,
         },
     )
     variants = build_variant_configs(config)
@@ -590,6 +646,27 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             raise ValueError(
                 "Phase29 p=1 baseline differs from the frozen Phase27 "
                 f"candidate: {sorted(differences)}"
+            )
+    if variant_axis == MOMENT_LINEAR_SKIP_AXIS:
+        phase27_config = _load_yaml(
+            PROJECT_ROOT
+            / "configs"
+            / "experiments"
+            / "manuscript_station_stf_usgs_event_loss_weighted.yaml"
+        )
+        phase27_incumbent = build_variant_configs(phase27_config)["candidate"]
+        phase30_baseline = copy.deepcopy(variants["baseline"])
+        phase27_incumbent.pop("campaign")
+        phase30_baseline.pop("campaign")
+        phase30_baseline["model"].pop("moment_linear_skip")
+        if phase30_baseline != phase27_incumbent:
+            differences = _config_diff_paths(
+                phase27_incumbent,
+                phase30_baseline,
+            )
+            raise ValueError(
+                "Phase30 baseline differs from the frozen Phase27 candidate: "
+                f"{sorted(differences)}"
             )
 
 
@@ -1157,6 +1234,7 @@ def _smoke_one_device(
         "magnitude_penalty": magnitude_penalty_from_formal_config(
             config
         ),
+        "moment_linear_skip": moment_linear_skip_from_config(config),
         "sample_weights_exercised": sample_weights is not None,
         "sample_weight_probe": (
             dict(sample_weight_probe) if sample_weight_probe is not None else None
@@ -1180,6 +1258,7 @@ def run_smoke(
         return completed
     preflight = _require_stage(output_root, "preflight")
     config, _ = _preflight_config(preflight)
+    variant_axis = variant_axis_from_config(config)
     variants = build_variant_configs(config)
     dataset = CorrectedEarthquakeDataset(config)
     split_manifests = {
@@ -1201,12 +1280,24 @@ def run_smoke(
             variant_config,
         )
         for device in (torch.device("cpu"), torch.device("cuda")):
-            results[variant][device.type] = _smoke_one_device(
+            result = _smoke_one_device(
                 variant_config,
                 dataset=dataset,
                 device=device,
                 sample_weight_probe=sample_weight_probe,
             )
+            if (
+                variant_axis == MOMENT_LINEAR_SKIP_AXIS
+                and int(result["parameter_count"])
+                != PHASE30_PARAMETER_COUNT_BY_VARIANT[variant]
+            ):
+                raise ValueError(
+                    "Phase30 parameter count changed for "
+                    f"{variant}: expected="
+                    f"{PHASE30_PARAMETER_COUNT_BY_VARIANT[variant]}, "
+                    f"actual={result['parameter_count']}"
+                )
+            results[variant][device.type] = result
     summary = {
         "stage": "smoke",
         "status": "complete",
@@ -1416,12 +1507,71 @@ def _phase29_sampling_manifest_is_valid(
     return True
 
 
+def _phase30_sampling_manifest_is_valid(
+    manifest: Mapping[str, Any],
+    *,
+    seed: int,
+) -> bool:
+    if seed not in SEEDS:
+        return False
+    normalization = EXPECTED_SPLIT_COUNTS[0] / EXPECTED_EVENT_COUNT
+    expected_weight_minimum = (
+        normalization / EXPECTED_TRAIN_EVENT_STATION_COUNT_MAXIMUM
+    )
+    try:
+        numerical_values = (
+            (float(manifest["expected_unique_record_count"]), 1788.0),
+            (float(manifest["expected_unique_record_fraction"]), 1.0),
+            (float(manifest["objective_weight_minimum"]), expected_weight_minimum),
+            (float(manifest["objective_weight_maximum"]), normalization),
+            (float(manifest["event_objective_mass_minimum"]), normalization),
+            (float(manifest["event_objective_mass_maximum"]), normalization),
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    if any(
+        not math.isfinite(actual)
+        or not math.isclose(actual, expected, rel_tol=1.0e-12, abs_tol=1.0e-12)
+        for actual, expected in numerical_values
+    ):
+        return False
+    return (
+        int(manifest.get("schema_version", -1)) == 2
+        and "event_balance_exponent" not in manifest
+        and manifest.get("mode") == "event_equal_inverse_count_full_data"
+        and manifest.get("event_balanced_sampling") is True
+        and manifest.get("event_balance_estimator")
+        == INVERSE_COUNT_FULL_DATA_ESTIMATOR
+        and manifest.get("sampler_class") == "RandomSampler"
+        and manifest.get("replacement") is False
+        and int(manifest.get("draw_count", -1)) == EXPECTED_SPLIT_COUNTS[0]
+        and int(manifest.get("record_count", -1)) == EXPECTED_SPLIT_COUNTS[0]
+        and int(manifest.get("event_count", -1)) == EXPECTED_EVENT_COUNT
+        and int(manifest.get("event_record_count_minimum", -1))
+        == EXPECTED_TRAIN_EVENT_STATION_COUNT_MINIMUM
+        and int(manifest.get("event_record_count_maximum", -1))
+        == EXPECTED_TRAIN_EVENT_STATION_COUNT_MAXIMUM
+        and int(manifest.get("optimizer_step_count", -1)) == 28
+        and manifest.get("loss_weights_applied") is True
+        and manifest.get("objective_weight_formula") == "N/(E*n_event)"
+        and manifest.get("objective_reduction")
+        == "mean(sample_weight * per_sample_loss)"
+        and manifest.get("objective_weight_sha256")
+        == PHASE27_INCUMBENT_OBJECTIVE_WEIGHT_SHA256_BY_SEED[seed]
+        and manifest.get("sample_weight_sha256")
+        == PHASE27_INCUMBENT_SAMPLE_WEIGHT_SHA256_BY_SEED[seed]
+        and manifest.get("sampling_weight_sha256")
+        == PHASE27_INCUMBENT_SAMPLE_WEIGHT_SHA256_BY_SEED[seed]
+    )
+
+
 def _seed_summary_is_valid(
     summary: Mapping[str, Any],
     *,
     require_sampling: bool = False,
     expected_magnitude_penalty: str | None = None,
     expected_event_balance_exponent: float | None = None,
+    expected_moment_linear_skip: bool | None = None,
     expected_variant: str | None = None,
     expected_seed: int | None = None,
     expected_split_assignment_sha256: str | None = None,
@@ -1437,6 +1587,12 @@ def _seed_summary_is_valid(
             expected_magnitude_penalty is not None
             and summary.get("magnitude_penalty")
             != expected_magnitude_penalty
+        ):
+            return False
+        if (
+            expected_moment_linear_skip is not None
+            and summary.get("moment_linear_skip")
+            is not expected_moment_linear_skip
         ):
             return False
         if expected_event_balance_exponent is not None:
@@ -1459,6 +1615,26 @@ def _seed_summary_is_valid(
                 _phase29_sampling_manifest_is_valid(
                     sampling_manifest,
                     expected_exponent=expected_event_balance_exponent,
+                )
+            ):
+                return False
+        if expected_moment_linear_skip is not None:
+            if expected_seed is None:
+                return False
+            summary_exponent = summary.get("event_balance_exponent")
+            if (
+                isinstance(summary_exponent, bool)
+                or not isinstance(summary_exponent, (int, float))
+                or float(summary_exponent) != 1.0
+            ):
+                return False
+            sampling_manifest = _load_json(
+                Path(str(summary["sampling"]["path"]))
+            )
+            if not isinstance(sampling_manifest, Mapping) or not (
+                _phase30_sampling_manifest_is_valid(
+                    sampling_manifest,
+                    seed=expected_seed,
                 )
             ):
                 return False
@@ -1531,6 +1707,7 @@ def _train_one_seed(
                 EVENT_BALANCE_ESTIMATOR_AXIS,
                 MAGNITUDE_PENALTY_AXIS,
                 EVENT_BALANCE_EXPONENT_AXIS,
+                MOMENT_LINEAR_SKIP_AXIS,
             }
         )
         expected_magnitude_penalty = (
@@ -1543,14 +1720,21 @@ def _train_one_seed(
             if campaign_axis == EVENT_BALANCE_EXPONENT_AXIS
             else None
         )
+        expected_moment_linear_skip = (
+            moment_linear_skip_from_config(config)
+            if campaign_axis == MOMENT_LINEAR_SKIP_AXIS
+            else None
+        )
         expected_git_commit = (
             current_git_commit(PROJECT_ROOT)
             if expected_event_balance_exponent is not None
+            or expected_moment_linear_skip is not None
             else None
         )
         strict_resume = (
             expected_magnitude_penalty is not None
             or expected_event_balance_exponent is not None
+            or expected_moment_linear_skip is not None
         )
         expected_runtime_config = (
             _runtime_config(
@@ -1567,6 +1751,7 @@ def _train_one_seed(
             require_sampling=require_sampling,
             expected_magnitude_penalty=expected_magnitude_penalty,
             expected_event_balance_exponent=expected_event_balance_exponent,
+            expected_moment_linear_skip=expected_moment_linear_skip,
             expected_variant=variant if strict_resume else None,
             expected_seed=seed if strict_resume else None,
             expected_split_assignment_sha256=(
@@ -1636,6 +1821,7 @@ def _train_one_seed(
         "magnitude_penalty": magnitude_penalty_from_formal_config(
             config
         ),
+        "moment_linear_skip": moment_linear_skip_from_config(config),
         "seed": seed,
         "git_commit": current_git_commit(PROJECT_ROOT),
         **checkpoint_selection,
@@ -1691,7 +1877,7 @@ def run_train(
             )
         selected_seed = select_seed_by_validation(seed_summaries)
         if (
-            variant_axis == EVENT_BALANCE_EXPONENT_AXIS
+            variant_axis in FROZEN_PHASE27_INCUMBENT_AXES
             and variant == "baseline"
         ):
             incumbent_reproduction = phase29_incumbent_reproduction(seed_summaries)
@@ -1703,8 +1889,13 @@ def run_train(
             )
             incumbent_reproduction_artifact = _artifact(reproduction_path)
             if not incumbent_reproduction["passed"]:
+                campaign_name = (
+                    "Phase29 p=1"
+                    if variant_axis == EVENT_BALANCE_EXPONENT_AXIS
+                    else "Phase30 moment-linear-skip"
+                )
                 raise ValueError(
-                    "Phase29 p=1 baseline did not exactly reproduce the frozen "
+                    f"{campaign_name} baseline did not exactly reproduce the frozen "
                     "Phase27 incumbent; refusing to train or compare the candidate"
                 )
         selection = {
@@ -1738,6 +1929,9 @@ def run_train(
             "magnitude_penalty": magnitude_penalty_from_formal_config(
                 variant_config
             ),
+            "moment_linear_skip": moment_linear_skip_from_config(
+                variant_config
+            ),
             "scientific_diff_from_baseline": sorted(
                 _config_diff_paths(variants["baseline"], variant_config)
             ),
@@ -1762,9 +1956,9 @@ def run_train(
         "external_evaluated": False,
         "variants": variant_summaries,
     }
-    if variant_axis == EVENT_BALANCE_EXPONENT_AXIS:
+    if variant_axis in FROZEN_PHASE27_INCUMBENT_AXES:
         if incumbent_reproduction is None or incumbent_reproduction_artifact is None:
-            raise RuntimeError("Phase29 incumbent reproduction gate was not evaluated")
+            raise RuntimeError("incumbent reproduction gate was not evaluated")
         summary["incumbent_reproduction"] = {
             **incumbent_reproduction,
             "artifact": incumbent_reproduction_artifact,
@@ -1783,26 +1977,37 @@ def candidate_validation_improves(train_summary: Mapping[str, Any]) -> bool:
     candidate = float(variants["candidate"]["seeds"][candidate_seed][VALIDATION_METRIC])
     if not math.isfinite(baseline) or not math.isfinite(candidate):
         raise ValueError("selected validation metrics must be finite")
-    if train_summary.get("variant_axis") == EVENT_BALANCE_EXPONENT_AXIS:
+    if train_summary.get("variant_axis") in FROZEN_PHASE27_INCUMBENT_AXES:
+        campaign_name = (
+            "Phase29"
+            if train_summary.get("variant_axis") == EVENT_BALANCE_EXPONENT_AXIS
+            else "Phase30"
+        )
         reproduction = train_summary.get("incumbent_reproduction")
         if not isinstance(reproduction, Mapping) or reproduction.get("passed") is not True:
-            raise ValueError("Phase29 incumbent reproduction gate is missing or failed")
+            raise ValueError(
+                f"{campaign_name} incumbent reproduction gate is missing or failed"
+            )
         reproduction_path = _validate_artifact(
             reproduction["artifact"],
-            label="Phase29 incumbent reproduction",
+            label=f"{campaign_name} incumbent reproduction",
         )
         persisted_reproduction = _load_json(reproduction_path)
         recorded_reproduction = {
             key: value for key, value in reproduction.items() if key != "artifact"
         }
         if persisted_reproduction != recorded_reproduction:
-            raise ValueError("Phase29 incumbent reproduction artifact changed")
+            raise ValueError(
+                f"{campaign_name} incumbent reproduction artifact changed"
+            )
         baseline_rows = {
             seed: variants["baseline"]["seeds"][str(seed)] for seed in SEEDS
         }
         expected_reproduction = phase29_incumbent_reproduction(baseline_rows)
         if expected_reproduction != persisted_reproduction:
-            raise ValueError("Phase29 incumbent reproduction evidence is inconsistent")
+            raise ValueError(
+                f"{campaign_name} incumbent reproduction evidence is inconsistent"
+            )
         return candidate < PHASE27_INCUMBENT_VALIDATION
     return candidate < baseline
 
@@ -2006,7 +2211,7 @@ def run_internal(
     validation_passed = candidate_validation_improves(train_summary)
     baseline_seed = _selected_seed_summary(train_summary, "baseline")
     candidate_seed = _selected_seed_summary(train_summary, "candidate")
-    if train_summary.get("variant_axis") == EVENT_BALANCE_EXPONENT_AXIS:
+    if train_summary.get("variant_axis") in FROZEN_PHASE27_INCUMBENT_AXES:
         validation_gate = {
             "passed": validation_passed,
             "baseline_reproduction": float(baseline_seed[VALIDATION_METRIC]),
