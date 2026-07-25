@@ -1,0 +1,108 @@
+{
+  "analysis_contract": {
+    "ensemble_used": false,
+    "observation_horizons_sec": [
+      20.0,
+      40.0,
+      60.0,
+      80.0,
+      100.0,
+      120.0,
+      140.0,
+      160.0,
+      180.0,
+      200.0
+    ],
+    "processing_delay_sec": 5.0,
+    "right_censor_horizon_sec": 200.0,
+    "selected_seed": 17,
+    "station_selection_causal": false,
+    "target_absolute_error_mw": 0.15,
+    "waveform_prefix_causal": true
+  },
+  "inputs": {
+    "candidate_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/train/candidate/selection.json",
+      "sha256": "a95a307f7a7ade41a06425292f95c887db9eb58a35db3e50f82daa81b676411b"
+    },
+    "delayed_prefix_cohort": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/delayed_prefix/cohort_contract.json",
+      "sha256": "6e345071f7d9a75cd511e2bd5ee46eec3993cc4665622c05f518fc1c0c5b04bb"
+    },
+    "delayed_prefix_event_predictions": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/delayed_prefix/event_predictions.csv",
+      "sha256": "6a7551a8908eeff741b224ac61a7bf359fc40fec461e9abd3657359ecedd6fa2"
+    },
+    "delayed_prefix_horizon_metrics": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/delayed_prefix/horizon_metrics.json",
+      "sha256": "a7f080155f886dd3e9a3b12850c5260ea4c60711a2369fe748ede9c55c94fb76"
+    },
+    "generator_script": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/scripts/plotting/plot_phase27_magnitude_convergence.py",
+      "sha256": "53379bafad9a3d7bb93d424bc87b696cd56849ec6976996b36707ac88304928a"
+    },
+    "internal_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/summary.json",
+      "sha256": "6c86e7596272639f6a007783083febb4bc4262c93a25b8e479efb6136f2ec198"
+    },
+    "selected_event_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/selected_seed_17/event_summary.csv",
+      "sha256": "24190f9fa0922e6de7529da5fce57144426affd9d248848b4769c7c9445c80e9"
+    },
+    "selected_metrics": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/selected_seed_17/metrics.json",
+      "sha256": "bb87c937c450973191fa3da94bf41b4d09d541d571f34253bf67a458aaa17d11"
+    },
+    "selected_result_registry": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/selected_seed_17/result_registry.json",
+      "sha256": "bb7cde75e4d2a9a176bdc5e282b5cfbde7d422f77f15f581977d6338d7902cde"
+    },
+    "train_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/train/summary.json",
+      "sha256": "0ba8832166cd67e8ebf1e8e63c99b347c12339a1345fc94982ee2e43953682b3"
+    }
+  },
+  "outputs": {
+    "01_magnitude_group_convergence.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted/figures/01_magnitude_group_convergence.pdf",
+      "sha256": "913bed61d3e5bc2b9a2a65e2544ada248639f49ac8b1ec1a444c4d649cab8c6f"
+    },
+    "01_magnitude_group_convergence.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted/figures/01_magnitude_group_convergence.png",
+      "sha256": "09311eb6b446f4039e5a649fe032c0c3ab746b935fc5b321abd07e6eb8864d2d"
+    },
+    "02_high_magnitude_event_trajectories.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted/figures/02_high_magnitude_event_trajectories.pdf",
+      "sha256": "94a623cc90fa6bf07bf17f907ee842b6a53e7765dc2fbb76ed23f502ddf538cc"
+    },
+    "02_high_magnitude_event_trajectories.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted/figures/02_high_magnitude_event_trajectories.png",
+      "sha256": "6a6fb4f1553148577364773a2da713bfaa5f87f64570304b1445f84b77504666"
+    },
+    "03_convergence_time_by_magnitude.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted/figures/03_convergence_time_by_magnitude.pdf",
+      "sha256": "c95c5fbe6db418816dcafbf3ecb0ab35d360de3dffbdb5a61654ce956a21f5a1"
+    },
+    "03_convergence_time_by_magnitude.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted/figures/03_convergence_time_by_magnitude.png",
+      "sha256": "acaf39a74e8cb4f36209eb0b6967e0adb54a4847f2395918fc6fb2ece1a1e4ba"
+    },
+    "README.md": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted/README.md",
+      "sha256": "cb196d99c1beaca149c5077c897185403eb8f5a1d4464eb094d6bdb518c7f16c"
+    },
+    "event_convergence_summary.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted/event_convergence_summary.csv",
+      "sha256": "0dccb81b38387d685fec1f25a6332b3af2d5ca08eef46e57a7c8a1ead3d0218f"
+    },
+    "event_predictions_by_horizon.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted/event_predictions_by_horizon.csv",
+      "sha256": "81c11a58c390cf542a337fe2db73fdd6cdf5107e5b9707ec5da26c689baca047"
+    },
+    "magnitude_group_horizon_metrics.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted/magnitude_group_horizon_metrics.csv",
+      "sha256": "13659e5adff238b47df610139329f5df6e7e29dbbc358123ecce44d72742790d"
+    }
+  },
+  "schema_version": 1
+}
