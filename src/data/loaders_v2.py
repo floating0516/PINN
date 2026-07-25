@@ -24,6 +24,7 @@ from src.data.splits import (
     make_event_group_split,
     make_event_inverse_count_weights,
     make_within_event_station_split,
+    resolve_event_balance_exponent,
     resolve_event_balance_estimator,
 )
 
@@ -284,6 +285,7 @@ def get_data_loaders_v2(
     shuffle = True
     event_balanced_sampling = bool(training.get("event_balanced_sampling", False))
     event_balance_estimator = resolve_event_balance_estimator(training)
+    event_balance_exponent = resolve_event_balance_exponent(training)
     event_balance_weights_by_event: dict[str, float] | None = None
     if event_balanced_sampling:
         train_events = [events[index] for index in split.train_indices]
@@ -299,7 +301,10 @@ def get_data_loaders_v2(
             )
             shuffle = False
         elif event_balance_estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR:
-            record_weights = make_event_inverse_count_weights(train_events)
+            record_weights = make_event_inverse_count_weights(
+                train_events,
+                exponent=event_balance_exponent,
+            )
             event_balance_weights_by_event = dict(
                 zip(train_events, record_weights, strict=True)
             )
@@ -318,6 +323,11 @@ def get_data_loaders_v2(
         train_loader,
         "event_balance_weights_by_event",
         event_balance_weights_by_event,
+    )
+    setattr(
+        train_loader,
+        "event_balance_exponent",
+        event_balance_exponent,
     )
     validation_loader = DataLoader(
         validation_dataset,

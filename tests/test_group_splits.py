@@ -1,4 +1,4 @@
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 import pytest
 import torch
@@ -14,6 +14,7 @@ from src.data.splits import (
     make_event_balanced_weights,
     make_event_group_split,
     make_event_inverse_count_weights,
+    resolve_event_balance_exponent,
     resolve_event_balance_estimator,
 )
 
@@ -67,6 +68,79 @@ def test_inverse_count_weights_have_unit_mean_and_equal_event_mass() -> None:
     assert sum(weights[:3]) == pytest.approx(len(events) / 2)
     assert weights[3] == pytest.approx(len(events) / 2)
     assert weights == pytest.approx([2.0 / 3.0, 2.0 / 3.0, 2.0 / 3.0, 2.0])
+
+
+def test_inverse_count_exponent_one_is_exactly_backward_compatible() -> None:
+    events = ["A", "A", "A", "B", "C", "C"]
+    counts = Counter(events)
+    normalization = len(events) / len(counts)
+    legacy_weights = [normalization / counts[event] for event in events]
+
+    assert make_event_inverse_count_weights(events) == legacy_weights
+    assert (
+        make_event_inverse_count_weights(events, exponent=1.0)
+        == legacy_weights
+    )
+
+
+def test_tempered_inverse_count_weights_have_unit_mean_and_analytic_mass() -> None:
+    events = ["A", "A", "A", "B"]
+    exponent = 0.5
+    counts = Counter(events)
+    normalization = len(events) / sum(
+        count ** (1.0 - exponent) for count in counts.values()
+    )
+
+    weights = make_event_inverse_count_weights(events, exponent=exponent)
+
+    expected = [normalization * counts[event] ** (-exponent) for event in events]
+    assert weights == pytest.approx(expected)
+    assert sum(weights) == pytest.approx(len(events))
+    assert sum(weights[:3]) == pytest.approx(
+        normalization * counts["A"] ** (1.0 - exponent)
+    )
+    assert weights[3] == pytest.approx(
+        normalization * counts["B"] ** (1.0 - exponent)
+    )
+    assert sum(weights[:3]) > weights[3]
+
+
+def test_event_balance_exponent_defaults_and_validates() -> None:
+    assert resolve_event_balance_exponent({}) == 1.0
+    assert resolve_event_balance_exponent(
+        {
+            "event_balanced_sampling": True,
+            "event_balance_estimator": INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+            "event_balance_exponent": 0.5,
+        }
+    ) == 0.5
+
+    for value in (True, "0.5", float("nan"), float("inf"), -0.1, 1.1):
+        with pytest.raises(ValueError, match="event_balance_exponent"):
+            resolve_event_balance_exponent(
+                {"event_balance_exponent": value}
+            )
+
+    for training in (
+        {
+            "event_balanced_sampling": False,
+            "event_balance_exponent": 0.5,
+        },
+        {
+            "event_balanced_sampling": True,
+            "event_balance_estimator": REPLACEMENT_SAMPLING_ESTIMATOR,
+            "event_balance_exponent": 0.5,
+        },
+    ):
+        with pytest.raises(ValueError, match="requires.*inverse_count_full_data"):
+            resolve_event_balance_exponent(training)
+
+    assert resolve_event_balance_exponent(
+        {
+            "event_balanced_sampling": False,
+            "event_balance_exponent": 1.0,
+        }
+    ) == 1.0
 
 
 def test_event_balance_estimator_defaults_to_legacy_and_rejects_conflicts() -> None:
@@ -421,6 +495,97 @@ def test_inverse_count_full_data_sampler_covers_all_records_and_resumes(
     assert _sampled_stations(resumed) == second_epoch
 
 
+def test_inverse_count_exponent_one_loader_is_exactly_backward_compatible(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dataset(monkeypatch)
+    default_config = _loader_config("grouped_event")
+    default_config["training"][
+        "event_balance_estimator"
+    ] = INVERSE_COUNT_FULL_DATA_ESTIMATOR
+    explicit_config = _loader_config("grouped_event")
+    explicit_config["training"].update(
+        event_balance_estimator=INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+        event_balance_exponent=1.0,
+    )
+
+    default, _, _, _ = get_data_loaders_v2(default_config)
+    explicit, _, _, _ = get_data_loaders_v2(explicit_config)
+
+    assert default.event_balance_exponent == 1.0
+    assert explicit.event_balance_exponent == 1.0
+    assert (
+        default.event_balance_weights_by_event
+        == explicit.event_balance_weights_by_event
+    )
+    assert torch.equal(
+        default.generator.get_state(),
+        explicit.generator.get_state(),
+    )
+
+
+def test_tempered_inverse_count_weights_are_train_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dataset(monkeypatch)
+    baseline_config = _loader_config("grouped_event")
+    baseline_config["training"][
+        "event_balance_estimator"
+    ] = INVERSE_COUNT_FULL_DATA_ESTIMATOR
+    config = _loader_config("grouped_event")
+    config["training"].update(
+        event_balance_estimator=INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+        event_balance_exponent=0.5,
+    )
+
+    baseline_train, baseline_validation, baseline_test, baseline_manifest = (
+        get_data_loaders_v2(baseline_config)
+    )
+    train, validation, test, manifest = get_data_loaders_v2(config)
+
+    assert train.event_balance_exponent == 0.5
+    assert manifest == baseline_manifest
+    assert validation.dataset.indices == baseline_validation.dataset.indices
+    assert test.dataset.indices == baseline_test.dataset.indices
+    assert torch.equal(
+        train.generator.get_state(),
+        baseline_train.generator.get_state(),
+    )
+    assert not hasattr(validation, "event_balance_exponent")
+    assert not hasattr(test, "event_balance_exponent")
+    assert not hasattr(validation, "event_balance_weights_by_event")
+    assert not hasattr(test, "event_balance_weights_by_event")
+
+    events = [
+        str(train.dataset.dataset.samples[index]["event"])
+        for index in train.dataset.indices
+    ]
+    counts = Counter(events)
+    assert len(set(counts.values())) > 1
+    normalization = len(events) / sum(
+        count ** 0.5 for count in counts.values()
+    )
+    expected_weights = {
+        event: normalization * count ** -0.5
+        for event, count in counts.items()
+    }
+    assert train.event_balance_weights_by_event == pytest.approx(
+        expected_weights
+    )
+    event_masses = {
+        event: count * train.event_balance_weights_by_event[event]
+        for event, count in counts.items()
+    }
+    assert sum(event_masses.values()) == pytest.approx(len(events))
+    assert event_masses == pytest.approx(
+        {
+            event: normalization * count ** 0.5
+            for event, count in counts.items()
+        }
+    )
+    assert min(event_masses.values()) < max(event_masses.values())
+
+
 def test_loader_rejects_inverse_count_estimator_when_balancing_is_disabled(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -432,4 +597,15 @@ def test_loader_rejects_inverse_count_estimator_when_balancing_is_disabled(
     )
 
     with pytest.raises(ValueError, match="requires.*event_balanced_sampling=true"):
+        get_data_loaders_v2(config)
+
+
+def test_loader_rejects_tempered_exponent_for_replacement_sampling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dataset(monkeypatch)
+    config = _loader_config("grouped_event")
+    config["training"]["event_balance_exponent"] = 0.5
+
+    with pytest.raises(ValueError, match="requires.*inverse_count_full_data"):
         get_data_loaders_v2(config)

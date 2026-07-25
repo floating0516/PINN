@@ -155,6 +155,54 @@ def test_event_balance_estimator_is_validated_with_its_enable_flag() -> None:
     validate_config_v2(config)
 
 
+def test_event_balance_exponent_defaults_accepts_tempering_and_validates() -> None:
+    config = _minimal_v2()
+    validate_config_v2(config)
+
+    config["training"].update(
+        event_balanced_sampling=True,
+        event_balance_estimator="inverse_count_full_data",
+        event_balance_exponent=0.5,
+    )
+    validate_config_v2(config)
+
+    for value in (True, "0.5", float("nan"), float("inf"), -0.1, 1.1):
+        config["training"]["event_balance_exponent"] = value
+        with pytest.raises(ValueError, match="event_balance_exponent"):
+            validate_config_v2(config)
+
+
+@pytest.mark.parametrize(
+    "training_update",
+    [
+        {
+            "event_balanced_sampling": False,
+            "event_balance_exponent": 0.5,
+        },
+        {
+            "event_balanced_sampling": True,
+            "event_balance_estimator": "replacement_sampling",
+            "event_balance_exponent": 0.5,
+        },
+    ],
+)
+def test_tempered_event_balance_exponent_requires_full_data_inverse_count(
+    training_update: dict[str, object],
+) -> None:
+    config = _minimal_v2()
+    config["training"].update(training_update)
+
+    with pytest.raises(ValueError, match="requires.*inverse_count_full_data"):
+        validate_config_v2(config)
+
+
+def test_explicit_unit_event_balance_exponent_is_legacy_compatible() -> None:
+    config = _minimal_v2()
+    config["training"]["event_balance_exponent"] = 1.0
+
+    validate_config_v2(config)
+
+
 def test_waveform_components_default_to_radial() -> None:
     config = _minimal_v2()
 

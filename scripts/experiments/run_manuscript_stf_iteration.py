@@ -47,6 +47,7 @@ from src.data.splits import (  # noqa: E402
     INVERSE_COUNT_FULL_DATA_ESTIMATOR,
     REPLACEMENT_SAMPLING_ESTIMATOR,
     make_event_inverse_count_weights,
+    resolve_event_balance_exponent,
     resolve_event_balance_estimator,
 )
 from src.evaluation.delayed_prefix import (  # noqa: E402
@@ -79,6 +80,7 @@ RADIAL_DYNAMIC_RANGE_STEM_AXIS = "radial_dynamic_range_stem"
 EVENT_BALANCED_SAMPLING_AXIS = "event_balanced_sampling"
 EVENT_BALANCE_ESTIMATOR_AXIS = "event_balance_estimator"
 MAGNITUDE_PENALTY_AXIS = "magnitude_penalty"
+EVENT_BALANCE_EXPONENT_AXIS = "event_balance_exponent"
 STATION_UNIFORM_ESTIMATOR = "station_uniform"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
@@ -105,6 +107,10 @@ VARIANT_AXES = {
         "baseline": "squared",
         "candidate": "absolute",
     },
+    EVENT_BALANCE_EXPONENT_AXIS: {
+        "baseline": 1.0,
+        "candidate": 0.5,
+    },
 }
 VARIANT_AXIS_PATHS = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: ("model", "stf_output_parameterization"),
@@ -117,6 +123,7 @@ VARIANT_AXIS_PATHS = {
         "stf_rate_loss",
         "magnitude_penalty",
     ),
+    EVENT_BALANCE_EXPONENT_AXIS: ("training", "event_balance_exponent"),
 }
 # Backward-compatible alias for the Phase23 campaign and its persisted tests.
 VARIANTS = VARIANT_AXES[STF_OUTPUT_PARAMETERIZATION_AXIS]
@@ -134,6 +141,20 @@ EXPECTED_SPLIT_SHA256 = {
     42: "5ac2e07ed186dce737a3592694632775b7bbf603bf922a4a74fa6b86a3d5c240",
     73: "786d029482fc8c6c8000b939380f7d4f6fdab2cc0dfe39a09fa982d1d9049548",
 }
+PHASE27_INCUMBENT_VALIDATION_BY_SEED = {
+    17: 0.11135358810424804,
+    42: 0.1320822874704997,
+    73: 0.20192739168802898,
+}
+PHASE27_INCUMBENT_CHECKPOINT_SHA256_BY_SEED = {
+    17: "c7d50f3d5ecfa9418f33743209a8e390431545047ca97539c6155c829ab94805",
+    42: "1f596c161c9497961d5e3af3f903945b66a33097479edf6257e92b71980c8a91",
+    73: "6e0587a8392660fe06d0c6b36343a1cb6fb274ac88b3fbe5b73a0c286399480f",
+}
+PHASE27_INCUMBENT_SELECTED_SEED = 17
+PHASE27_INCUMBENT_VALIDATION = PHASE27_INCUMBENT_VALIDATION_BY_SEED[
+    PHASE27_INCUMBENT_SELECTED_SEED
+]
 EXTERNAL_EVENT_NAMES = (
     "iquique-aftershock-2014-chile",
     "nepal-aftershock-2015",
@@ -331,6 +352,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
     scheduler_t0 = training.get("scheduler_T0")
     stem_is_explicit = "radial_dynamic_range_stem" in model
     estimator_is_explicit = "event_balance_estimator" in training
+    exponent_is_explicit = "event_balance_exponent" in training
     loss_config = training.get("stf_rate_loss")
     if not isinstance(loss_config, Mapping):
         raise ValueError("formal config is missing training.stf_rate_loss")
@@ -346,6 +368,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 or scheduler_t0 != 15
                 or stem_is_explicit
                 or estimator_is_explicit
+                or exponent_is_explicit
                 or magnitude_penalty_is_explicit
                 or training.get("event_balanced_sampling") is not False
             ):
@@ -360,6 +383,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 parameterization != "moment_shape_factorized"
                 or scheduler_t0 != 15
                 or stem_is_explicit
+                or exponent_is_explicit
                 or magnitude_penalty_is_explicit
                 or training.get("event_balanced_sampling") is not True
                 or training.get("event_balance_estimator")
@@ -377,6 +401,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 parameterization != "moment_shape_factorized"
                 or scheduler_t0 != 15
                 or stem_is_explicit
+                or exponent_is_explicit
                 or training.get("event_balanced_sampling") is not True
                 or training.get("event_balance_estimator")
                 != INVERSE_COUNT_FULL_DATA_ESTIMATOR
@@ -390,6 +415,28 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                     "magnitude_penalty='squared'"
                 )
             return MAGNITUDE_PENALTY_AXIS
+        if explicit_axis == EVENT_BALANCE_EXPONENT_AXIS:
+            if (
+                parameterization != "moment_shape_factorized"
+                or scheduler_t0 != 15
+                or stem_is_explicit
+                or training.get("event_balanced_sampling") is not True
+                or training.get("event_balance_estimator")
+                != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                or not exponent_is_explicit
+                or training.get("event_balance_exponent") != 1.0
+                or magnitude_penalty_is_explicit
+                or loss_config.get("magnitude_penalty", "squared") != "squared"
+            ):
+                raise ValueError(
+                    "Phase29 tempered inverse-count baseline requires factorized "
+                    "STF, scheduler_T0=15, the original radial stem, "
+                    "event_balanced_sampling=true, "
+                    "event_balance_estimator='inverse_count_full_data', "
+                    "event_balance_exponent=1.0, and the default squared "
+                    "magnitude penalty"
+                )
+            return EVENT_BALANCE_EXPONENT_AXIS
         else:
             raise ValueError(f"unsupported formal campaign axis: {explicit_axis!r}")
     if (
@@ -397,6 +444,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         and scheduler_t0 == 15
         and not stem_is_explicit
         and not estimator_is_explicit
+        and not exponent_is_explicit
         and not magnitude_penalty_is_explicit
     ):
         return STF_OUTPUT_PARAMETERIZATION_AXIS
@@ -404,6 +452,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         parameterization == "moment_shape_factorized"
         and scheduler_t0 == 15
         and not estimator_is_explicit
+        and not exponent_is_explicit
         and not magnitude_penalty_is_explicit
     ):
         if stem_is_explicit:
@@ -419,7 +468,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         "Phase24 factorized/T0=15 baseline or the Phase25 factorized/T0=15 "
         "baseline with explicit radial dynamic-range stem or the explicitly "
         "marked Phase26/Phase27 event-balance baselines or Phase28 magnitude "
-        "penalty baseline"
+        "penalty baseline or Phase29 event-balance exponent baseline"
     )
 
 
@@ -494,6 +543,7 @@ def validate_formal_config(config: dict[str, Any]) -> None:
         ("training", "early_stop_metric"): "event_mae_catalog",
         ("training", "checkpoint_metric"): "event_mae_catalog",
         ("training", "early_stop_min_delta"): 0.0,
+        ("training", "grad_clip_norm"): 1.0,
         ("training", "epochs"): 200,
         ("training", "warmup_epochs"): 5,
         ("training", "scheduler_T_mult"): 2,
@@ -513,9 +563,34 @@ def validate_formal_config(config: dict[str, Any]) -> None:
         config,
         ("training", "event_balanced_sampling"),
         variant_axis
-        in {EVENT_BALANCE_ESTIMATOR_AXIS, MAGNITUDE_PENALTY_AXIS},
+        in {
+            EVENT_BALANCE_ESTIMATOR_AXIS,
+            MAGNITUDE_PENALTY_AXIS,
+            EVENT_BALANCE_EXPONENT_AXIS,
+        },
     )
-    build_variant_configs(config)
+    variants = build_variant_configs(config)
+    if variant_axis == EVENT_BALANCE_EXPONENT_AXIS:
+        phase27_config = _load_yaml(
+            PROJECT_ROOT
+            / "configs"
+            / "experiments"
+            / "manuscript_station_stf_usgs_event_loss_weighted.yaml"
+        )
+        phase27_incumbent = build_variant_configs(phase27_config)["candidate"]
+        phase29_baseline = copy.deepcopy(variants["baseline"])
+        phase27_incumbent.pop("campaign")
+        phase29_baseline.pop("campaign")
+        phase29_baseline["training"].pop("event_balance_exponent")
+        if phase29_baseline != phase27_incumbent:
+            differences = _config_diff_paths(
+                phase27_incumbent,
+                phase29_baseline,
+            )
+            raise ValueError(
+                "Phase29 p=1 baseline differs from the frozen Phase27 "
+                f"candidate: {sorted(differences)}"
+            )
 
 
 def _runtime_config(
@@ -547,6 +622,10 @@ def event_balance_estimator_from_config(config: Mapping[str, Any]) -> str:
     return resolve_event_balance_estimator(training)
 
 
+def event_balance_exponent_from_config(config: Mapping[str, Any]) -> float:
+    return resolve_event_balance_exponent(config["training"])
+
+
 def magnitude_penalty_from_formal_config(config: Mapping[str, Any]) -> str:
     return magnitude_penalty_from_config(dict(config))
 
@@ -576,7 +655,12 @@ def _training_sampling_manifest(
 
     enabled = bool(config["training"]["event_balanced_sampling"])
     estimator = event_balance_estimator_from_config(config)
+    exponent = event_balance_exponent_from_config(config)
     sampler = train_loader.sampler
+    objective_normalization_constant = 1.0
+    objective_weight_formula = "1"
+    objective_event_mass_formula = "n_event"
+    equal_event_objective_mass = False
     if estimator == REPLACEMENT_SAMPLING_ESTIMATOR:
         if not isinstance(sampler, WeightedRandomSampler):
             raise TypeError("event-balanced training requires WeightedRandomSampler")
@@ -602,16 +686,38 @@ def _training_sampling_manifest(
                 "replacement"
             )
         sampling_weights = [1.0] * len(events)
-        objective_weights = make_event_inverse_count_weights(events)
+        objective_weights = make_event_inverse_count_weights(
+            events,
+            exponent=exponent,
+        )
+        if exponent == 1.0:
+            objective_normalization_constant = len(events) / len(counts)
+            expected_loader_weights = {
+                event: objective_normalization_constant / count
+                for event, count in counts.items()
+            }
+            mode = "event_equal_inverse_count_full_data"
+            objective_weight_formula = "N/(E*n_event)"
+            objective_event_mass_formula = "N/E"
+            equal_event_objective_mass = True
+        else:
+            objective_normalization_constant = len(events) / sum(
+                count ** (1.0 - exponent) for count in counts.values()
+            )
+            expected_loader_weights = {
+                event: objective_normalization_constant * count ** (-exponent)
+                for event, count in counts.items()
+            }
+            mode = "tempered_inverse_count_full_data"
+            objective_weight_formula = (
+                "C*n_event^(-p), C=N/sum_event(n_event^(1-p))"
+            )
+            objective_event_mass_formula = "C*n_event^(1-p)"
         loader_weights = getattr(
             train_loader,
             "event_balance_weights_by_event",
             None,
         )
-        expected_loader_weights = {
-            event: len(events) / (len(counts) * count)
-            for event, count in counts.items()
-        }
         if not isinstance(loader_weights, Mapping) or set(loader_weights) != set(
             expected_loader_weights
         ):
@@ -626,7 +732,18 @@ def _training_sampling_manifest(
             for event, expected in expected_loader_weights.items()
         ):
             raise ValueError("full-data loader event weights changed")
-        mode = "event_equal_inverse_count_full_data"
+        loader_exponent = getattr(train_loader, "event_balance_exponent", None)
+        if (
+            isinstance(loader_exponent, bool)
+            or not isinstance(loader_exponent, (int, float))
+            or not math.isclose(
+                float(loader_exponent),
+                exponent,
+                rel_tol=0.0,
+                abs_tol=0.0,
+            )
+        ):
+            raise ValueError("full-data loader event-balance exponent changed")
     elif estimator == STATION_UNIFORM_ESTIMATOR:
         if not isinstance(sampler, RandomSampler) or sampler.replacement:
             raise TypeError(
@@ -668,11 +785,24 @@ def _training_sampling_manifest(
     ):
         raise ValueError("formal objective weights must have global mean one")
     if estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR:
-        expected_event_mass = len(events) / len(counts)
+        expected_event_masses = {
+            event: expected_loader_weights[event] * count
+            for event, count in counts.items()
+        }
         if any(
             not math.isclose(
+                event_objective_weights[event],
+                expected_mass,
+                rel_tol=0.0,
+                abs_tol=1.0e-9,
+            )
+            for event, expected_mass in expected_event_masses.items()
+        ):
+            raise ValueError("full-data objective event masses changed")
+        if equal_event_objective_mass and any(
+            not math.isclose(
                 mass,
-                expected_event_mass,
+                len(events) / len(counts),
                 rel_tol=0.0,
                 abs_tol=1.0e-9,
             )
@@ -713,8 +843,14 @@ def _training_sampling_manifest(
     objective_weight_sha256 = hashlib.sha256(
         _json_bytes(objective_weight_rows)
     ).hexdigest()
-    return {
-        "schema_version": 2,
+    event_objective_masses = list(event_objective_weights.values())
+    event_objective_mass_ess = sum(event_objective_masses) ** 2 / sum(
+        mass**2 for mass in event_objective_masses
+    )
+    manifest = {
+        "schema_version": (
+            3 if "event_balance_exponent" in config["training"] else 2
+        ),
         "mode": mode,
         "event_balanced_sampling": enabled,
         "event_balance_estimator": estimator,
@@ -733,11 +869,7 @@ def _training_sampling_manifest(
         "loss_weights_applied": (
             estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR
         ),
-        "objective_weight_formula": (
-            "N/(E*n_event)"
-            if estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR
-            else "1"
-        ),
+        "objective_weight_formula": objective_weight_formula,
         "objective_reduction": (
             "mean(sample_weight * per_sample_loss)"
             if estimator == INVERSE_COUNT_FULL_DATA_ESTIMATOR
@@ -751,6 +883,24 @@ def _training_sampling_manifest(
         "sampling_weight_sha256": sampling_weight_sha256,
         "objective_weight_sha256": objective_weight_sha256,
     }
+    if "event_balance_exponent" in config["training"]:
+        event_mass_minimum = min(event_objective_masses)
+        event_mass_maximum = max(event_objective_masses)
+        manifest.update(
+            {
+                "event_balance_exponent": exponent,
+                "objective_normalization_constant": (
+                    objective_normalization_constant
+                ),
+                "objective_event_mass_formula": objective_event_mass_formula,
+                "equal_event_objective_mass": equal_event_objective_mass,
+                "event_objective_mass_ratio": (
+                    event_mass_maximum / event_mass_minimum
+                ),
+                "event_objective_mass_ess": event_objective_mass_ess,
+            }
+        )
+    return manifest
 
 
 def _assert_split_manifest(manifest: Mapping[str, Any], *, seed: int) -> None:
@@ -883,11 +1033,65 @@ def _preflight_config(preflight: Mapping[str, Any]) -> tuple[dict[str, Any], Pat
     return config, manifest_path
 
 
+def _formal_sample_weight_probe(
+    split_manifests: Mapping[int, Mapping[str, Any]],
+    config: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if (
+        event_balance_estimator_from_config(config)
+        != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+    ):
+        return None
+    if set(split_manifests) != set(SEEDS):
+        raise ValueError(f"formal weight probe requires exactly seeds {SEEDS}")
+    exponent = event_balance_exponent_from_config(config)
+    by_seed: dict[str, Any] = {}
+    all_weights: list[float] = []
+    for seed in SEEDS:
+        manifest = split_manifests[seed]
+        rows = manifest.get("per_event_station_counts")
+        if not isinstance(rows, Mapping):
+            raise ValueError(f"seed {seed} split lacks per-event station counts")
+        counts = {
+            str(event): int(split_counts["train"])
+            for event, split_counts in rows.items()
+            if isinstance(split_counts, Mapping) and int(split_counts["train"]) > 0
+        }
+        if (
+            len(counts) != EXPECTED_EVENT_COUNT
+            or sum(counts.values()) != EXPECTED_SPLIT_COUNTS[0]
+            or min(counts.values()) != EXPECTED_TRAIN_EVENT_STATION_COUNT_MINIMUM
+            or max(counts.values()) != EXPECTED_TRAIN_EVENT_STATION_COUNT_MAXIMUM
+        ):
+            raise ValueError(f"seed {seed} formal weight-probe cohort changed")
+        events = [
+            event
+            for event, count in counts.items()
+            for _ in range(count)
+        ]
+        weights = make_event_inverse_count_weights(events, exponent=exponent)
+        minimum = min(weights)
+        maximum = max(weights)
+        all_weights.extend((minimum, maximum))
+        by_seed[str(seed)] = {
+            "minimum": minimum,
+            "maximum": maximum,
+        }
+    return {
+        "source": "frozen_train_split_event_counts",
+        "event_balance_exponent": exponent,
+        "minimum": min(all_weights),
+        "maximum": max(all_weights),
+        "by_seed": by_seed,
+    }
+
+
 def _smoke_one_device(
     config: dict[str, Any],
     *,
     dataset: CorrectedEarthquakeDataset,
     device: torch.device,
+    sample_weight_probe: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     batch_size = min(2, len(dataset))
     loader = DataLoader(
@@ -905,14 +1109,13 @@ def _smoke_one_device(
         event_balance_estimator_from_config(config)
         == INVERSE_COUNT_FULL_DATA_ESTIMATOR
     ):
-        minimum_weight = EXPECTED_SPLIT_COUNTS[0] / (
-            EXPECTED_EVENT_COUNT * EXPECTED_TRAIN_EVENT_STATION_COUNT_MAXIMUM
-        )
-        maximum_weight = EXPECTED_SPLIT_COUNTS[0] / (
-            EXPECTED_EVENT_COUNT * EXPECTED_TRAIN_EVENT_STATION_COUNT_MINIMUM
-        )
+        if sample_weight_probe is None:
+            raise ValueError("full-data smoke requires a formal sample-weight probe")
         sample_weights = torch.tensor(
-            [minimum_weight, maximum_weight],
+            [
+                float(sample_weight_probe["minimum"]),
+                float(sample_weight_probe["maximum"]),
+            ],
             device=device,
         )[:batch_size]
     loss, metrics = criterion(
@@ -950,10 +1153,14 @@ def _smoke_one_device(
         "loss": float(loss.detach().cpu()),
         "metrics": metrics,
         "event_balance_estimator": event_balance_estimator_from_config(config),
+        "event_balance_exponent": event_balance_exponent_from_config(config),
         "magnitude_penalty": magnitude_penalty_from_formal_config(
             config
         ),
         "sample_weights_exercised": sample_weights is not None,
+        "sample_weight_probe": (
+            dict(sample_weight_probe) if sample_weight_probe is not None else None
+        ),
         "passed": True,
     }
     del batch, prepared, prediction, criterion, model, loss
@@ -975,16 +1182,30 @@ def run_smoke(
     config, _ = _preflight_config(preflight)
     variants = build_variant_configs(config)
     dataset = CorrectedEarthquakeDataset(config)
+    split_manifests = {
+        seed: _load_json(
+            _validate_artifact(
+                preflight["splits"][str(seed)]["manifest"],
+                label=f"preflight split seed {seed}",
+            )
+        )
+        for seed in SEEDS
+    }
     if not torch.cuda.is_available():
         raise RuntimeError("formal smoke requires both CPU and CUDA")
     results: dict[str, Any] = {}
     for variant, variant_config in variants.items():
         results[variant] = {}
+        sample_weight_probe = _formal_sample_weight_probe(
+            split_manifests,
+            variant_config,
+        )
         for device in (torch.device("cpu"), torch.device("cuda")):
             results[variant][device.type] = _smoke_one_device(
                 variant_config,
                 dataset=dataset,
                 device=device,
+                sample_weight_probe=sample_weight_probe,
             )
     summary = {
         "stage": "smoke",
@@ -1039,9 +1260,160 @@ def select_seed_by_validation(seed_rows: Mapping[int, Mapping[str, Any]]) -> int
     return min(candidates)[1]
 
 
+def phase29_incumbent_reproduction(
+    seed_rows: Mapping[int, Mapping[str, Any]],
+) -> dict[str, Any]:
+    if set(seed_rows) != set(SEEDS):
+        raise ValueError(f"Phase29 incumbent reproduction requires exactly {SEEDS}")
+    rows: dict[str, Any] = {}
+    passed = True
+    for seed in SEEDS:
+        actual_metric = float(seed_rows[seed][VALIDATION_METRIC])
+        actual_checkpoint_sha256 = str(
+            seed_rows[seed]["checkpoint"]["sha256"]
+        )
+        expected_metric = PHASE27_INCUMBENT_VALIDATION_BY_SEED[seed]
+        expected_checkpoint_sha256 = (
+            PHASE27_INCUMBENT_CHECKPOINT_SHA256_BY_SEED[seed]
+        )
+        metric_matches = math.isclose(
+            actual_metric,
+            expected_metric,
+            rel_tol=0.0,
+            abs_tol=0.0,
+        )
+        checkpoint_matches = actual_checkpoint_sha256 == expected_checkpoint_sha256
+        seed_passed = metric_matches and checkpoint_matches
+        passed = passed and seed_passed
+        rows[str(seed)] = {
+            "passed": seed_passed,
+            "actual_validation_event_mae_catalog": actual_metric,
+            "expected_validation_event_mae_catalog": expected_metric,
+            "validation_metric_exact_match": metric_matches,
+            "actual_checkpoint_sha256": actual_checkpoint_sha256,
+            "expected_checkpoint_sha256": expected_checkpoint_sha256,
+            "checkpoint_sha256_exact_match": checkpoint_matches,
+        }
+    selected_seed = select_seed_by_validation(seed_rows)
+    selected_seed_matches = selected_seed == PHASE27_INCUMBENT_SELECTED_SEED
+    passed = passed and selected_seed_matches
+    return {
+        "passed": passed,
+        "rule": (
+            "all p=1 baseline validation metrics and checkpoint SHA-256 values "
+            "must exactly reproduce the frozen Phase27 candidate"
+        ),
+        "selected_seed": selected_seed,
+        "expected_selected_seed": PHASE27_INCUMBENT_SELECTED_SEED,
+        "selected_seed_matches": selected_seed_matches,
+        "seeds": rows,
+    }
+
+
 def _read_csv(path: Path) -> list[dict[str, str]]:
     with path.open(encoding="utf-8", newline="") as stream:
         return list(csv.DictReader(stream))
+
+
+def _phase29_sampling_manifest_is_valid(
+    manifest: Mapping[str, Any],
+    *,
+    expected_exponent: float,
+) -> bool:
+    try:
+        exponent = float(manifest["event_balance_exponent"])
+        normalization = float(manifest["objective_normalization_constant"])
+        record_count = int(manifest["record_count"])
+        event_count = int(manifest["event_count"])
+        count_minimum = int(manifest["event_record_count_minimum"])
+        count_maximum = int(manifest["event_record_count_maximum"])
+        weight_minimum = float(manifest["objective_weight_minimum"])
+        weight_maximum = float(manifest["objective_weight_maximum"])
+        mass_minimum = float(manifest["event_objective_mass_minimum"])
+        mass_maximum = float(manifest["event_objective_mass_maximum"])
+        mass_ratio = float(manifest["event_objective_mass_ratio"])
+        mass_ess = float(manifest["event_objective_mass_ess"])
+    except (KeyError, TypeError, ValueError):
+        return False
+    finite_values = (
+        exponent,
+        normalization,
+        weight_minimum,
+        weight_maximum,
+        mass_minimum,
+        mass_maximum,
+        mass_ratio,
+        mass_ess,
+    )
+    if not all(math.isfinite(value) for value in finite_values):
+        return False
+    if (
+        int(manifest.get("schema_version", -1)) != 3
+        or manifest.get("event_balance_estimator")
+        != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+        or not math.isclose(
+            exponent,
+            expected_exponent,
+            rel_tol=0.0,
+            abs_tol=0.0,
+        )
+        or record_count != EXPECTED_SPLIT_COUNTS[0]
+        or event_count != EXPECTED_EVENT_COUNT
+        or count_minimum != EXPECTED_TRAIN_EVENT_STATION_COUNT_MINIMUM
+        or count_maximum != EXPECTED_TRAIN_EVENT_STATION_COUNT_MAXIMUM
+        or normalization <= 0.0
+    ):
+        return False
+
+    event_equal = expected_exponent == 1.0
+    expected_mode = (
+        "event_equal_inverse_count_full_data"
+        if event_equal
+        else "tempered_inverse_count_full_data"
+    )
+    expected_weight_formula = (
+        "N/(E*n_event)"
+        if event_equal
+        else "C*n_event^(-p), C=N/sum_event(n_event^(1-p))"
+    )
+    expected_mass_formula = "N/E" if event_equal else "C*n_event^(1-p)"
+    if (
+        manifest.get("mode") != expected_mode
+        or manifest.get("objective_weight_formula") != expected_weight_formula
+        or manifest.get("objective_event_mass_formula") != expected_mass_formula
+        or manifest.get("equal_event_objective_mass") is not event_equal
+    ):
+        return False
+
+    expected_weight_minimum = normalization * count_maximum ** (-exponent)
+    expected_weight_maximum = normalization * count_minimum ** (-exponent)
+    expected_mass_minimum = normalization * count_minimum ** (1.0 - exponent)
+    expected_mass_maximum = normalization * count_maximum ** (1.0 - exponent)
+    expected_mass_ratio = (count_maximum / count_minimum) ** (1.0 - exponent)
+    analytical_values = (
+        (weight_minimum, expected_weight_minimum),
+        (weight_maximum, expected_weight_maximum),
+        (mass_minimum, expected_mass_minimum),
+        (mass_maximum, expected_mass_maximum),
+        (mass_ratio, expected_mass_ratio),
+    )
+    if any(
+        not math.isclose(actual, expected, rel_tol=1.0e-12, abs_tol=1.0e-12)
+        for actual, expected in analytical_values
+    ):
+        return False
+    if not 0.0 < mass_ess <= event_count:
+        return False
+    if event_equal and not math.isclose(
+        mass_ess,
+        float(event_count),
+        rel_tol=0.0,
+        abs_tol=1.0e-12,
+    ):
+        return False
+    if not event_equal and not mass_ess < event_count:
+        return False
+    return True
 
 
 def _seed_summary_is_valid(
@@ -1049,10 +1421,12 @@ def _seed_summary_is_valid(
     *,
     require_sampling: bool = False,
     expected_magnitude_penalty: str | None = None,
+    expected_event_balance_exponent: float | None = None,
     expected_variant: str | None = None,
     expected_seed: int | None = None,
     expected_split_assignment_sha256: str | None = None,
     expected_config: Mapping[str, Any] | None = None,
+    expected_git_commit: str | None = None,
 ) -> bool:
     try:
         for name in ("checkpoint", "config", "split", "training_log", "run_manifest"):
@@ -1065,6 +1439,29 @@ def _seed_summary_is_valid(
             != expected_magnitude_penalty
         ):
             return False
+        if expected_event_balance_exponent is not None:
+            summary_exponent = summary.get("event_balance_exponent")
+            if (
+                isinstance(summary_exponent, bool)
+                or not isinstance(summary_exponent, (int, float))
+                or not math.isclose(
+                    float(summary_exponent),
+                    expected_event_balance_exponent,
+                    rel_tol=0.0,
+                    abs_tol=0.0,
+                )
+            ):
+                return False
+            sampling_manifest = _load_json(
+                Path(str(summary["sampling"]["path"]))
+            )
+            if not isinstance(sampling_manifest, Mapping) or not (
+                _phase29_sampling_manifest_is_valid(
+                    sampling_manifest,
+                    expected_exponent=expected_event_balance_exponent,
+                )
+            ):
+                return False
         if (
             expected_variant is not None
             and summary.get("variant") != expected_variant
@@ -1092,6 +1489,15 @@ def _seed_summary_is_valid(
                 persisted_config = yaml.safe_load(stream)
             if persisted_config != dict(expected_config):
                 return False
+        if expected_git_commit is not None:
+            if summary.get("git_commit") != expected_git_commit:
+                return False
+            run_manifest = _load_json(Path(str(summary["run_manifest"]["path"])))
+            if (
+                run_manifest.get("git_commit") != expected_git_commit
+                or run_manifest.get("git_dirty") is not False
+            ):
+                return False
         return int(summary["seed"]) in SEEDS and math.isfinite(
             float(summary[VALIDATION_METRIC])
         )
@@ -1113,22 +1519,39 @@ def _train_one_seed(
     if seed_summary_path.is_file():
         summary = _load_json(seed_summary_path)
         campaign = config.get("campaign", {})
+        campaign_axis = (
+            campaign.get("variant_axis")
+            if isinstance(campaign, Mapping)
+            else None
+        )
         require_sampling = (
-            isinstance(campaign, Mapping)
-            and campaign.get("variant_axis")
+            campaign_axis
             in {
                 EVENT_BALANCED_SAMPLING_AXIS,
                 EVENT_BALANCE_ESTIMATOR_AXIS,
                 MAGNITUDE_PENALTY_AXIS,
+                EVENT_BALANCE_EXPONENT_AXIS,
             }
         )
         expected_magnitude_penalty = (
             magnitude_penalty_from_formal_config(config)
-            if isinstance(campaign, Mapping)
-            and campaign.get("variant_axis") == MAGNITUDE_PENALTY_AXIS
+            if campaign_axis == MAGNITUDE_PENALTY_AXIS
             else None
         )
-        phase28_resume = expected_magnitude_penalty is not None
+        expected_event_balance_exponent = (
+            event_balance_exponent_from_config(config)
+            if campaign_axis == EVENT_BALANCE_EXPONENT_AXIS
+            else None
+        )
+        expected_git_commit = (
+            current_git_commit(PROJECT_ROOT)
+            if expected_event_balance_exponent is not None
+            else None
+        )
+        strict_resume = (
+            expected_magnitude_penalty is not None
+            or expected_event_balance_exponent is not None
+        )
         expected_runtime_config = (
             _runtime_config(
                 config,
@@ -1136,19 +1559,21 @@ def _train_one_seed(
                 seed=seed,
                 dataset_manifest=dataset_manifest,
             )
-            if phase28_resume
+            if strict_resume
             else None
         )
         if resume and _seed_summary_is_valid(
             summary,
             require_sampling=require_sampling,
             expected_magnitude_penalty=expected_magnitude_penalty,
-            expected_variant=variant if phase28_resume else None,
-            expected_seed=seed if phase28_resume else None,
+            expected_event_balance_exponent=expected_event_balance_exponent,
+            expected_variant=variant if strict_resume else None,
+            expected_seed=seed if strict_resume else None,
             expected_split_assignment_sha256=(
-                EXPECTED_SPLIT_SHA256[seed] if phase28_resume else None
+                EXPECTED_SPLIT_SHA256[seed] if strict_resume else None
             ),
             expected_config=expected_runtime_config,
+            expected_git_commit=expected_git_commit,
         ):
             return summary
         if not resume:
@@ -1207,10 +1632,12 @@ def _train_one_seed(
             config["training"]["event_balanced_sampling"]
         ),
         "event_balance_estimator": event_balance_estimator_from_config(config),
+        "event_balance_exponent": event_balance_exponent_from_config(config),
         "magnitude_penalty": magnitude_penalty_from_formal_config(
             config
         ),
         "seed": seed,
+        "git_commit": current_git_commit(PROJECT_ROOT),
         **checkpoint_selection,
         "checkpoint": _artifact(verified["checkpoint_path"]),
         "config": _artifact(result["config_snapshot_path"]),
@@ -1244,6 +1671,8 @@ def run_train(
     variant_axis = variant_axis_from_config(config)
     variants = build_variant_configs(config)
     variant_summaries: dict[str, Any] = {}
+    incumbent_reproduction: dict[str, Any] | None = None
+    incumbent_reproduction_artifact: dict[str, str] | None = None
     for variant, variant_config in variants.items():
         seed_summaries: dict[int, dict[str, Any]] = {}
         for seed in SEEDS:
@@ -1261,6 +1690,23 @@ def run_train(
                 resume=resume,
             )
         selected_seed = select_seed_by_validation(seed_summaries)
+        if (
+            variant_axis == EVENT_BALANCE_EXPONENT_AXIS
+            and variant == "baseline"
+        ):
+            incumbent_reproduction = phase29_incumbent_reproduction(seed_summaries)
+            reproduction_path = stage_dir / variant / "incumbent_reproduction.json"
+            _atomic_json(
+                reproduction_path,
+                incumbent_reproduction,
+                overwrite=resume,
+            )
+            incumbent_reproduction_artifact = _artifact(reproduction_path)
+            if not incumbent_reproduction["passed"]:
+                raise ValueError(
+                    "Phase29 p=1 baseline did not exactly reproduce the frozen "
+                    "Phase27 incumbent; refusing to train or compare the candidate"
+                )
         selection = {
             "selected_seed": selected_seed,
             "selection_metric": VALIDATION_METRIC,
@@ -1284,6 +1730,9 @@ def run_train(
                 variant_config["training"]["event_balanced_sampling"]
             ),
             "event_balance_estimator": event_balance_estimator_from_config(
+                variant_config
+            ),
+            "event_balance_exponent": event_balance_exponent_from_config(
                 variant_config
             ),
             "magnitude_penalty": magnitude_penalty_from_formal_config(
@@ -1313,6 +1762,13 @@ def run_train(
         "external_evaluated": False,
         "variants": variant_summaries,
     }
+    if variant_axis == EVENT_BALANCE_EXPONENT_AXIS:
+        if incumbent_reproduction is None or incumbent_reproduction_artifact is None:
+            raise RuntimeError("Phase29 incumbent reproduction gate was not evaluated")
+        summary["incumbent_reproduction"] = {
+            **incumbent_reproduction,
+            "artifact": incumbent_reproduction_artifact,
+        }
     _finish_stage(stage_dir, summary, resume=resume)
     return summary
 
@@ -1327,6 +1783,27 @@ def candidate_validation_improves(train_summary: Mapping[str, Any]) -> bool:
     candidate = float(variants["candidate"]["seeds"][candidate_seed][VALIDATION_METRIC])
     if not math.isfinite(baseline) or not math.isfinite(candidate):
         raise ValueError("selected validation metrics must be finite")
+    if train_summary.get("variant_axis") == EVENT_BALANCE_EXPONENT_AXIS:
+        reproduction = train_summary.get("incumbent_reproduction")
+        if not isinstance(reproduction, Mapping) or reproduction.get("passed") is not True:
+            raise ValueError("Phase29 incumbent reproduction gate is missing or failed")
+        reproduction_path = _validate_artifact(
+            reproduction["artifact"],
+            label="Phase29 incumbent reproduction",
+        )
+        persisted_reproduction = _load_json(reproduction_path)
+        recorded_reproduction = {
+            key: value for key, value in reproduction.items() if key != "artifact"
+        }
+        if persisted_reproduction != recorded_reproduction:
+            raise ValueError("Phase29 incumbent reproduction artifact changed")
+        baseline_rows = {
+            seed: variants["baseline"]["seeds"][str(seed)] for seed in SEEDS
+        }
+        expected_reproduction = phase29_incumbent_reproduction(baseline_rows)
+        if expected_reproduction != persisted_reproduction:
+            raise ValueError("Phase29 incumbent reproduction evidence is inconsistent")
+        return candidate < PHASE27_INCUMBENT_VALIDATION
     return candidate < baseline
 
 
@@ -1529,13 +2006,25 @@ def run_internal(
     validation_passed = candidate_validation_improves(train_summary)
     baseline_seed = _selected_seed_summary(train_summary, "baseline")
     candidate_seed = _selected_seed_summary(train_summary, "candidate")
-    validation_gate = {
-        "passed": validation_passed,
-        "baseline": float(baseline_seed[VALIDATION_METRIC]),
-        "candidate": float(candidate_seed[VALIDATION_METRIC]),
-        "metric": VALIDATION_METRIC,
-        "rule": "candidate < baseline",
-    }
+    if train_summary.get("variant_axis") == EVENT_BALANCE_EXPONENT_AXIS:
+        validation_gate = {
+            "passed": validation_passed,
+            "baseline_reproduction": float(baseline_seed[VALIDATION_METRIC]),
+            "frozen_incumbent": PHASE27_INCUMBENT_VALIDATION,
+            "frozen_incumbent_seed": PHASE27_INCUMBENT_SELECTED_SEED,
+            "candidate": float(candidate_seed[VALIDATION_METRIC]),
+            "metric": VALIDATION_METRIC,
+            "rule": "candidate < frozen Phase27 incumbent",
+            "incumbent_reproduction_verified": True,
+        }
+    else:
+        validation_gate = {
+            "passed": validation_passed,
+            "baseline": float(baseline_seed[VALIDATION_METRIC]),
+            "candidate": float(candidate_seed[VALIDATION_METRIC]),
+            "metric": VALIDATION_METRIC,
+            "rule": "candidate < baseline",
+        }
     if not validation_passed:
         summary = {
             "stage": "internal",

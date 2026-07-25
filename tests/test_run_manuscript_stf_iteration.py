@@ -50,6 +50,12 @@ PHASE28_CONFIG_PATH = (
     / "experiments"
     / "manuscript_station_stf_usgs_absolute_magnitude.yaml"
 )
+PHASE29_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_tempered_event_loss.yaml"
+)
 CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
@@ -161,6 +167,12 @@ def _selected_train_summary(
             "squared",
             "absolute",
         ),
+        (
+            PHASE29_CONFIG_PATH,
+            campaign.EVENT_BALANCE_EXPONENT_AXIS,
+            1.0,
+            0.5,
+        ),
     ],
 )
 def test_formal_configs_and_variants_have_one_scientific_difference(
@@ -188,6 +200,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         campaign.EVENT_BALANCED_SAMPLING_AXIS,
         campaign.EVENT_BALANCE_ESTIMATOR_AXIS,
         campaign.MAGNITUDE_PENALTY_AXIS,
+        campaign.EVENT_BALANCE_EXPONENT_AXIS,
     }:
         assert {
             variant["model"]["stf_output_parameterization"]
@@ -202,6 +215,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         campaign.EVENT_BALANCED_SAMPLING_AXIS,
         campaign.EVENT_BALANCE_ESTIMATOR_AXIS,
         campaign.MAGNITUDE_PENALTY_AXIS,
+        campaign.EVENT_BALANCE_EXPONENT_AXIS,
     }:
         assert {
             variant["training"]["scheduler_T0"] for variant in variants.values()
@@ -217,6 +231,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         (PHASE26_CONFIG_PATH, campaign.EVENT_BALANCED_SAMPLING_AXIS),
         (PHASE27_CONFIG_PATH, campaign.EVENT_BALANCE_ESTIMATOR_AXIS),
         (PHASE28_CONFIG_PATH, campaign.MAGNITUDE_PENALTY_AXIS),
+        (PHASE29_CONFIG_PATH, campaign.EVENT_BALANCE_EXPONENT_AXIS),
     ],
 )
 def test_formal_config_rejects_a_second_scientific_change(
@@ -363,6 +378,45 @@ def test_phase28_axis_requires_the_phase27_candidate_as_baseline() -> None:
     )
     with pytest.raises(ValueError, match="Phase28 magnitude-penalty baseline"):
         campaign.validate_formal_config(replacement_estimator)
+
+
+def test_phase29_axis_is_exactly_the_phase27_incumbent_plus_exponent() -> None:
+    config = _config(PHASE29_CONFIG_PATH)
+
+    assert (
+        campaign.variant_axis_from_config(config)
+        == campaign.EVENT_BALANCE_EXPONENT_AXIS
+    )
+    variants = campaign.build_variant_configs(config)
+    assert variants["baseline"]["training"]["event_balance_exponent"] == 1.0
+    assert variants["candidate"]["training"]["event_balance_exponent"] == 0.5
+    assert "magnitude_penalty" not in config["training"]["stf_rate_loss"]
+
+    phase27_incumbent = campaign.build_variant_configs(
+        _config(PHASE27_CONFIG_PATH)
+    )["candidate"]
+    phase29_baseline = copy.deepcopy(variants["baseline"])
+    phase27_incumbent.pop("campaign")
+    phase29_baseline.pop("campaign")
+    phase29_baseline["training"].pop("event_balance_exponent")
+    assert phase29_baseline == phase27_incumbent
+
+    tempered_as_baseline = copy.deepcopy(config)
+    tempered_as_baseline["training"]["event_balance_exponent"] = 0.5
+    with pytest.raises(ValueError, match="Phase29 tempered inverse-count baseline"):
+        campaign.validate_formal_config(tempered_as_baseline)
+
+    explicit_magnitude_penalty = copy.deepcopy(config)
+    explicit_magnitude_penalty["training"]["stf_rate_loss"][
+        "magnitude_penalty"
+    ] = "squared"
+    with pytest.raises(ValueError, match="Phase29 tempered inverse-count baseline"):
+        campaign.validate_formal_config(explicit_magnitude_penalty)
+
+    changed_learning_rate = copy.deepcopy(config)
+    changed_learning_rate["training"]["learning_rate"] = 2.0e-4
+    with pytest.raises(ValueError, match="differs from the frozen Phase27"):
+        campaign.validate_formal_config(changed_learning_rate)
 
 
 def test_split_contract_is_frozen_for_all_three_seeds() -> None:
@@ -585,6 +639,120 @@ def test_phase28_seed_summary_resume_is_bound_to_full_context(tmp_path: Path) ->
     )
 
 
+def test_phase29_seed_summary_resume_rejects_exponent_or_commit_mismatch(
+    tmp_path: Path,
+) -> None:
+    expected_git_commit = "phase29-commit"
+    references: dict[str, dict[str, str]] = {}
+    for name in ("checkpoint", "training_log"):
+        artifact_path = tmp_path / f"{name}.artifact"
+        artifact_path.write_text(name, encoding="utf-8")
+        references[name] = _artifact(artifact_path)
+    run_manifest_path = tmp_path / "run_manifest.json"
+    _write_json(
+        run_manifest_path,
+        {"git_commit": expected_git_commit, "git_dirty": False},
+    )
+    references["run_manifest"] = _artifact(run_manifest_path)
+    split_path = tmp_path / "split.json"
+    _write_json(
+        split_path,
+        {
+            "seed": 17,
+            "protocol": "within_event_station",
+            "train_record_count": 1788,
+            "validation_record_count": 385,
+            "test_record_count": 385,
+            "assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[17],
+        },
+    )
+    references["split"] = _artifact(split_path)
+    normalization = 1788 / 31
+    sampling_manifest = {
+        "schema_version": 3,
+        "mode": "event_equal_inverse_count_full_data",
+        "event_balance_estimator": campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+        "event_balance_exponent": 1.0,
+        "record_count": 1788,
+        "event_count": 31,
+        "event_record_count_minimum": 1,
+        "event_record_count_maximum": 482,
+        "objective_normalization_constant": normalization,
+        "objective_weight_formula": "N/(E*n_event)",
+        "objective_event_mass_formula": "N/E",
+        "equal_event_objective_mass": True,
+        "objective_weight_minimum": normalization / 482,
+        "objective_weight_maximum": normalization,
+        "event_objective_mass_minimum": normalization,
+        "event_objective_mass_maximum": normalization,
+        "event_objective_mass_ratio": 1.0,
+        "event_objective_mass_ess": 31.0,
+    }
+    sampling_path = tmp_path / "sampling.json"
+    _write_json(sampling_path, sampling_manifest)
+    references["sampling"] = _artifact(sampling_path)
+    expected_config = {
+        "training": {
+            "random_seed": 17,
+            "event_balance_estimator": "inverse_count_full_data",
+            "event_balance_exponent": 1.0,
+        }
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(expected_config, sort_keys=False),
+        encoding="utf-8",
+    )
+    summary = {
+        "variant": "baseline",
+        "seed": 17,
+        "git_commit": expected_git_commit,
+        "event_balance_exponent": 1.0,
+        "split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[17],
+        campaign.VALIDATION_METRIC: 0.1,
+        "config": _artifact(config_path),
+        **references,
+    }
+    arguments = {
+        "require_sampling": True,
+        "expected_event_balance_exponent": 1.0,
+        "expected_variant": "baseline",
+        "expected_seed": 17,
+        "expected_split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[17],
+        "expected_config": expected_config,
+        "expected_git_commit": expected_git_commit,
+    }
+
+    assert campaign._seed_summary_is_valid(summary, **arguments)
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "event_balance_exponent": 0.5},
+        **arguments,
+    )
+    assert not campaign._seed_summary_is_valid(
+        summary,
+        **{**arguments, "expected_event_balance_exponent": 0.5},
+    )
+
+    mismatched_sampling = dict(sampling_manifest)
+    mismatched_sampling["event_balance_exponent"] = 0.5
+    mismatched_sampling_path = tmp_path / "sampling_mismatch.json"
+    _write_json(mismatched_sampling_path, mismatched_sampling)
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "sampling": _artifact(mismatched_sampling_path)},
+        **arguments,
+    )
+
+    dirty_run_manifest_path = tmp_path / "run_manifest_dirty.json"
+    _write_json(
+        dirty_run_manifest_path,
+        {"git_commit": expected_git_commit, "git_dirty": True},
+    )
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "run_manifest": _artifact(dirty_run_manifest_path)},
+        **arguments,
+    )
+
+
 def _logged_scheduler_learning_rates(scheduler_t0: int) -> list[float]:
     parameter = torch.nn.Parameter(torch.tensor(0.0))
     optimizer = torch.optim.AdamW([parameter], lr=1.0e-4)
@@ -727,6 +895,7 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
     baseline_loader.event_balance_weights_by_event = {
         event: 1788 / (31 * count) for event, count in counts.items()
     }
+    baseline_loader.event_balance_exponent = 1.0
     full_data = campaign._training_sampling_manifest(
         baseline_loader,
         {
@@ -754,6 +923,91 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
     assert full_data["objective_weight_maximum"] == pytest.approx(1788 / 31)
     assert full_data["event_objective_mass_minimum"] == pytest.approx(1788 / 31)
     assert full_data["event_objective_mass_maximum"] == pytest.approx(1788 / 31)
+
+    event_names = [str(row["event"]) for row in dataset.samples]
+    tempered_exponent = 0.5
+    tempered_weights = campaign.make_event_inverse_count_weights(
+        event_names,
+        exponent=tempered_exponent,
+    )
+    baseline_loader.event_balance_weights_by_event = dict(
+        zip(event_names, tempered_weights, strict=True)
+    )
+    baseline_loader.event_balance_exponent = tempered_exponent
+    tempered = campaign._training_sampling_manifest(
+        baseline_loader,
+        {
+            "training": {
+                "event_balanced_sampling": True,
+                "event_balance_estimator": (
+                    campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                ),
+                "event_balance_exponent": tempered_exponent,
+            }
+        },
+    )
+    normalization = 1788 / sum(
+        count ** (1.0 - tempered_exponent) for count in counts.values()
+    )
+    event_masses = [
+        normalization * count ** (1.0 - tempered_exponent)
+        for count in counts.values()
+    ]
+    expected_ess = sum(event_masses) ** 2 / sum(
+        mass**2 for mass in event_masses
+    )
+    assert tempered["schema_version"] == 3
+    assert tempered["mode"] == "tempered_inverse_count_full_data"
+    assert tempered["event_balance_exponent"] == 0.5
+    assert tempered["equal_event_objective_mass"] is False
+    assert (
+        tempered["objective_weight_formula"]
+        == "C*n_event^(-p), C=N/sum_event(n_event^(1-p))"
+    )
+    assert tempered["objective_event_mass_formula"] == "C*n_event^(1-p)"
+    assert tempered["objective_normalization_constant"] == pytest.approx(
+        normalization
+    )
+    assert tempered["event_objective_mass_ratio"] == pytest.approx(482**0.5)
+    assert tempered["event_objective_mass_ess"] == pytest.approx(expected_ess)
+    assert tempered["event_objective_mass_minimum"] < tempered[
+        "event_objective_mass_maximum"
+    ]
+    assert campaign._phase29_sampling_manifest_is_valid(
+        tempered,
+        expected_exponent=0.5,
+    )
+
+
+def test_phase29_smoke_probe_uses_exact_frozen_split_weight_extrema() -> None:
+    counts = {"E00": 1, "E30": 482}
+    counts.update({f"E{index:02d}": 45 for index in range(1, 30)})
+    split_manifests = {
+        seed: {
+            "per_event_station_counts": {
+                event: {"train": count, "validation": 0, "test": 0}
+                for event, count in counts.items()
+            }
+        }
+        for seed in campaign.SEEDS
+    }
+    config = campaign.build_variant_configs(_config(PHASE29_CONFIG_PATH))[
+        "candidate"
+    ]
+
+    probe = campaign._formal_sample_weight_probe(split_manifests, config)
+
+    assert probe is not None
+    events = [event for event, count in counts.items() for _ in range(count)]
+    expected_weights = campaign.make_event_inverse_count_weights(
+        events,
+        exponent=0.5,
+    )
+    assert probe["source"] == "frozen_train_split_event_counts"
+    assert probe["event_balance_exponent"] == 0.5
+    assert probe["minimum"] == pytest.approx(min(expected_weights))
+    assert probe["maximum"] == pytest.approx(max(expected_weights))
+    assert probe["maximum"] != pytest.approx((1788 / 31) ** 0.5)
 
 
 @pytest.mark.parametrize(
@@ -821,6 +1075,15 @@ def test_sampling_manifest_audits_balanced_replacement_without_consuming_rng() -
             (True, True),
             ("inverse_count_full_data", "inverse_count_full_data"),
         ),
+        (
+            PHASE29_CONFIG_PATH,
+            campaign.EVENT_BALANCE_EXPONENT_AXIS,
+            ("moment_shape_factorized", "moment_shape_factorized"),
+            (15, 15),
+            ("none", "none"),
+            (True, True),
+            ("inverse_count_full_data", "inverse_count_full_data"),
+        ),
     ],
 )
 def test_train_stage_selects_from_validation_without_test_or_external(
@@ -862,17 +1125,30 @@ def test_train_stage_selects_from_validation_without_test_or_external(
         "baseline": {17: 0.30, 42: 0.20, 73: 0.25},
         "candidate": {17: 0.19, 42: 0.21, 73: 0.18},
     }
+    if expected_axis == campaign.EVENT_BALANCE_EXPONENT_AXIS:
+        values["baseline"] = dict(
+            campaign.PHASE27_INCUMBENT_VALIDATION_BY_SEED
+        )
     calls: list[tuple[str, int]] = []
 
     def fake_train_one_seed(**kwargs: Any) -> dict[str, Any]:
         variant = str(kwargs["variant"])
         seed = int(kwargs["seed"])
         calls.append((variant, seed))
-        return {
+        summary = {
             "variant": variant,
             "seed": seed,
             campaign.VALIDATION_METRIC: values[variant][seed],
         }
+        if expected_axis == campaign.EVENT_BALANCE_EXPONENT_AXIS:
+            summary["checkpoint"] = {
+                "sha256": (
+                    campaign.PHASE27_INCUMBENT_CHECKPOINT_SHA256_BY_SEED[seed]
+                    if variant == "baseline"
+                    else f"candidate-{seed}"
+                )
+            }
+        return summary
 
     monkeypatch.setattr(campaign, "_train_one_seed", fake_train_one_seed)
     monkeypatch.setattr(
@@ -903,7 +1179,15 @@ def test_train_stage_selects_from_validation_without_test_or_external(
     assert summary["test_evaluated"] is False
     assert summary["external_evaluated"] is False
     assert summary["variant_axis"] == expected_axis
-    assert summary["variants"]["baseline"]["selection"]["selected_seed"] == 42
+    expected_baseline_seed = (
+        campaign.PHASE27_INCUMBENT_SELECTED_SEED
+        if expected_axis == campaign.EVENT_BALANCE_EXPONENT_AXIS
+        else 42
+    )
+    assert (
+        summary["variants"]["baseline"]["selection"]["selected_seed"]
+        == expected_baseline_seed
+    )
     assert summary["variants"]["candidate"]["selection"]["selected_seed"] == 73
     variant_names = ("baseline", "candidate")
     assert tuple(
@@ -924,6 +1208,15 @@ def test_train_stage_selects_from_validation_without_test_or_external(
         summary["variants"][name]["event_balance_estimator"]
         for name in variant_names
     ) == expected_estimators
+    expected_exponents = (
+        (1.0, 0.5)
+        if expected_axis == campaign.EVENT_BALANCE_EXPONENT_AXIS
+        else (1.0, 1.0)
+    )
+    assert tuple(
+        summary["variants"][name]["event_balance_exponent"]
+        for name in variant_names
+    ) == expected_exponents
     expected_penalties = (
         ("squared", "absolute")
         if expected_axis == campaign.MAGNITUDE_PENALTY_AXIS
@@ -936,6 +1229,74 @@ def test_train_stage_selects_from_validation_without_test_or_external(
     assert summary["variants"]["candidate"]["scientific_diff_from_baseline"] == [
         ".".join(campaign.VARIANT_AXIS_PATHS[expected_axis])
     ]
+    if expected_axis == campaign.EVENT_BALANCE_EXPONENT_AXIS:
+        assert summary["incumbent_reproduction"]["passed"] is True
+
+
+@pytest.mark.parametrize("mismatch", ["validation_metric", "checkpoint_sha256"])
+def test_phase29_control_drift_stops_before_candidate_training(
+    mismatch: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "frozen_config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(_config(PHASE29_CONFIG_PATH), sort_keys=False),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "dataset_manifest.csv"
+    manifest_path.write_text("event,station\n", encoding="utf-8")
+    splits: dict[str, Any] = {}
+    for seed in campaign.SEEDS:
+        split_path = tmp_path / f"split_{seed}.json"
+        _write_json(split_path, {"seed": seed})
+        splits[str(seed)] = {"manifest": _artifact(split_path)}
+    _mark_stage(
+        tmp_path,
+        "preflight",
+        {
+            "status": "complete",
+            "source_data": {"sha256": campaign.EXPECTED_SOURCE_SHA256},
+            "frozen_config": _artifact(config_path),
+            "dataset_manifest": _artifact(manifest_path),
+            "splits": splits,
+        },
+    )
+    _mark_stage(tmp_path, "smoke", {"status": "complete"})
+    calls: list[tuple[str, int]] = []
+
+    def fake_train_one_seed(**kwargs: Any) -> dict[str, Any]:
+        variant = str(kwargs["variant"])
+        seed = int(kwargs["seed"])
+        calls.append((variant, seed))
+        metric = campaign.PHASE27_INCUMBENT_VALIDATION_BY_SEED[seed]
+        checkpoint_sha256 = (
+            campaign.PHASE27_INCUMBENT_CHECKPOINT_SHA256_BY_SEED[seed]
+        )
+        if seed == 42 and mismatch == "validation_metric":
+            metric += 1.0e-12
+        if seed == 42 and mismatch == "checkpoint_sha256":
+            checkpoint_sha256 = "wrong"
+        return {
+            "variant": variant,
+            "seed": seed,
+            campaign.VALIDATION_METRIC: metric,
+            "checkpoint": {"sha256": checkpoint_sha256},
+        }
+
+    monkeypatch.setattr(campaign, "_train_one_seed", fake_train_one_seed)
+
+    with pytest.raises(ValueError, match="refusing to train or compare"):
+        campaign.run_train(output_root=tmp_path, resume=False)
+
+    assert calls == [("baseline", seed) for seed in campaign.SEEDS]
+    reproduction = json.loads(
+        (tmp_path / "train" / "baseline" / "incumbent_reproduction.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert reproduction["passed"] is False
+    assert not (tmp_path / "train" / "candidate").exists()
 
 
 def test_delayed_prefix_result_persists_auditable_contract_and_outputs(
@@ -1057,6 +1418,91 @@ def test_internal_validation_gate_fails_before_locked_test(
     assert summary["status"] == "candidate_validation_gate_failed"
     assert summary["validation_gate"]["passed"] is False
     assert summary["test_evaluated"] is False
+
+
+def test_phase29_frozen_incumbent_gate_fails_before_locked_test(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline_rows = {
+        str(seed): {
+            "seed": seed,
+            campaign.VALIDATION_METRIC: (
+                campaign.PHASE27_INCUMBENT_VALIDATION_BY_SEED[seed]
+            ),
+            "checkpoint": {
+                "sha256": (
+                    campaign.PHASE27_INCUMBENT_CHECKPOINT_SHA256_BY_SEED[seed]
+                )
+            },
+        }
+        for seed in campaign.SEEDS
+    }
+    candidate_rows = {
+        "17": {
+            "seed": 17,
+            campaign.VALIDATION_METRIC: campaign.PHASE27_INCUMBENT_VALIDATION,
+        },
+        "42": {"seed": 42, campaign.VALIDATION_METRIC: 0.13},
+        "73": {"seed": 73, campaign.VALIDATION_METRIC: 0.20},
+    }
+    reproduction = campaign.phase29_incumbent_reproduction(
+        {seed: baseline_rows[str(seed)] for seed in campaign.SEEDS}
+    )
+    reproduction_path = tmp_path / "incumbent_reproduction.json"
+    _write_json(reproduction_path, reproduction)
+    train_summary = {
+        "status": "complete",
+        "variant_axis": campaign.EVENT_BALANCE_EXPONENT_AXIS,
+        "incumbent_reproduction": {
+            **reproduction,
+            "artifact": _artifact(reproduction_path),
+        },
+        "variants": {
+            "baseline": {
+                "seeds": baseline_rows,
+                "selection": {
+                    "selected_seed": 17,
+                    "selection_metric": campaign.VALIDATION_METRIC,
+                    "ensemble_used": False,
+                },
+            },
+            "candidate": {
+                "seeds": candidate_rows,
+                "selection": {
+                    "selected_seed": 17,
+                    "selection_metric": campaign.VALIDATION_METRIC,
+                    "ensemble_used": False,
+                },
+            },
+        },
+    }
+    _mark_stage(tmp_path, "train", train_summary)
+    calls = 0
+
+    def forbidden_test(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("Phase29 locked test must remain unread")
+
+    monkeypatch.setattr(campaign, "_evaluate_locked_test", forbidden_test)
+
+    summary = campaign.run_internal(output_root=tmp_path, resume=False)
+
+    assert calls == 0
+    assert summary["status"] == "candidate_validation_gate_failed"
+    assert summary["validation_gate"] == {
+        "passed": False,
+        "baseline_reproduction": campaign.PHASE27_INCUMBENT_VALIDATION,
+        "frozen_incumbent": campaign.PHASE27_INCUMBENT_VALIDATION,
+        "frozen_incumbent_seed": campaign.PHASE27_INCUMBENT_SELECTED_SEED,
+        "candidate": campaign.PHASE27_INCUMBENT_VALIDATION,
+        "metric": campaign.VALIDATION_METRIC,
+        "rule": "candidate < frozen Phase27 incumbent",
+        "incumbent_reproduction_verified": True,
+    }
+    assert summary["test_evaluated"] is False
+    assert summary["external_evaluated"] is False
 
 
 def test_external_gate_fails_before_external_evaluation(

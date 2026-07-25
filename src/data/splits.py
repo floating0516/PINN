@@ -4,6 +4,7 @@ from collections import Counter
 from collections.abc import Mapping
 from dataclasses import dataclass
 import math
+from numbers import Real
 
 import numpy as np
 
@@ -171,9 +172,50 @@ def resolve_event_balance_estimator(training: Mapping[str, object]) -> str:
     return estimator
 
 
-def make_event_inverse_count_weights(events: list[str]) -> list[float]:
+def _coerce_event_balance_exponent(value: object) -> float:
+    if isinstance(value, bool) or not isinstance(value, Real):
+        raise ValueError(
+            "training.event_balance_exponent must be a finite number in [0, 1]"
+        )
+    exponent = float(value)
+    if not math.isfinite(exponent) or not 0.0 <= exponent <= 1.0:
+        raise ValueError(
+            "training.event_balance_exponent must be a finite number in [0, 1]"
+        )
+    return exponent
+
+
+def resolve_event_balance_exponent(training: Mapping[str, object]) -> float:
+    exponent = _coerce_event_balance_exponent(
+        training.get("event_balance_exponent", 1.0)
+    )
+    if exponent != 1.0:
+        estimator = resolve_event_balance_estimator(training)
+        if (
+            not training.get("event_balanced_sampling", False)
+            or estimator != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+        ):
+            raise ValueError(
+                "training.event_balance_exponent != 1.0 requires "
+                "training.event_balanced_sampling=true and "
+                "training.event_balance_estimator=inverse_count_full_data"
+            )
+    return exponent
+
+
+def make_event_inverse_count_weights(
+    events: list[str],
+    exponent: float = 1.0,
+) -> list[float]:
     if not events:
         raise ValueError("events must not be empty")
+    exponent = _coerce_event_balance_exponent(exponent)
     counts = Counter(events)
-    normalization = len(events) / len(counts)
-    return [normalization / counts[event] for event in events]
+    if exponent == 1.0:
+        normalization = len(events) / len(counts)
+        return [normalization / counts[event] for event in events]
+
+    normalization = len(events) / sum(
+        count ** (1.0 - exponent) for count in counts.values()
+    )
+    return [normalization * counts[event] ** (-exponent) for event in events]
