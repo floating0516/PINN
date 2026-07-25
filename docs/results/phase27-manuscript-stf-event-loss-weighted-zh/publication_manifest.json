@@ -1,0 +1,218 @@
+{
+  "analysis_contract": {
+    "end_to_end_causal": false,
+    "ensemble_used": false,
+    "event_balance_estimator": "inverse_count_full_data",
+    "external_cm2_coverage": "7/8",
+    "external_cm2_missing_event": "Luding 2022 M6.6",
+    "external_role": "development_validation",
+    "independent_mw_head": false,
+    "input_components": [
+      "radial"
+    ],
+    "internal_test_role": "same_event_unseen_station",
+    "observation_horizons_sec": [
+      20.0,
+      40.0,
+      60.0,
+      80.0,
+      100.0,
+      120.0,
+      140.0,
+      160.0,
+      180.0,
+      200.0
+    ],
+    "processing_delay_sec": 5.0,
+    "right_censor_horizon_sec": 200.0,
+    "selected_seed": 17,
+    "split_protocol": "within_event_station",
+    "station_sample_model": true,
+    "station_selection_causal": false,
+    "stf_parameterization": "moment_shape_factorized",
+    "target_absolute_error_mw": 0.15,
+    "waveform_prefix_causal_at_release": true
+  },
+  "font": {
+    "family": "Noto Sans CJK SC",
+    "path": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"
+  },
+  "inputs": {
+    "base_generator_script": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/scripts/plotting/plot_phase27_magnitude_convergence.py",
+      "sha256": "53379bafad9a3d7bb93d424bc87b696cd56849ec6976996b36707ac88304928a"
+    },
+    "candidate_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/train/candidate/selection.json",
+      "sha256": "a95a307f7a7ade41a06425292f95c887db9eb58a35db3e50f82daa81b676411b"
+    },
+    "dataset_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/preflight/dataset_summary.json",
+      "sha256": "a04b5481ee007bdda53de661a4f58e57968988bae79cab3089c8f6ff65e569c3"
+    },
+    "delayed_prefix_cohort": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/delayed_prefix/cohort_contract.json",
+      "sha256": "6e345071f7d9a75cd511e2bd5ee46eec3993cc4665622c05f518fc1c0c5b04bb"
+    },
+    "delayed_prefix_event_predictions": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/delayed_prefix/event_predictions.csv",
+      "sha256": "6a7551a8908eeff741b224ac61a7bf359fc40fec461e9abd3657359ecedd6fa2"
+    },
+    "delayed_prefix_horizon_metrics": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/delayed_prefix/horizon_metrics.json",
+      "sha256": "a7f080155f886dd3e9a3b12850c5260ea4c60711a2369fe748ede9c55c94fb76"
+    },
+    "external_cm2_predictions": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/external/cm2/event_predictions_usgs.csv",
+      "sha256": "6bcf2763d02feedfc0fdeb0ef1aafcb0c8302c08ed93088eb9f439c5cb8ffc00"
+    },
+    "external_cm2_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/external/cm2/summary.json",
+      "sha256": "7fa26016a0bcfdb82c363db5908c299daeb248e11fee497a0984aa50fd2a7da3"
+    },
+    "external_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/external/summary.json",
+      "sha256": "5cf404d696d89ef849dc8fb727648f8a94acdaea6d4e4fc056de0df53719c7ef"
+    },
+    "internal_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/summary.json",
+      "sha256": "6c86e7596272639f6a007783083febb4bc4262c93a25b8e479efb6136f2ec198"
+    },
+    "preflight_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/preflight/summary.json",
+      "sha256": "bc249df73985a4ea58c4cd1f2955b3ff60fdb4c0afce783aa5404d493442930a"
+    },
+    "selected_config": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/train/candidate/seed_17/models/20260725_063040/config.yaml",
+      "sha256": "0df76f4957c631df4feacf765d0058dcefb9b5b7bc8fa58808763da6d1622006"
+    },
+    "selected_event_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/selected_seed_17/event_summary.csv",
+      "sha256": "24190f9fa0922e6de7529da5fce57144426affd9d248848b4769c7c9445c80e9"
+    },
+    "selected_metrics": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/selected_seed_17/metrics.json",
+      "sha256": "bb87c937c450973191fa3da94bf41b4d09d541d571f34253bf67a458aaa17d11"
+    },
+    "selected_result_registry": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/candidate/results/selected_seed_17/result_registry.json",
+      "sha256": "bb7cde75e4d2a9a176bdc5e282b5cfbde7d422f77f15f581977d6338d7902cde"
+    },
+    "selected_sampling_manifest": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/train/candidate/seed_17/sampling_manifest.json",
+      "sha256": "b02fc41665e2d3ac948cfb0701a62b157a3bafd7a6efe9ed660e4de2d9383a7c"
+    },
+    "selected_seed_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/train/candidate/seed_17/seed_summary.json",
+      "sha256": "b774be264fd3660de6986046a0de81d7dd0c479f72f1c5263d2a84fe7308331e"
+    },
+    "split_seed_17": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/preflight/split_seed_17.json",
+      "sha256": "a053f5f82e1a349d3999b1cceff5282dc384418ca5f1a14d0e58e6bab0fd9ee2"
+    },
+    "train_summary": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/train/summary.json",
+      "sha256": "0ba8832166cd67e8ebf1e8e63c99b347c12339a1345fc94982ee2e43953682b3"
+    },
+    "zh_font_file": {
+      "path": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+      "sha256": "b76b0433203017ca80401b2ee0dd69350349871c4b19d504c34dbdd80541690a"
+    },
+    "zh_generator_script": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/scripts/plotting/plot_phase27_complete_results_zh.py",
+      "sha256": "7398f2d78cea503b73ac459f98895c1ad703d729f1909dcf90322aabee48fad3"
+    }
+  },
+  "locale": "zh-CN",
+  "outputs": {
+    "README.md": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/README.md",
+      "sha256": "289b46754b3ae7702c7ca585fde0704f108628eb931f83d3d057b4295779c1b3"
+    },
+    "event_convergence_summary.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/event_convergence_summary.csv",
+      "sha256": "0dccb81b38387d685fec1f25a6332b3af2d5ca08eef46e57a7c8a1ead3d0218f"
+    },
+    "event_predictions_by_horizon.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/event_predictions_by_horizon.csv",
+      "sha256": "81c11a58c390cf542a337fe2db73fdd6cdf5107e5b9707ec5da26c689baca047"
+    },
+    "external_cm2_event_comparison.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/external_cm2_event_comparison.csv",
+      "sha256": "bc345233dab900c51193c6b84ce3a6d131130fb649efe8b21a2935bad4b361c7"
+    },
+    "external_cm2_method_summary.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/external_cm2_method_summary.csv",
+      "sha256": "72f63e758636c0c91f89a9393a25c5b0a17b77a0f32cf14a5ff61762841cd7b2"
+    },
+    "figures/01_method_and_causal_timing.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/01_method_and_causal_timing.pdf",
+      "sha256": "862b1a81bb44f9877e9270adeebcea0ffccc83a6d05260cc444e0a3bdec1512b"
+    },
+    "figures/01_method_and_causal_timing.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/01_method_and_causal_timing.png",
+      "sha256": "2d8bf6cdd2faeb4f31318b1c0f62dafb8ef610563bae8d677ee15560a9d8f42f"
+    },
+    "figures/02_overall_internal_convergence.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/02_overall_internal_convergence.pdf",
+      "sha256": "fb3170a5b229bd10e2897819cd8c669a282c31d5cdf7a4cf796db14fdbada0db"
+    },
+    "figures/02_overall_internal_convergence.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/02_overall_internal_convergence.png",
+      "sha256": "5ecb9af68ac36622f08d370fca6e0a20096bf01c09e73cbd22de3a45d6a5a478"
+    },
+    "figures/03_magnitude_group_convergence.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/03_magnitude_group_convergence.pdf",
+      "sha256": "f746ca6eff210a1f8b2306095ef7e7e16882c451ce70353993d7e2d653e46a9c"
+    },
+    "figures/03_magnitude_group_convergence.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/03_magnitude_group_convergence.png",
+      "sha256": "804d953ca211a266c8d05e009ebedaf81f301c22ae51ea41d0da27d89419fc05"
+    },
+    "figures/04_high_magnitude_event_trajectories.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/04_high_magnitude_event_trajectories.pdf",
+      "sha256": "b372a13702e6a2b6f136e96679d14ef558470cd3e7466831c88d106d3f964849"
+    },
+    "figures/04_high_magnitude_event_trajectories.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/04_high_magnitude_event_trajectories.png",
+      "sha256": "d2a81a214cda5d936033c912b4bd3b82ca417333ea897be9e186cc16b5f02059"
+    },
+    "figures/05_convergence_time_by_magnitude.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/05_convergence_time_by_magnitude.pdf",
+      "sha256": "3492ba425eeaebc1687fe8c77dcdf5a1f3f17cb38ec3ed86d1283ab54b428885"
+    },
+    "figures/05_convergence_time_by_magnitude.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/05_convergence_time_by_magnitude.png",
+      "sha256": "4251a541fb6cc323d4bef6dc985684a79e474bca14c40208fedc1c8137e8e17b"
+    },
+    "figures/06_final_event_errors_and_station_counts.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/06_final_event_errors_and_station_counts.pdf",
+      "sha256": "ad82d9451cdadfe25d7859580188076770beacecc1eb0dbfe6a548ec2556cae7"
+    },
+    "figures/06_final_event_errors_and_station_counts.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/06_final_event_errors_and_station_counts.png",
+      "sha256": "210840cb1fe870ac6092ad75f461e86679a21cf0aba127a0258f515bd1bfaa63"
+    },
+    "figures/07_external_cm2_method_comparison.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/07_external_cm2_method_comparison.pdf",
+      "sha256": "6ba4a53bd9b7cc414750779f5a68b467b8daf4716cebafd4d7b16f5ae99bb120"
+    },
+    "figures/07_external_cm2_method_comparison.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/figures/07_external_cm2_method_comparison.png",
+      "sha256": "9f24b0a39fac53487d5701a838293355c181e85f89cedadaa0034c84ff0acdcd"
+    },
+    "final_event_errors.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/final_event_errors.csv",
+      "sha256": "35a0975d768881c7cbaf85481d0670212ed373b88c70c6533e0c61022583ab9d"
+    },
+    "magnitude_group_horizon_metrics.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/magnitude_group_horizon_metrics.csv",
+      "sha256": "13659e5adff238b47df610139329f5df6e7e29dbbc358123ecce44d72742790d"
+    },
+    "overall_horizon_metrics.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase27-manuscript-stf-event-loss-weighted-zh/overall_horizon_metrics.csv",
+      "sha256": "851f229687e59dbb46b27506311826e51297513ebdaf11194cbaf2bfd95b18fc"
+    }
+  },
+  "schema_version": 1
+}
