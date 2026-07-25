@@ -68,6 +68,12 @@ PHASE31_CONFIG_PATH = (
     / "experiments"
     / "manuscript_station_stf_usgs_moment_head_dropout.yaml"
 )
+PHASE32_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_loss_weight_search.yaml"
+)
 CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
@@ -574,6 +580,101 @@ def test_phase31_axis_is_exactly_the_phase27_incumbent_plus_dropout_marker() -> 
         campaign.validate_formal_config(changed_learning_rate)
 
 
+def test_phase32_profiles_and_hash_are_frozen_on_phase27_incumbent() -> None:
+    config = _config(PHASE32_CONFIG_PATH)
+
+    campaign.validate_formal_config(config)
+    assert campaign.variant_axis_from_config(config) == campaign.LOSS_WEIGHT_PROFILE_AXIS
+    profiles = campaign.loss_weight_profiles_from_config(config)
+    assert profiles == campaign.LOSS_WEIGHT_PROFILES
+    assert campaign._candidate_profile_sha256(profiles) == (
+        "2235d225dd480f675ab3bdd4b044fae420f4420a9a0f40c26fc70bfd9399df64"
+    )
+    variants = campaign.build_variant_configs(config)
+    assert list(variants) == ["baseline", "w01", "w10"]
+    expected_paths = {
+        ".".join(campaign.LOSS_WEIGHT_PATHS[name])
+        for name in campaign.LOSS_WEIGHT_KEYS
+    }
+    for profile_id in ("w01", "w10"):
+        assert campaign._config_diff_paths(
+            variants["baseline"], variants[profile_id]
+        ) == expected_paths
+        assert campaign.variant_axis_from_config(variants[profile_id]) == (
+            campaign.LOSS_WEIGHT_PROFILE_AXIS
+        )
+
+    phase27_incumbent = campaign.build_variant_configs(
+        _config(PHASE27_CONFIG_PATH)
+    )["candidate"]
+    phase32_baseline = copy.deepcopy(variants["baseline"])
+    phase27_incumbent.pop("campaign")
+    phase32_baseline.pop("campaign")
+    assert phase32_baseline == phase27_incumbent
+
+
+@pytest.mark.parametrize("invalid", [0.0, -1.0, float("nan"), float("inf")])
+def test_phase32_rejects_nonpositive_or_nonfinite_profile_weights(
+    invalid: float,
+) -> None:
+    config = _config(PHASE32_CONFIG_PATH)
+    config["campaign"]["loss_weight_search"]["profiles"]["w01"][
+        "lambda_shape"
+    ] = invalid
+
+    with pytest.raises(ValueError, match="finite and positive"):
+        campaign.loss_weight_profiles_from_config(config)
+
+
+def test_phase32_rejects_profile_table_or_hash_tampering() -> None:
+    changed_hash = _config(PHASE32_CONFIG_PATH)
+    changed_hash["campaign"]["loss_weight_search"][
+        "candidate_profile_sha256"
+    ] = "0" * 64
+    with pytest.raises(ValueError, match="candidate_profile_sha256 changed"):
+        campaign.loss_weight_profiles_from_config(changed_hash)
+
+    changed_table = _config(PHASE32_CONFIG_PATH)
+    changed_table["campaign"]["loss_weight_search"]["profiles"]["w10"][
+        "lambda_mag"
+    ] += 1.0e-9
+    with pytest.raises(ValueError, match="w10.lambda_mag changed"):
+        campaign.loss_weight_profiles_from_config(changed_table)
+
+
+def test_phase32_profile_selection_uses_paired_median_and_profile_id_tie_break() -> None:
+    baseline = {17: 0.10, 42: 0.20, 73: 0.30}
+    deltas = {
+        "w01": {17: -0.02, 42: -0.01, 73: 0.02},
+        "w10": {17: -0.03, 42: -0.01, 73: 0.03},
+    }
+    variants: dict[str, Any] = {
+        "baseline": {
+            "seeds": {
+                str(seed): {campaign.VALIDATION_METRIC: value}
+                for seed, value in baseline.items()
+            }
+        }
+    }
+    for profile_id in ("w01", "w10"):
+        variants[profile_id] = {
+            "seeds": {
+                str(seed): {
+                    campaign.VALIDATION_METRIC: baseline[seed] + deltas[profile_id][seed]
+                }
+                for seed in campaign.SEEDS
+            }
+        }
+
+    selection = campaign.select_loss_weight_profile(variants)
+
+    assert selection["winner_profile"] == "w01"
+    assert selection["winner_paired_median_delta"] == pytest.approx(-0.01)
+    assert selection["winner_paired_mean_delta"] < 0.0
+    assert selection["winner_improved_seed_count"] == 2
+    assert selection["winner_improved_seed_majority"] is True
+
+
 def test_split_contract_is_frozen_for_all_three_seeds() -> None:
     for seed in campaign.SEEDS:
         manifest = {
@@ -1063,6 +1164,65 @@ def test_phase30_seed_summary_resume_binds_bool_and_schema2_sampling(
         phase31_summary,
         **{**phase31_arguments, "expected_moment_head_dropout": False},
     )
+
+    phase32_weights = dict(campaign.LOSS_WEIGHT_PROFILES["w01"])
+    phase32_expected_config = {
+        "training": {
+            "random_seed": 17,
+            "event_balance_estimator": "inverse_count_full_data",
+            "stf_rate_loss": phase32_weights,
+        }
+    }
+    phase32_config_path = tmp_path / "phase32_config.yaml"
+    phase32_config_path.write_text(
+        yaml.safe_dump(phase32_expected_config, sort_keys=False),
+        encoding="utf-8",
+    )
+    phase32_summary = {
+        **summary,
+        "loss_weight_profile": "w01",
+        "loss_weights": phase32_weights,
+        "loss_weight_profile_sha256": (
+            campaign.LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+        ),
+        "config": _artifact(phase32_config_path),
+    }
+    phase32_arguments = {
+        "require_sampling": True,
+        "expected_loss_weight_profile": "w01",
+        "expected_loss_weights": phase32_weights,
+        "expected_loss_weight_profile_sha256": (
+            campaign.LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+        ),
+        "expected_variant": "baseline",
+        "expected_seed": 17,
+        "expected_split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[17],
+        "expected_config": phase32_expected_config,
+        "expected_git_commit": expected_git_commit,
+    }
+
+    assert campaign._seed_summary_is_valid(
+        phase32_summary,
+        **phase32_arguments,
+    )
+    assert not campaign._seed_summary_is_valid(
+        {**phase32_summary, "loss_weight_profile": "w10"},
+        **phase32_arguments,
+    )
+    assert not campaign._seed_summary_is_valid(
+        {
+            **phase32_summary,
+            "loss_weight_profile_sha256": "wrong",
+        },
+        **phase32_arguments,
+    )
+    for weight_name in campaign.LOSS_WEIGHT_KEYS:
+        changed_weights = dict(phase32_weights)
+        changed_weights[weight_name] += 1.0e-9
+        assert not campaign._seed_summary_is_valid(
+            {**phase32_summary, "loss_weights": changed_weights},
+            **phase32_arguments,
+        )
 
 
 def test_phase30_train_resume_passes_complete_strict_context(
@@ -1821,9 +1981,82 @@ def test_train_stage_selects_from_validation_without_test_or_external(
         assert summary["incumbent_reproduction"]["passed"] is True
 
 
+def test_phase32_train_runs_baseline_then_two_profiles_for_all_seeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "frozen_config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(_config(PHASE32_CONFIG_PATH), sort_keys=False),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "dataset_manifest.csv"
+    manifest_path.write_text("event,station\n", encoding="utf-8")
+    splits: dict[str, Any] = {}
+    for seed in campaign.SEEDS:
+        split_path = tmp_path / f"split_{seed}.json"
+        _write_json(split_path, {"seed": seed})
+        splits[str(seed)] = {"manifest": _artifact(split_path)}
+    _mark_stage(
+        tmp_path,
+        "preflight",
+        {
+            "status": "complete",
+            "source_data": {"sha256": campaign.EXPECTED_SOURCE_SHA256},
+            "frozen_config": _artifact(config_path),
+            "dataset_manifest": _artifact(manifest_path),
+            "splits": splits,
+        },
+    )
+    _mark_stage(tmp_path, "smoke", {"status": "complete"})
+    values = {
+        "baseline": dict(campaign.PHASE27_INCUMBENT_VALIDATION_BY_SEED),
+        "w01": {17: 0.100, 42: 0.120, 73: 0.190},
+        "w10": {17: 0.120, 42: 0.130, 73: 0.180},
+    }
+    calls: list[tuple[str, int]] = []
+
+    def fake_train_one_seed(**kwargs: Any) -> dict[str, Any]:
+        profile_id = str(kwargs["variant"])
+        seed = int(kwargs["seed"])
+        calls.append((profile_id, seed))
+        return {
+            "variant": profile_id,
+            "seed": seed,
+            campaign.VALIDATION_METRIC: values[profile_id][seed],
+            "checkpoint": {
+                "sha256": (
+                    campaign.PHASE27_INCUMBENT_CHECKPOINT_SHA256_BY_SEED[seed]
+                    if profile_id == "baseline"
+                    else f"{profile_id}-{seed}"
+                )
+            },
+        }
+
+    monkeypatch.setattr(campaign, "_train_one_seed", fake_train_one_seed)
+
+    summary = campaign.run_train(output_root=tmp_path, resume=False)
+
+    assert calls == [
+        (profile_id, seed)
+        for profile_id in ("baseline", "w01", "w10")
+        for seed in campaign.SEEDS
+    ]
+    assert summary["incumbent_reproduction"]["passed"] is True
+    assert summary["selected_candidate_variant"] == "w01"
+    assert summary["loss_weight_profile_selection"]["winner_profile"] == "w01"
+    assert summary["test_evaluated"] is False
+    assert summary["external_evaluated"] is False
+
+
 @pytest.mark.parametrize(
     "config_path",
-    [PHASE29_CONFIG_PATH, PHASE30_CONFIG_PATH, PHASE31_CONFIG_PATH],
+    [
+        PHASE29_CONFIG_PATH,
+        PHASE30_CONFIG_PATH,
+        PHASE31_CONFIG_PATH,
+        PHASE32_CONFIG_PATH,
+    ],
 )
 @pytest.mark.parametrize("mismatch", ["validation_metric", "checkpoint_sha256"])
 def test_frozen_incumbent_control_drift_stops_before_candidate_training(
@@ -1985,6 +2218,168 @@ def test_internal_runs_delayed_prefix_only_for_selected_candidate(
     }
     assert "delayed_prefix" not in summary["variants"]["baseline"]
     assert "delayed_prefix" in summary["variants"]["candidate"]
+
+
+@pytest.mark.parametrize(
+    ("candidate_mae", "expected_passed"),
+    [(0.13, True), (0.14, False)],
+)
+def test_phase32_internal_evaluates_only_winner_and_applies_both_test_gates(
+    candidate_mae: float,
+    expected_passed: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def profile(selected_seed: int) -> dict[str, Any]:
+        return {
+            "selection": {"selected_seed": selected_seed},
+            "seeds": {
+                str(seed): {
+                    "seed": seed,
+                    campaign.VALIDATION_METRIC: 0.10 + seed / 1000.0,
+                }
+                for seed in campaign.SEEDS
+            },
+        }
+
+    _mark_stage(
+        tmp_path,
+        "train",
+        {
+            "status": "complete",
+            "variant_axis": campaign.LOSS_WEIGHT_PROFILE_AXIS,
+            "selected_candidate_variant": "w10",
+            "variants": {
+                "baseline": profile(17),
+                "w01": profile(42),
+                "w10": profile(73),
+            },
+        },
+    )
+    profile_selection = {
+        "winner_profile": "w10",
+        "winner_paired_mean_delta": -0.01,
+        "winner_paired_median_delta": -0.01,
+        "winner_improved_seed_count": 2,
+        "winner_improved_seed_majority": True,
+    }
+    monkeypatch.setattr(campaign, "candidate_validation_improves", lambda _s: True)
+    monkeypatch.setattr(
+        campaign,
+        "_validated_loss_weight_profile_selection",
+        lambda _s: profile_selection,
+    )
+    calls: list[tuple[int, bool]] = []
+
+    def fake_locked_test(**kwargs: Any) -> dict[str, Any]:
+        seed = int(kwargs["seed_summary"]["seed"])
+        delayed = bool(kwargs["include_delayed_prefix"])
+        calls.append((seed, delayed))
+        return {
+            "selected_seed": seed,
+            "metrics": {
+                "event_mae": candidate_mae if delayed else 0.137,
+            },
+            "artifacts": {},
+        }
+
+    monkeypatch.setattr(campaign, "_evaluate_locked_test", fake_locked_test)
+
+    summary = campaign.run_internal(output_root=tmp_path, resume=False)
+
+    assert calls == [(17, False), (73, True)]
+    assert summary["selected_candidate_variant"] == "w10"
+    assert summary["variants"]["candidate"]["source_variant"] == "w10"
+    assert summary["candidate_gate"]["passed"] is expected_passed
+    assert summary["candidate_gate"][
+        "phase27_incumbent_maximum_exclusive"
+    ] == campaign.PHASE27_INCUMBENT_TEST_EVENT_MAE
+    assert summary["candidate_gate"]["absolute_maximum_exclusive"] == 0.15
+
+
+@pytest.mark.parametrize(
+    (
+        "improved_majority",
+        "mean_delta",
+        "median_delta",
+        "candidate_validation",
+    ),
+    [
+        (False, -0.01, -0.01, 0.10),
+        (True, 0.001, -0.01, 0.10),
+        (True, -0.01, 0.0, 0.10),
+        (True, -0.01, -0.01, campaign.PHASE27_INCUMBENT_VALIDATION),
+    ],
+)
+def test_phase32_validation_failures_never_read_locked_test(
+    improved_majority: bool,
+    mean_delta: float,
+    median_delta: float,
+    candidate_validation: float,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def profile(selected_seed: int, validation: float) -> dict[str, Any]:
+        return {
+            "selection": {"selected_seed": selected_seed},
+            "seeds": {
+                str(seed): {
+                    "seed": seed,
+                    campaign.VALIDATION_METRIC: (
+                        validation if seed == selected_seed else validation + 0.01
+                    ),
+                }
+                for seed in campaign.SEEDS
+            },
+        }
+
+    train_summary = {
+        "status": "complete",
+        "variant_axis": campaign.LOSS_WEIGHT_PROFILE_AXIS,
+        "selected_candidate_variant": "w01",
+        "variants": {
+            "baseline": profile(
+                campaign.PHASE27_INCUMBENT_SELECTED_SEED,
+                campaign.PHASE27_INCUMBENT_VALIDATION,
+            ),
+            "w01": profile(17, candidate_validation),
+            "w10": profile(42, 0.12),
+        },
+    }
+    _mark_stage(tmp_path, "train", train_summary)
+    selection = {
+        "winner_profile": "w01",
+        "winner_paired_mean_delta": mean_delta,
+        "winner_paired_median_delta": median_delta,
+        "winner_improved_seed_count": 2 if improved_majority else 1,
+        "winner_improved_seed_majority": improved_majority,
+    }
+    monkeypatch.setattr(
+        campaign,
+        "_validated_phase27_incumbent_reproduction",
+        lambda *_args, **_kwargs: {},
+    )
+    monkeypatch.setattr(
+        campaign,
+        "_validated_loss_weight_profile_selection",
+        lambda _summary: selection,
+    )
+    locked_test_calls = 0
+
+    def forbidden_locked_test(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal locked_test_calls
+        locked_test_calls += 1
+        raise AssertionError("Phase32 locked test must remain unread")
+
+    monkeypatch.setattr(campaign, "_evaluate_locked_test", forbidden_locked_test)
+
+    summary = campaign.run_internal(output_root=tmp_path, resume=False)
+
+    assert locked_test_calls == 0
+    assert summary["status"] == "candidate_validation_gate_failed"
+    assert summary["validation_gate"]["passed"] is False
+    assert summary["test_evaluated"] is False
+    assert "variants" not in summary
 
 
 def test_internal_validation_gate_fails_before_locked_test(

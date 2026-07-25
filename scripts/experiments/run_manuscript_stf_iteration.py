@@ -85,6 +85,7 @@ MAGNITUDE_PENALTY_AXIS = "magnitude_penalty"
 EVENT_BALANCE_EXPONENT_AXIS = "event_balance_exponent"
 MOMENT_LINEAR_SKIP_AXIS = "moment_linear_skip"
 MOMENT_HEAD_DROPOUT_AXIS = "moment_head_dropout"
+LOSS_WEIGHT_PROFILE_AXIS = "loss_weight_profile"
 STATION_UNIFORM_ESTIMATOR = "station_uniform"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
@@ -139,6 +140,43 @@ VARIANT_AXIS_PATHS = {
     MOMENT_LINEAR_SKIP_AXIS: ("model", "moment_linear_skip"),
     MOMENT_HEAD_DROPOUT_AXIS: ("model", "moment_head_dropout"),
 }
+LOSS_WEIGHT_KEYS = (
+    "lambda_MSE",
+    "lambda_synth",
+    "lambda_mag",
+    "lambda_shape",
+)
+LOSS_WEIGHT_PATHS = {
+    name: ("training", "stf_rate_loss", name) for name in LOSS_WEIGHT_KEYS
+}
+LOSS_WEIGHT_PROFILES = {
+    "baseline": {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.1,
+    },
+    "w01": {
+        "lambda_MSE": 0.822781998,
+        "lambda_synth": 2.937882947,
+        "lambda_mag": 1.075052702,
+        "lambda_shape": 44.807934578,
+    },
+    "w10": {
+        "lambda_MSE": 1.068322822,
+        "lambda_synth": 5.018296600,
+        "lambda_mag": 0.866201862,
+        "lambda_shape": 52.112544857,
+    },
+}
+LOSS_WEIGHT_GENERATION_SEED = 20260725
+LOSS_WEIGHT_PROPOSAL_POOL_SIZE = 12
+LOSS_WEIGHT_PROPOSAL_POOL_SHA256 = (
+    "7d35115e92b76540572fe2e5f8ea1e3caec288a979d66a6f7937f3b00ca68dcc"
+)
+LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256 = (
+    "2235d225dd480f675ab3bdd4b044fae420f4420a9a0f40c26fc70bfd9399df64"
+)
 # Backward-compatible alias for the Phase23 campaign and its persisted tests.
 VARIANTS = VARIANT_AXES[STF_OUTPUT_PARAMETERIZATION_AXIS]
 VALIDATION_METRIC = "validation_event_mae_catalog"
@@ -184,6 +222,7 @@ FROZEN_PHASE27_INCUMBENT_AXES = frozenset(
         EVENT_BALANCE_EXPONENT_AXIS,
         MOMENT_LINEAR_SKIP_AXIS,
         MOMENT_HEAD_DROPOUT_AXIS,
+        LOSS_WEIGHT_PROFILE_AXIS,
     }
 )
 PHASE30_PARAMETER_COUNT_BY_VARIANT = {
@@ -205,6 +244,7 @@ EXTERNAL_EVENT_NAMES = (
     "sand-point-2025-alaska",
 )
 INTERNAL_EVENT_MAE_MAXIMUM = 0.15
+PHASE27_INCUMBENT_TEST_EVENT_MAE = 0.1372873624165853
 FULL_OBSERVATION_HORIZON_SEC = 200.0
 FULL_RELEASE_TIME_SEC = (
     FULL_OBSERVATION_HORIZON_SEC + MANUSCRIPT_PROCESSING_DELAY_SEC
@@ -239,6 +279,117 @@ def _json_bytes(payload: Any) -> bytes:
         )
         + "\n"
     ).encode("utf-8")
+
+
+def _compact_canonical_json_bytes(payload: Any) -> bytes:
+    return json.dumps(
+        payload,
+        ensure_ascii=True,
+        allow_nan=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+
+
+def _candidate_profile_sha256(profiles: Mapping[str, Any]) -> str:
+    candidates = {
+        name: profiles[name]
+        for name in sorted(set(profiles) - {"baseline"})
+    }
+    return hashlib.sha256(_compact_canonical_json_bytes(candidates)).hexdigest()
+
+
+def loss_weights_from_config(config: Mapping[str, Any]) -> dict[str, float]:
+    try:
+        loss_config = config["training"]["stf_rate_loss"]
+    except (KeyError, TypeError) as error:
+        raise ValueError("formal config is missing training.stf_rate_loss") from error
+    if not isinstance(loss_config, Mapping):
+        raise ValueError("formal config is missing training.stf_rate_loss")
+    weights: dict[str, float] = {}
+    for name in LOSS_WEIGHT_KEYS:
+        value = loss_config.get(name)
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError(f"loss weight {name} must be a finite positive number")
+        numeric = float(value)
+        if not math.isfinite(numeric) or numeric <= 0.0:
+            raise ValueError(f"loss weight {name} must be a finite positive number")
+        weights[name] = numeric
+    return weights
+
+
+def loss_weight_profiles_from_config(
+    config: Mapping[str, Any],
+) -> dict[str, dict[str, float]]:
+    campaign = config.get("campaign")
+    if not isinstance(campaign, Mapping):
+        raise ValueError("loss-weight campaign marker must be a mapping")
+    search = campaign.get("loss_weight_search")
+    if not isinstance(search, Mapping):
+        raise ValueError("loss-weight campaign is missing loss_weight_search")
+    expected_keys = {
+        "generation_method",
+        "generation_seed",
+        "proposal_pool_size",
+        "selection_rule",
+        "proposal_pool_sha256",
+        "candidate_profile_sha256",
+        "profiles",
+    }
+    if set(search) != expected_keys:
+        raise ValueError("loss-weight search metadata schema changed")
+    expected_metadata = {
+        "generation_method": "fixed 12-point train-only log-Latin-hypercube pool",
+        "generation_seed": LOSS_WEIGHT_GENERATION_SEED,
+        "proposal_pool_size": LOSS_WEIGHT_PROPOSAL_POOL_SIZE,
+        "selection_rule": (
+            "w01 is the best train-gradient proxy; w10 is the first "
+            "higher-ranked profile passing the preregistered diversity check"
+        ),
+        "proposal_pool_sha256": LOSS_WEIGHT_PROPOSAL_POOL_SHA256,
+        "candidate_profile_sha256": LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256,
+    }
+    for name, expected in expected_metadata.items():
+        value = search.get(name)
+        if value != expected or type(value) is not type(expected):
+            raise ValueError(
+                f"loss-weight search {name} changed: expected={expected!r}, "
+                f"actual={value!r}"
+            )
+    raw_profiles = search.get("profiles")
+    if not isinstance(raw_profiles, Mapping) or set(raw_profiles) != set(
+        LOSS_WEIGHT_PROFILES
+    ):
+        raise ValueError("loss-weight profile identities changed")
+    profiles: dict[str, dict[str, float]] = {}
+    for profile_id in LOSS_WEIGHT_PROFILES:
+        raw_weights = raw_profiles.get(profile_id)
+        if not isinstance(raw_weights, Mapping) or set(raw_weights) != set(
+            LOSS_WEIGHT_KEYS
+        ):
+            raise ValueError(f"loss-weight profile {profile_id} schema changed")
+        weights: dict[str, float] = {}
+        for name in LOSS_WEIGHT_KEYS:
+            value = raw_weights.get(name)
+            if type(value) is not float or not math.isfinite(value) or value <= 0.0:
+                raise ValueError(
+                    f"loss-weight profile {profile_id}.{name} must be finite and positive"
+                )
+            expected = LOSS_WEIGHT_PROFILES[profile_id][name]
+            if value != expected:
+                raise ValueError(
+                    f"loss-weight profile {profile_id}.{name} changed: "
+                    f"expected={expected!r}, actual={value!r}"
+                )
+            weights[name] = value
+        profiles[profile_id] = weights
+    actual_hash = _candidate_profile_sha256(profiles)
+    if actual_hash != LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256:
+        raise ValueError(
+            "loss-weight candidate profile hash changed: "
+            f"expected={LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256}, actual={actual_hash}"
+        )
+    return profiles
 
 
 def _yaml_bytes(payload: Mapping[str, Any]) -> bytes:
@@ -534,6 +685,32 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                     "moment-linear skip, and model.moment_head_dropout=true"
                 )
             return MOMENT_HEAD_DROPOUT_AXIS
+        if explicit_axis == LOSS_WEIGHT_PROFILE_AXIS:
+            if (
+                parameterization != "moment_shape_factorized"
+                or scheduler_t0 != 15
+                or stem_is_explicit
+                or moment_skip_is_explicit
+                or moment_dropout_is_explicit
+                or training.get("event_balanced_sampling") is not True
+                or training.get("event_balance_estimator")
+                != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                or exponent_is_explicit
+                or magnitude_penalty_is_explicit
+                or loss_config.get("magnitude_penalty", "squared") != "squared"
+            ):
+                raise ValueError(
+                    "Phase32 loss-weight baseline requires the frozen Phase27 "
+                    "factorized STF candidate with scheduler_T0=15, the original "
+                    "radial stem, inverse-count full-data event balancing, p=1, "
+                    "and squared magnitude penalty"
+                )
+            profiles = loss_weight_profiles_from_config(base_config)
+            if loss_weights_from_config(base_config) not in profiles.values():
+                raise ValueError(
+                    "Phase32 active loss weights do not match a frozen profile"
+                )
+            return LOSS_WEIGHT_PROFILE_AXIS
         else:
             raise ValueError(f"unsupported formal campaign axis: {explicit_axis!r}")
     if (
@@ -571,7 +748,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         "marked Phase26/Phase27 event-balance baselines or Phase28 magnitude "
         "penalty baseline or Phase29 event-balance exponent baseline or "
         "Phase30 moment-linear-skip baseline or Phase31 moment-head-dropout "
-        "baseline"
+        "baseline or Phase32 loss-weight-profile baseline"
     )
 
 
@@ -579,6 +756,28 @@ def build_variant_configs(
     base_config: Mapping[str, Any],
 ) -> dict[str, dict[str, Any]]:
     axis = variant_axis_from_config(base_config)
+    if axis == LOSS_WEIGHT_PROFILE_AXIS:
+        profiles = loss_weight_profiles_from_config(base_config)
+        variants: dict[str, dict[str, Any]] = {}
+        for profile_id, weights in profiles.items():
+            config = copy.deepcopy(dict(base_config))
+            loss_config = config["training"]["stf_rate_loss"]
+            for name, value in weights.items():
+                loss_config[name] = value
+            variants[profile_id] = config
+        for profile_id, config in variants.items():
+            differences = _config_diff_paths(variants["baseline"], config)
+            expected = (
+                set()
+                if profile_id == "baseline"
+                else {".".join(LOSS_WEIGHT_PATHS[name]) for name in LOSS_WEIGHT_KEYS}
+            )
+            if differences != expected:
+                raise ValueError(
+                    f"loss-weight profile {profile_id} scientific diff changed: "
+                    f"expected={sorted(expected)}, actual={sorted(differences)}"
+                )
+        return variants
     variants: dict[str, dict[str, Any]] = {}
     for name, value in VARIANT_AXES[axis].items():
         config = copy.deepcopy(dict(base_config))
@@ -672,6 +871,7 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             EVENT_BALANCE_EXPONENT_AXIS,
             MOMENT_LINEAR_SKIP_AXIS,
             MOMENT_HEAD_DROPOUT_AXIS,
+            LOSS_WEIGHT_PROFILE_AXIS,
         },
     )
     variants = build_variant_configs(config)
@@ -736,6 +936,26 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             )
             raise ValueError(
                 "Phase31 baseline differs from the frozen Phase27 candidate: "
+                f"{sorted(differences)}"
+            )
+    if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+        phase27_config = _load_yaml(
+            PROJECT_ROOT
+            / "configs"
+            / "experiments"
+            / "manuscript_station_stf_usgs_event_loss_weighted.yaml"
+        )
+        phase27_incumbent = build_variant_configs(phase27_config)["candidate"]
+        phase32_baseline = copy.deepcopy(variants["baseline"])
+        phase27_incumbent.pop("campaign")
+        phase32_baseline.pop("campaign")
+        if phase32_baseline != phase27_incumbent:
+            differences = _config_diff_paths(
+                phase27_incumbent,
+                phase32_baseline,
+            )
+            raise ValueError(
+                "Phase32 baseline differs from the frozen Phase27 candidate: "
                 f"{sorted(differences)}"
             )
 
@@ -1306,6 +1526,7 @@ def _smoke_one_device(
         ),
         "moment_linear_skip": moment_linear_skip_from_config(config),
         "moment_head_dropout": moment_head_dropout_from_config(config),
+        "loss_weights": loss_weights_from_config(config),
         "sample_weights_exercised": sample_weights is not None,
         "sample_weight_probe": (
             dict(sample_weight_probe) if sample_weight_probe is not None else None
@@ -1357,6 +1578,15 @@ def run_smoke(
                 device=device,
                 sample_weight_probe=sample_weight_probe,
             )
+            if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+                result.update(
+                    {
+                        "loss_weight_profile": variant,
+                        "loss_weight_profile_sha256": (
+                            LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+                        ),
+                    }
+                )
             if (
                 variant_axis == MOMENT_LINEAR_SKIP_AXIS
                 and int(result["parameter_count"])
@@ -1393,6 +1623,15 @@ def run_smoke(
         "external_evaluated": False,
         "results": results,
     }
+    if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+        summary.update(
+            {
+                "loss_weight_profiles": loss_weight_profiles_from_config(config),
+                "loss_weight_profile_sha256": (
+                    LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+                ),
+            }
+        )
     _finish_stage(stage_dir, summary, resume=resume)
     return summary
 
@@ -1481,6 +1720,80 @@ def phase29_incumbent_reproduction(
         "expected_selected_seed": PHASE27_INCUMBENT_SELECTED_SEED,
         "selected_seed_matches": selected_seed_matches,
         "seeds": rows,
+    }
+
+
+def select_loss_weight_profile(
+    variants: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    if set(variants) != set(LOSS_WEIGHT_PROFILES):
+        raise ValueError(
+            "loss-weight selection requires exactly baseline, w01, and w10"
+        )
+    baseline_rows = variants["baseline"].get("seeds")
+    expected_seed_keys = {str(seed) for seed in SEEDS}
+    if not isinstance(baseline_rows, Mapping) or set(baseline_rows) != (
+        expected_seed_keys
+    ):
+        raise ValueError("loss-weight baseline seed summaries are missing")
+    profile_rows: dict[str, Any] = {}
+    ranking: list[tuple[float, str]] = []
+    for profile_id in sorted(set(LOSS_WEIGHT_PROFILES) - {"baseline"}):
+        candidate_rows = variants[profile_id].get("seeds")
+        if not isinstance(candidate_rows, Mapping) or set(candidate_rows) != (
+            expected_seed_keys
+        ):
+            raise ValueError(f"loss-weight {profile_id} seed summaries are missing")
+        deltas: dict[str, float] = {}
+        for seed in SEEDS:
+            try:
+                baseline_value = float(
+                    baseline_rows[str(seed)][VALIDATION_METRIC]
+                )
+                candidate_value = float(
+                    candidate_rows[str(seed)][VALIDATION_METRIC]
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(
+                    f"loss-weight {profile_id} validation evidence is incomplete"
+                ) from error
+            if not math.isfinite(baseline_value) or not math.isfinite(
+                candidate_value
+            ):
+                raise ValueError("loss-weight validation metrics must be finite")
+            deltas[str(seed)] = candidate_value - baseline_value
+        ordered_deltas = sorted(deltas.values())
+        median_delta = ordered_deltas[len(ordered_deltas) // 2]
+        mean_delta = sum(ordered_deltas) / len(ordered_deltas)
+        improved_seed_count = sum(delta < 0.0 for delta in ordered_deltas)
+        selected_seed = select_seed_by_validation(
+            {seed: candidate_rows[str(seed)] for seed in SEEDS}
+        )
+        profile_rows[profile_id] = {
+            "paired_deltas": deltas,
+            "paired_mean_delta": mean_delta,
+            "paired_median_delta": median_delta,
+            "improved_seed_count": improved_seed_count,
+            "improved_seed_majority": improved_seed_count >= 2,
+            "selected_seed": selected_seed,
+            "selected_validation_event_mae_catalog": float(
+                candidate_rows[str(selected_seed)][VALIDATION_METRIC]
+            ),
+        }
+        ranking.append((median_delta, profile_id))
+    winner_median_delta, winner_profile = min(ranking)
+    winner = profile_rows[winner_profile]
+    return {
+        "selection_metric": VALIDATION_METRIC,
+        "ranking_rule": (
+            "minimum paired three-seed median delta; ties by profile id"
+        ),
+        "winner_profile": winner_profile,
+        "winner_paired_mean_delta": winner["paired_mean_delta"],
+        "winner_paired_median_delta": winner_median_delta,
+        "winner_improved_seed_count": winner["improved_seed_count"],
+        "winner_improved_seed_majority": winner["improved_seed_majority"],
+        "profiles": profile_rows,
     }
 
 
@@ -1656,6 +1969,9 @@ def _seed_summary_is_valid(
     expected_event_balance_exponent: float | None = None,
     expected_moment_linear_skip: bool | None = None,
     expected_moment_head_dropout: bool | None = None,
+    expected_loss_weight_profile: str | None = None,
+    expected_loss_weights: Mapping[str, float] | None = None,
+    expected_loss_weight_profile_sha256: str | None = None,
     expected_variant: str | None = None,
     expected_seed: int | None = None,
     expected_split_assignment_sha256: str | None = None,
@@ -1685,6 +2001,23 @@ def _seed_summary_is_valid(
             is not expected_moment_head_dropout
         ):
             return False
+        if (
+            expected_loss_weight_profile is not None
+            and summary.get("loss_weight_profile") != expected_loss_weight_profile
+        ):
+            return False
+        if expected_loss_weights is not None:
+            summary_weights = summary.get("loss_weights")
+            if not isinstance(summary_weights, Mapping) or dict(
+                summary_weights
+            ) != dict(expected_loss_weights):
+                return False
+        if (
+            expected_loss_weight_profile_sha256 is not None
+            and summary.get("loss_weight_profile_sha256")
+            != expected_loss_weight_profile_sha256
+        ):
+            return False
         if expected_event_balance_exponent is not None:
             summary_exponent = summary.get("event_balance_exponent")
             if (
@@ -1711,6 +2044,7 @@ def _seed_summary_is_valid(
         if (
             expected_moment_linear_skip is not None
             or expected_moment_head_dropout is not None
+            or expected_loss_weight_profile is not None
         ):
             if expected_seed is None:
                 return False
@@ -1785,14 +2119,12 @@ def _train_one_seed(
     resume: bool,
 ) -> dict[str, Any]:
     seed_summary_path = seed_root / "seed_summary.json"
+    campaign = config.get("campaign", {})
+    campaign_axis = (
+        campaign.get("variant_axis") if isinstance(campaign, Mapping) else None
+    )
     if seed_summary_path.is_file():
         summary = _load_json(seed_summary_path)
-        campaign = config.get("campaign", {})
-        campaign_axis = (
-            campaign.get("variant_axis")
-            if isinstance(campaign, Mapping)
-            else None
-        )
         require_sampling = (
             campaign_axis
             in {
@@ -1802,6 +2134,7 @@ def _train_one_seed(
                 EVENT_BALANCE_EXPONENT_AXIS,
                 MOMENT_LINEAR_SKIP_AXIS,
                 MOMENT_HEAD_DROPOUT_AXIS,
+                LOSS_WEIGHT_PROFILE_AXIS,
             }
         )
         expected_magnitude_penalty = (
@@ -1824,11 +2157,25 @@ def _train_one_seed(
             if campaign_axis == MOMENT_HEAD_DROPOUT_AXIS
             else None
         )
+        expected_loss_weight_profile = (
+            variant if campaign_axis == LOSS_WEIGHT_PROFILE_AXIS else None
+        )
+        expected_loss_weights = (
+            loss_weights_from_config(config)
+            if campaign_axis == LOSS_WEIGHT_PROFILE_AXIS
+            else None
+        )
+        expected_loss_weight_profile_sha256 = (
+            LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+            if campaign_axis == LOSS_WEIGHT_PROFILE_AXIS
+            else None
+        )
         expected_git_commit = (
             current_git_commit(PROJECT_ROOT)
             if expected_event_balance_exponent is not None
             or expected_moment_linear_skip is not None
             or expected_moment_head_dropout is not None
+            or expected_loss_weight_profile is not None
             else None
         )
         strict_resume = (
@@ -1836,6 +2183,7 @@ def _train_one_seed(
             or expected_event_balance_exponent is not None
             or expected_moment_linear_skip is not None
             or expected_moment_head_dropout is not None
+            or expected_loss_weight_profile is not None
         )
         expected_runtime_config = (
             _runtime_config(
@@ -1854,6 +2202,11 @@ def _train_one_seed(
             expected_event_balance_exponent=expected_event_balance_exponent,
             expected_moment_linear_skip=expected_moment_linear_skip,
             expected_moment_head_dropout=expected_moment_head_dropout,
+            expected_loss_weight_profile=expected_loss_weight_profile,
+            expected_loss_weights=expected_loss_weights,
+            expected_loss_weight_profile_sha256=(
+                expected_loss_weight_profile_sha256
+            ),
             expected_variant=variant if strict_resume else None,
             expected_seed=seed if strict_resume else None,
             expected_split_assignment_sha256=(
@@ -1925,6 +2278,7 @@ def _train_one_seed(
         ),
         "moment_linear_skip": moment_linear_skip_from_config(config),
         "moment_head_dropout": moment_head_dropout_from_config(config),
+        "loss_weights": loss_weights_from_config(config),
         "seed": seed,
         "git_commit": current_git_commit(PROJECT_ROOT),
         **checkpoint_selection,
@@ -1939,6 +2293,15 @@ def _train_one_seed(
         "parameter_count": int(verified["parameter_count"]),
         "device": str(result["device"]),
     }
+    if campaign_axis == LOSS_WEIGHT_PROFILE_AXIS:
+        summary.update(
+            {
+                "loss_weight_profile": variant,
+                "loss_weight_profile_sha256": (
+                    LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+                ),
+            }
+        )
     _atomic_json(seed_summary_path, summary, overwrite=resume)
     return summary
 
@@ -1998,7 +2361,11 @@ def run_train(
                     else (
                         "Phase30 moment-linear-skip"
                         if variant_axis == MOMENT_LINEAR_SKIP_AXIS
-                        else "Phase31 moment-head-dropout"
+                        else (
+                            "Phase31 moment-head-dropout"
+                            if variant_axis == MOMENT_HEAD_DROPOUT_AXIS
+                            else "Phase32 loss-weight-profile"
+                        )
                     )
                 )
                 raise ValueError(
@@ -2042,6 +2409,7 @@ def run_train(
             "moment_head_dropout": moment_head_dropout_from_config(
                 variant_config
             ),
+            "loss_weights": loss_weights_from_config(variant_config),
             "scientific_diff_from_baseline": sorted(
                 _config_diff_paths(variants["baseline"], variant_config)
             ),
@@ -2049,6 +2417,26 @@ def run_train(
             "selection": selection,
             "selection_artifact": _artifact(selection_path),
         }
+        if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+            variant_summaries[variant].update(
+                {
+                    "loss_weight_profile": variant,
+                    "loss_weight_profile_sha256": (
+                        LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+                    ),
+                }
+            )
+    profile_selection: dict[str, Any] | None = None
+    profile_selection_artifact: dict[str, str] | None = None
+    if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+        profile_selection = select_loss_weight_profile(variant_summaries)
+        profile_selection_path = stage_dir / "loss_weight_profile_selection.json"
+        _atomic_json(
+            profile_selection_path,
+            profile_selection,
+            overwrite=resume,
+        )
+        profile_selection_artifact = _artifact(profile_selection_path)
     summary = {
         "stage": "train",
         "status": "complete",
@@ -2073,12 +2461,164 @@ def run_train(
             **incumbent_reproduction,
             "artifact": incumbent_reproduction_artifact,
         }
+    if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+        if profile_selection is None or profile_selection_artifact is None:
+            raise RuntimeError("loss-weight profile selection was not evaluated")
+        summary.update(
+            {
+                "loss_weight_profiles": loss_weight_profiles_from_config(config),
+                "loss_weight_profile_sha256": (
+                    LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+                ),
+                "loss_weight_profile_selection": {
+                    **profile_selection,
+                    "artifact": profile_selection_artifact,
+                },
+                "selected_candidate_variant": profile_selection[
+                    "winner_profile"
+                ],
+            }
+        )
     _finish_stage(stage_dir, summary, resume=resume)
     return summary
 
 
+def _validated_phase27_incumbent_reproduction(
+    train_summary: Mapping[str, Any],
+    *,
+    campaign_name: str,
+) -> Mapping[str, Any]:
+    variants = train_summary["variants"]
+    reproduction = train_summary.get("incumbent_reproduction")
+    if not isinstance(reproduction, Mapping) or reproduction.get("passed") is not True:
+        raise ValueError(
+            f"{campaign_name} incumbent reproduction gate is missing or failed"
+        )
+    reproduction_path = _validate_artifact(
+        reproduction["artifact"],
+        label=f"{campaign_name} incumbent reproduction",
+    )
+    persisted_reproduction = _load_json(reproduction_path)
+    recorded_reproduction = {
+        key: value for key, value in reproduction.items() if key != "artifact"
+    }
+    if persisted_reproduction != recorded_reproduction:
+        raise ValueError(f"{campaign_name} incumbent reproduction artifact changed")
+    baseline_rows = {
+        seed: variants["baseline"]["seeds"][str(seed)] for seed in SEEDS
+    }
+    expected_reproduction = phase29_incumbent_reproduction(baseline_rows)
+    if expected_reproduction != persisted_reproduction:
+        raise ValueError(
+            f"{campaign_name} incumbent reproduction evidence is inconsistent"
+        )
+    return reproduction
+
+
+def _validated_loss_weight_profile_selection(
+    train_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    if train_summary.get("loss_weight_profile_sha256") != (
+        LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+    ):
+        raise ValueError("loss-weight profile hash is missing or changed")
+    if train_summary.get("loss_weight_profiles") != LOSS_WEIGHT_PROFILES:
+        raise ValueError("loss-weight profile table is missing or changed")
+    variants = train_summary.get("variants")
+    if not isinstance(variants, Mapping) or set(variants) != set(
+        LOSS_WEIGHT_PROFILES
+    ):
+        raise ValueError("loss-weight train variants changed")
+    for profile_id, expected_weights in LOSS_WEIGHT_PROFILES.items():
+        profile = variants[profile_id]
+        if (
+            profile.get("loss_weight_profile") != profile_id
+            or profile.get("loss_weight_profile_sha256")
+            != LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+            or profile.get("loss_weights") != expected_weights
+        ):
+            raise ValueError(f"loss-weight train variant {profile_id} changed")
+        seeds = profile.get("seeds")
+        if not isinstance(seeds, Mapping) or set(seeds) != {
+            str(seed) for seed in SEEDS
+        }:
+            raise ValueError(f"loss-weight seed set changed for {profile_id}")
+        for seed in SEEDS:
+            row = seeds[str(seed)]
+            if (
+                row.get("loss_weight_profile") != profile_id
+                or row.get("loss_weight_profile_sha256")
+                != LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+                or row.get("loss_weights") != expected_weights
+            ):
+                raise ValueError(
+                    f"loss-weight seed summary changed for {profile_id}/{seed}"
+                )
+    recorded = train_summary.get("loss_weight_profile_selection")
+    if not isinstance(recorded, Mapping):
+        raise ValueError("loss-weight profile selection is missing")
+    selection_path = _validate_artifact(
+        recorded["artifact"],
+        label="loss-weight profile selection",
+    )
+    persisted = _load_json(selection_path)
+    recorded_without_artifact = {
+        key: value for key, value in recorded.items() if key != "artifact"
+    }
+    if persisted != recorded_without_artifact:
+        raise ValueError("loss-weight profile selection artifact changed")
+    expected = select_loss_weight_profile(variants)
+    if persisted != expected:
+        raise ValueError("loss-weight profile selection evidence is inconsistent")
+    for profile_id in LOSS_WEIGHT_PROFILES:
+        profile = variants[profile_id]
+        selection = profile.get("selection")
+        if not isinstance(selection, Mapping):
+            raise ValueError(f"loss-weight seed selection missing for {profile_id}")
+        expected_seed = (
+            PHASE27_INCUMBENT_SELECTED_SEED
+            if profile_id == "baseline"
+            else expected["profiles"][profile_id]["selected_seed"]
+        )
+        if int(selection.get("selected_seed", -1)) != expected_seed:
+            raise ValueError(f"loss-weight selected seed changed for {profile_id}")
+        selection_path = _validate_artifact(
+            profile["selection_artifact"],
+            label=f"loss-weight seed selection {profile_id}",
+        )
+        if _load_json(selection_path) != dict(selection):
+            raise ValueError(
+                f"loss-weight seed selection artifact changed for {profile_id}"
+            )
+    if train_summary.get("selected_candidate_variant") != expected["winner_profile"]:
+        raise ValueError("selected loss-weight candidate variant changed")
+    return expected
+
+
 def candidate_validation_improves(train_summary: Mapping[str, Any]) -> bool:
     variants = train_summary["variants"]
+    variant_axis = train_summary.get("variant_axis")
+    if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+        _validated_phase27_incumbent_reproduction(
+            train_summary,
+            campaign_name="Phase32",
+        )
+        selection = _validated_loss_weight_profile_selection(train_summary)
+        winner_profile = str(selection["winner_profile"])
+        winner_seed = str(
+            variants[winner_profile]["selection"]["selected_seed"]
+        )
+        winner_validation = float(
+            variants[winner_profile]["seeds"][winner_seed][VALIDATION_METRIC]
+        )
+        if not math.isfinite(winner_validation):
+            raise ValueError("selected validation metrics must be finite")
+        return (
+            bool(selection["winner_improved_seed_majority"])
+            and float(selection["winner_paired_mean_delta"]) < 0.0
+            and float(selection["winner_paired_median_delta"]) < 0.0
+            and winner_validation < PHASE27_INCUMBENT_VALIDATION
+        )
     baseline_selection = variants["baseline"]["selection"]
     candidate_selection = variants["candidate"]["selection"]
     baseline_seed = str(baseline_selection["selected_seed"])
@@ -2087,41 +2627,20 @@ def candidate_validation_improves(train_summary: Mapping[str, Any]) -> bool:
     candidate = float(variants["candidate"]["seeds"][candidate_seed][VALIDATION_METRIC])
     if not math.isfinite(baseline) or not math.isfinite(candidate):
         raise ValueError("selected validation metrics must be finite")
-    if train_summary.get("variant_axis") in FROZEN_PHASE27_INCUMBENT_AXES:
+    if variant_axis in FROZEN_PHASE27_INCUMBENT_AXES:
         campaign_name = (
             "Phase29"
-            if train_summary.get("variant_axis") == EVENT_BALANCE_EXPONENT_AXIS
+            if variant_axis == EVENT_BALANCE_EXPONENT_AXIS
             else (
                 "Phase30"
-                if train_summary.get("variant_axis") == MOMENT_LINEAR_SKIP_AXIS
+                if variant_axis == MOMENT_LINEAR_SKIP_AXIS
                 else "Phase31"
             )
         )
-        reproduction = train_summary.get("incumbent_reproduction")
-        if not isinstance(reproduction, Mapping) or reproduction.get("passed") is not True:
-            raise ValueError(
-                f"{campaign_name} incumbent reproduction gate is missing or failed"
-            )
-        reproduction_path = _validate_artifact(
-            reproduction["artifact"],
-            label=f"{campaign_name} incumbent reproduction",
+        _validated_phase27_incumbent_reproduction(
+            train_summary,
+            campaign_name=campaign_name,
         )
-        persisted_reproduction = _load_json(reproduction_path)
-        recorded_reproduction = {
-            key: value for key, value in reproduction.items() if key != "artifact"
-        }
-        if persisted_reproduction != recorded_reproduction:
-            raise ValueError(
-                f"{campaign_name} incumbent reproduction artifact changed"
-            )
-        baseline_rows = {
-            seed: variants["baseline"]["seeds"][str(seed)] for seed in SEEDS
-        }
-        expected_reproduction = phase29_incumbent_reproduction(baseline_rows)
-        if expected_reproduction != persisted_reproduction:
-            raise ValueError(
-                f"{campaign_name} incumbent reproduction evidence is inconsistent"
-            )
         return candidate < PHASE27_INCUMBENT_VALIDATION
     return candidate < baseline
 
@@ -2323,9 +2842,44 @@ def run_internal(
     if train_summary.get("status") != "complete":
         raise RuntimeError("train stage did not complete")
     validation_passed = candidate_validation_improves(train_summary)
+    variant_axis = train_summary.get("variant_axis")
+    candidate_variant = (
+        str(train_summary["selected_candidate_variant"])
+        if variant_axis == LOSS_WEIGHT_PROFILE_AXIS
+        else "candidate"
+    )
     baseline_seed = _selected_seed_summary(train_summary, "baseline")
-    candidate_seed = _selected_seed_summary(train_summary, "candidate")
-    if train_summary.get("variant_axis") in FROZEN_PHASE27_INCUMBENT_AXES:
+    candidate_seed = _selected_seed_summary(train_summary, candidate_variant)
+    if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+        profile_selection = _validated_loss_weight_profile_selection(train_summary)
+        validation_gate = {
+            "passed": validation_passed,
+            "baseline_reproduction": float(baseline_seed[VALIDATION_METRIC]),
+            "frozen_incumbent": PHASE27_INCUMBENT_VALIDATION,
+            "frozen_incumbent_seed": PHASE27_INCUMBENT_SELECTED_SEED,
+            "selected_candidate_variant": candidate_variant,
+            "candidate": float(candidate_seed[VALIDATION_METRIC]),
+            "winner_paired_median_delta": profile_selection[
+                "winner_paired_median_delta"
+            ],
+            "winner_paired_mean_delta": profile_selection[
+                "winner_paired_mean_delta"
+            ],
+            "winner_improved_seed_count": profile_selection[
+                "winner_improved_seed_count"
+            ],
+            "winner_improved_seed_majority": profile_selection[
+                "winner_improved_seed_majority"
+            ],
+            "metric": VALIDATION_METRIC,
+            "rule": (
+                "winner has at least two negative paired seed deltas, negative "
+                "paired mean and median deltas, and its selected seed is below "
+                "the frozen Phase27 incumbent"
+            ),
+            "incumbent_reproduction_verified": True,
+        }
+    elif variant_axis in FROZEN_PHASE27_INCUMBENT_AXES:
         validation_gate = {
             "passed": validation_passed,
             "baseline_reproduction": float(baseline_seed[VALIDATION_METRIC]),
@@ -2360,9 +2914,9 @@ def run_internal(
         return summary
 
     evaluations: dict[str, Any] = {}
-    for variant, seed_summary in (
-        ("baseline", baseline_seed),
-        ("candidate", candidate_seed),
+    for variant, source_variant, seed_summary in (
+        ("baseline", "baseline", baseline_seed),
+        ("candidate", candidate_variant, candidate_seed),
     ):
         variant_dir = stage_dir / variant
         include_delayed_prefix = variant == "candidate"
@@ -2381,15 +2935,51 @@ def run_internal(
                 include_delayed_prefix=include_delayed_prefix,
                 resume=resume,
             )
+            if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+                result.update(
+                    {
+                        "source_variant": source_variant,
+                        "loss_weight_profile": source_variant,
+                        "loss_weights": LOSS_WEIGHT_PROFILES[source_variant],
+                        "loss_weight_profile_sha256": (
+                            LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+                        ),
+                    }
+                )
             _atomic_json(variant_dir / "summary.json", result, overwrite=resume)
+        elif variant_axis == LOSS_WEIGHT_PROFILE_AXIS and (
+            int(result.get("selected_seed", -1)) != int(seed_summary["seed"])
+            or result.get("source_variant") != source_variant
+            or result.get("loss_weight_profile") != source_variant
+            or result.get("loss_weights") != LOSS_WEIGHT_PROFILES[source_variant]
+            or result.get("loss_weight_profile_sha256")
+            != LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+        ):
+            raise ValueError("resumed loss-weight internal evaluation changed")
         evaluations[variant] = result
     baseline_event_mae = float(evaluations["baseline"]["metrics"]["event_mae"])
     candidate_event_mae = float(evaluations["candidate"]["metrics"]["event_mae"])
-    candidate_gate = {
-        "passed": candidate_event_mae < INTERNAL_EVENT_MAE_MAXIMUM,
-        "event_mae": candidate_event_mae,
-        "maximum_exclusive": INTERNAL_EVENT_MAE_MAXIMUM,
-    }
+    if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+        candidate_gate = {
+            "passed": (
+                candidate_event_mae < PHASE27_INCUMBENT_TEST_EVENT_MAE
+                and candidate_event_mae < INTERNAL_EVENT_MAE_MAXIMUM
+            ),
+            "event_mae": candidate_event_mae,
+            "phase27_incumbent_maximum_exclusive": (
+                PHASE27_INCUMBENT_TEST_EVENT_MAE
+            ),
+            "absolute_maximum_exclusive": INTERNAL_EVENT_MAE_MAXIMUM,
+            "rule": (
+                "candidate Event MAE < frozen Phase27 Event MAE and < 0.15"
+            ),
+        }
+    else:
+        candidate_gate = {
+            "passed": candidate_event_mae < INTERNAL_EVENT_MAE_MAXIMUM,
+            "event_mae": candidate_event_mae,
+            "maximum_exclusive": INTERNAL_EVENT_MAE_MAXIMUM,
+        }
     frozen_test_diagnostic = {
         "baseline_event_mae": baseline_event_mae,
         "candidate_event_mae": candidate_event_mae,
@@ -2412,6 +3002,8 @@ def run_internal(
         "external_evaluated": False,
         "variants": evaluations,
     }
+    if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
+        summary["selected_candidate_variant"] = candidate_variant
     _finish_stage(stage_dir, summary, resume=resume)
     return summary
 
@@ -2672,11 +3264,26 @@ def run_external(
     ):
         raise RuntimeError("external stage requires a passed internal candidate gate")
     train_summary = _require_stage(output_root, "train")
-    candidate_seed = _selected_seed_summary(train_summary, "candidate")
+    if train_summary.get("variant_axis") == LOSS_WEIGHT_PROFILE_AXIS:
+        _validated_phase27_incumbent_reproduction(
+            train_summary,
+            campaign_name="Phase32",
+        )
+        profile_selection = _validated_loss_weight_profile_selection(train_summary)
+        candidate_variant = str(profile_selection["winner_profile"])
+    else:
+        candidate_variant = "candidate"
+    candidate_seed = _selected_seed_summary(train_summary, candidate_variant)
     if int(candidate_seed["seed"]) != int(
         internal["variants"]["candidate"]["selected_seed"]
     ):
         raise ValueError("internal and train selected candidate seeds differ")
+    if train_summary.get("variant_axis") == LOSS_WEIGHT_PROFILE_AXIS and (
+        internal.get("selected_candidate_variant") != candidate_variant
+        or internal["variants"]["candidate"].get("source_variant")
+        != candidate_variant
+    ):
+        raise ValueError("internal and train selected loss-weight profiles differ")
     checkpoint = _validate_artifact(candidate_seed["checkpoint"], label="candidate checkpoint")
     _validate_artifact(candidate_seed["config"], label="candidate config")
     model_dir = checkpoint.parent
@@ -2722,7 +3329,7 @@ def run_external(
         "internal_summary": _artifact(
             _stage_dir(output_root, "internal") / "summary.json"
         ),
-        "selected_variant": "candidate",
+        "selected_variant": candidate_variant,
         "selected_seed": int(candidate_seed["seed"]),
         "ensemble_used": False,
         "observation_horizon_sec": FULL_OBSERVATION_HORIZON_SEC,
