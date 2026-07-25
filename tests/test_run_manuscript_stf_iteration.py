@@ -62,6 +62,12 @@ PHASE30_CONFIG_PATH = (
     / "experiments"
     / "manuscript_station_stf_usgs_moment_linear_skip.yaml"
 )
+PHASE31_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_moment_head_dropout.yaml"
+)
 CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
@@ -185,6 +191,12 @@ def _selected_train_summary(
             False,
             True,
         ),
+        (
+            PHASE31_CONFIG_PATH,
+            campaign.MOMENT_HEAD_DROPOUT_AXIS,
+            True,
+            False,
+        ),
     ],
 )
 def test_formal_configs_and_variants_have_one_scientific_difference(
@@ -214,6 +226,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         campaign.MAGNITUDE_PENALTY_AXIS,
         campaign.EVENT_BALANCE_EXPONENT_AXIS,
         campaign.MOMENT_LINEAR_SKIP_AXIS,
+        campaign.MOMENT_HEAD_DROPOUT_AXIS,
     }:
         assert {
             variant["model"]["stf_output_parameterization"]
@@ -230,6 +243,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         campaign.MAGNITUDE_PENALTY_AXIS,
         campaign.EVENT_BALANCE_EXPONENT_AXIS,
         campaign.MOMENT_LINEAR_SKIP_AXIS,
+        campaign.MOMENT_HEAD_DROPOUT_AXIS,
     }:
         assert {
             variant["training"]["scheduler_T0"] for variant in variants.values()
@@ -247,6 +261,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         (PHASE28_CONFIG_PATH, campaign.MAGNITUDE_PENALTY_AXIS),
         (PHASE29_CONFIG_PATH, campaign.EVENT_BALANCE_EXPONENT_AXIS),
         (PHASE30_CONFIG_PATH, campaign.MOMENT_LINEAR_SKIP_AXIS),
+        (PHASE31_CONFIG_PATH, campaign.MOMENT_HEAD_DROPOUT_AXIS),
     ],
 )
 def test_formal_config_rejects_a_second_scientific_change(
@@ -279,6 +294,31 @@ def test_prior_formal_axes_reject_a_moment_skip_marker(
 ) -> None:
     config = _config(config_path)
     config["model"]["moment_linear_skip"] = enabled
+
+    with pytest.raises(ValueError):
+        campaign.validate_formal_config(config)
+
+
+@pytest.mark.parametrize(
+    "config_path",
+    [
+        PHASE23_CONFIG_PATH,
+        PHASE24_CONFIG_PATH,
+        PHASE25_CONFIG_PATH,
+        PHASE26_CONFIG_PATH,
+        PHASE27_CONFIG_PATH,
+        PHASE28_CONFIG_PATH,
+        PHASE29_CONFIG_PATH,
+        PHASE30_CONFIG_PATH,
+    ],
+)
+@pytest.mark.parametrize("enabled", [False, True])
+def test_prior_formal_axes_reject_a_moment_head_dropout_marker(
+    config_path: Path,
+    enabled: bool,
+) -> None:
+    config = _config(config_path)
+    config["model"]["moment_head_dropout"] = enabled
 
     with pytest.raises(ValueError):
         campaign.validate_formal_config(config)
@@ -487,6 +527,46 @@ def test_phase30_axis_is_exactly_the_phase27_incumbent_plus_skip_marker() -> Non
     explicit_exponent["training"]["event_balance_exponent"] = 1.0
     with pytest.raises(ValueError, match="Phase30 moment-linear-skip baseline"):
         campaign.validate_formal_config(explicit_exponent)
+
+    changed_learning_rate = copy.deepcopy(config)
+    changed_learning_rate["training"]["learning_rate"] = 2.0e-4
+    with pytest.raises(ValueError, match="differs from the frozen Phase27"):
+        campaign.validate_formal_config(changed_learning_rate)
+
+
+def test_phase31_axis_is_exactly_the_phase27_incumbent_plus_dropout_marker() -> None:
+    config = _config(PHASE31_CONFIG_PATH)
+
+    assert (
+        campaign.variant_axis_from_config(config)
+        == campaign.MOMENT_HEAD_DROPOUT_AXIS
+    )
+    variants = campaign.build_variant_configs(config)
+    assert variants["baseline"]["model"]["moment_head_dropout"] is True
+    assert variants["candidate"]["model"]["moment_head_dropout"] is False
+    assert "moment_linear_skip" not in config["model"]
+    assert "event_balance_exponent" not in config["training"]
+    assert "magnitude_penalty" not in config["training"]["stf_rate_loss"]
+    assert "radial_dynamic_range_stem" not in config["model"]
+
+    phase27_incumbent = campaign.build_variant_configs(
+        _config(PHASE27_CONFIG_PATH)
+    )["candidate"]
+    phase31_baseline = copy.deepcopy(variants["baseline"])
+    phase27_incumbent.pop("campaign")
+    phase31_baseline.pop("campaign")
+    phase31_baseline["model"].pop("moment_head_dropout")
+    assert phase31_baseline == phase27_incumbent
+
+    disabled_as_baseline = copy.deepcopy(config)
+    disabled_as_baseline["model"]["moment_head_dropout"] = False
+    with pytest.raises(ValueError, match="Phase31 moment-head-dropout baseline"):
+        campaign.validate_formal_config(disabled_as_baseline)
+
+    explicit_skip = copy.deepcopy(config)
+    explicit_skip["model"]["moment_linear_skip"] = False
+    with pytest.raises(ValueError, match="Phase31 moment-head-dropout baseline"):
+        campaign.validate_formal_config(explicit_skip)
 
     changed_learning_rate = copy.deepcopy(config)
     changed_learning_rate["training"]["learning_rate"] = 2.0e-4
@@ -944,6 +1024,46 @@ def test_phase30_seed_summary_resume_binds_bool_and_schema2_sampling(
         **arguments,
     )
 
+    phase31_expected_config = {
+        "model": {"moment_head_dropout": True},
+        "training": {
+            "random_seed": 17,
+            "event_balance_estimator": "inverse_count_full_data",
+        },
+    }
+    phase31_config_path = tmp_path / "phase31_config.yaml"
+    phase31_config_path.write_text(
+        yaml.safe_dump(phase31_expected_config, sort_keys=False),
+        encoding="utf-8",
+    )
+    phase31_summary = {
+        **summary,
+        "moment_head_dropout": True,
+        "config": _artifact(phase31_config_path),
+    }
+    phase31_arguments = {
+        "require_sampling": True,
+        "expected_moment_head_dropout": True,
+        "expected_variant": "baseline",
+        "expected_seed": 17,
+        "expected_split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[17],
+        "expected_config": phase31_expected_config,
+        "expected_git_commit": expected_git_commit,
+    }
+
+    assert campaign._seed_summary_is_valid(
+        phase31_summary,
+        **phase31_arguments,
+    )
+    assert not campaign._seed_summary_is_valid(
+        {**phase31_summary, "moment_head_dropout": False},
+        **phase31_arguments,
+    )
+    assert not campaign._seed_summary_is_valid(
+        phase31_summary,
+        **{**phase31_arguments, "expected_moment_head_dropout": False},
+    )
+
 
 def test_phase30_train_resume_passes_complete_strict_context(
     tmp_path: Path,
@@ -984,6 +1104,48 @@ def test_phase30_train_resume_passes_complete_strict_context(
     assert captured["expected_config"]["model"]["moment_linear_skip"] is False
     assert "event_balance_exponent" not in captured["expected_config"]["training"]
     assert captured["expected_git_commit"] == "phase30"
+
+
+def test_phase31_train_resume_passes_complete_strict_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_root = tmp_path / "seed_17"
+    _write_json(seed_root / "seed_summary.json", {"existing": True})
+    config = campaign.build_variant_configs(_config(PHASE31_CONFIG_PATH))[
+        "baseline"
+    ]
+    captured: dict[str, Any] = {}
+
+    def fake_validate(_summary: dict[str, Any], **kwargs: Any) -> bool:
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(campaign, "_seed_summary_is_valid", fake_validate)
+    monkeypatch.setattr(campaign, "current_git_commit", lambda _root: "phase31")
+
+    resumed = campaign._train_one_seed(
+        variant="baseline",
+        config=config,
+        seed=17,
+        seed_root=seed_root,
+        dataset_manifest=tmp_path / "dataset.csv",
+        frozen_split_path=tmp_path / "split.json",
+        resume=True,
+    )
+
+    assert resumed == {"existing": True}
+    assert captured["require_sampling"] is True
+    assert captured["expected_moment_head_dropout"] is True
+    assert captured["expected_variant"] == "baseline"
+    assert captured["expected_seed"] == 17
+    assert captured["expected_split_assignment_sha256"] == (
+        campaign.EXPECTED_SPLIT_SHA256[17]
+    )
+    assert captured["expected_config"]["model"]["moment_head_dropout"] is True
+    assert "moment_linear_skip" not in captured["expected_config"]["model"]
+    assert "event_balance_exponent" not in captured["expected_config"]["training"]
+    assert captured["expected_git_commit"] == "phase31"
 
 
 def _logged_scheduler_learning_rates(scheduler_t0: int) -> list[float]:
@@ -1338,6 +1500,68 @@ def test_phase30_smoke_rejects_parameter_count_drift(
         campaign.run_smoke(output_root=tmp_path, resume=False)
 
 
+@pytest.mark.parametrize("parameter_count", [1_010_850, 1])
+def test_phase31_smoke_enforces_equal_frozen_parameter_counts(
+    parameter_count: int,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(_config(PHASE31_CONFIG_PATH), sort_keys=False),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "dataset.csv"
+    manifest_path.write_text("event,station\n", encoding="utf-8")
+    splits: dict[str, Any] = {}
+    for seed in campaign.SEEDS:
+        split_path = tmp_path / f"split_{seed}.json"
+        _write_json(split_path, {})
+        splits[str(seed)] = {"manifest": _artifact(split_path)}
+    _mark_stage(
+        tmp_path,
+        "preflight",
+        {
+            "status": "complete",
+            "source_data": {"sha256": campaign.EXPECTED_SOURCE_SHA256},
+            "frozen_config": _artifact(config_path),
+            "dataset_manifest": _artifact(manifest_path),
+            "splits": splits,
+        },
+    )
+    monkeypatch.setattr(campaign, "CorrectedEarthquakeDataset", lambda _config: [])
+    monkeypatch.setattr(campaign.torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(
+        campaign,
+        "_formal_sample_weight_probe",
+        lambda _splits, _config: {},
+    )
+
+    def smoke_result(config: dict[str, Any], **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "parameter_count": parameter_count,
+            "moment_head_dropout": campaign.moment_head_dropout_from_config(config),
+        }
+
+    monkeypatch.setattr(campaign, "_smoke_one_device", smoke_result)
+
+    if parameter_count != 1_010_850:
+        with pytest.raises(ValueError, match="Phase31 parameter count changed"):
+            campaign.run_smoke(output_root=tmp_path, resume=False)
+        return
+
+    summary = campaign.run_smoke(output_root=tmp_path, resume=False)
+    assert summary["variant_axis"] == campaign.MOMENT_HEAD_DROPOUT_AXIS
+    assert summary["results"]["baseline"]["cpu"] == {
+        "parameter_count": 1_010_850,
+        "moment_head_dropout": True,
+    }
+    assert summary["results"]["candidate"]["cuda"] == {
+        "parameter_count": 1_010_850,
+        "moment_head_dropout": False,
+    }
+
+
 @pytest.mark.parametrize(
     (
         "formal_config_path",
@@ -1397,6 +1621,15 @@ def test_phase30_smoke_rejects_parameter_count_drift(
         (
             PHASE28_CONFIG_PATH,
             campaign.MAGNITUDE_PENALTY_AXIS,
+            ("moment_shape_factorized", "moment_shape_factorized"),
+            (15, 15),
+            ("none", "none"),
+            (True, True),
+            ("inverse_count_full_data", "inverse_count_full_data"),
+        ),
+        (
+            PHASE31_CONFIG_PATH,
+            campaign.MOMENT_HEAD_DROPOUT_AXIS,
             ("moment_shape_factorized", "moment_shape_factorized"),
             (15, 15),
             ("none", "none"),
@@ -1572,6 +1805,15 @@ def test_train_stage_selects_from_validation_without_test_or_external(
         summary["variants"][name]["moment_linear_skip"]
         for name in variant_names
     ) == expected_moment_skips
+    expected_moment_dropouts = (
+        (True, False)
+        if expected_axis == campaign.MOMENT_HEAD_DROPOUT_AXIS
+        else (True, True)
+    )
+    assert tuple(
+        summary["variants"][name]["moment_head_dropout"]
+        for name in variant_names
+    ) == expected_moment_dropouts
     assert summary["variants"]["candidate"]["scientific_diff_from_baseline"] == [
         ".".join(campaign.VARIANT_AXIS_PATHS[expected_axis])
     ]
@@ -1579,7 +1821,10 @@ def test_train_stage_selects_from_validation_without_test_or_external(
         assert summary["incumbent_reproduction"]["passed"] is True
 
 
-@pytest.mark.parametrize("config_path", [PHASE29_CONFIG_PATH, PHASE30_CONFIG_PATH])
+@pytest.mark.parametrize(
+    "config_path",
+    [PHASE29_CONFIG_PATH, PHASE30_CONFIG_PATH, PHASE31_CONFIG_PATH],
+)
 @pytest.mark.parametrize("mismatch", ["validation_metric", "checkpoint_sha256"])
 def test_frozen_incumbent_control_drift_stops_before_candidate_training(
     config_path: Path,
@@ -1770,7 +2015,11 @@ def test_internal_validation_gate_fails_before_locked_test(
 
 @pytest.mark.parametrize(
     "variant_axis",
-    [campaign.EVENT_BALANCE_EXPONENT_AXIS, campaign.MOMENT_LINEAR_SKIP_AXIS],
+    [
+        campaign.EVENT_BALANCE_EXPONENT_AXIS,
+        campaign.MOMENT_LINEAR_SKIP_AXIS,
+        campaign.MOMENT_HEAD_DROPOUT_AXIS,
+    ],
 )
 def test_frozen_incumbent_gate_fails_before_locked_test(
     variant_axis: str,

@@ -216,6 +216,23 @@ def moment_linear_skip_from_config(config: dict[str, Any]) -> bool:
     return value
 
 
+def moment_head_dropout_from_config(config: dict[str, Any]) -> bool:
+    model = config.get("model", {}) or {}
+    value = model.get("moment_head_dropout", True)
+    if not isinstance(value, bool):
+        raise ValueError("model.moment_head_dropout must be boolean")
+    if (
+        not value
+        and model.get("stf_output_parameterization", "direct")
+        != "moment_shape_factorized"
+    ):
+        raise ValueError(
+            "model.moment_head_dropout=false requires "
+            "model.stf_output_parameterization=moment_shape_factorized"
+        )
+    return value
+
+
 def magnitude_penalty_from_config(config: dict[str, Any]) -> str:
     training = config.get("training", {}) or {}
     loss_config = training.get("stf_rate_loss", {}) or {}
@@ -241,6 +258,7 @@ def validate_config_v2(config: dict[str, Any]) -> None:
     waveform_input_components_from_config(config)
     radial_dynamic_range_stem_from_config(config)
     moment_linear_skip_from_config(config)
+    moment_head_dropout_from_config(config)
     magnitude_penalty_from_config(config)
 
     for path in _FORBIDDEN_PATHS:

@@ -62,6 +62,7 @@ from src.training.loss_stf_rate_v2 import STFRateWaveformLossV2  # noqa: E402
 from src.training.train import _prepare_v2_batch  # noqa: E402
 from src.utils.config_v2 import (  # noqa: E402
     magnitude_penalty_from_config,
+    moment_head_dropout_from_config,
     moment_linear_skip_from_config,
     validate_config_v2,
 )
@@ -83,6 +84,7 @@ EVENT_BALANCE_ESTIMATOR_AXIS = "event_balance_estimator"
 MAGNITUDE_PENALTY_AXIS = "magnitude_penalty"
 EVENT_BALANCE_EXPONENT_AXIS = "event_balance_exponent"
 MOMENT_LINEAR_SKIP_AXIS = "moment_linear_skip"
+MOMENT_HEAD_DROPOUT_AXIS = "moment_head_dropout"
 STATION_UNIFORM_ESTIMATOR = "station_uniform"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
@@ -117,6 +119,10 @@ VARIANT_AXES = {
         "baseline": False,
         "candidate": True,
     },
+    MOMENT_HEAD_DROPOUT_AXIS: {
+        "baseline": True,
+        "candidate": False,
+    },
 }
 VARIANT_AXIS_PATHS = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: ("model", "stf_output_parameterization"),
@@ -131,6 +137,7 @@ VARIANT_AXIS_PATHS = {
     ),
     EVENT_BALANCE_EXPONENT_AXIS: ("training", "event_balance_exponent"),
     MOMENT_LINEAR_SKIP_AXIS: ("model", "moment_linear_skip"),
+    MOMENT_HEAD_DROPOUT_AXIS: ("model", "moment_head_dropout"),
 }
 # Backward-compatible alias for the Phase23 campaign and its persisted tests.
 VARIANTS = VARIANT_AXES[STF_OUTPUT_PARAMETERIZATION_AXIS]
@@ -173,11 +180,19 @@ PHASE27_INCUMBENT_VALIDATION = PHASE27_INCUMBENT_VALIDATION_BY_SEED[
     PHASE27_INCUMBENT_SELECTED_SEED
 ]
 FROZEN_PHASE27_INCUMBENT_AXES = frozenset(
-    {EVENT_BALANCE_EXPONENT_AXIS, MOMENT_LINEAR_SKIP_AXIS}
+    {
+        EVENT_BALANCE_EXPONENT_AXIS,
+        MOMENT_LINEAR_SKIP_AXIS,
+        MOMENT_HEAD_DROPOUT_AXIS,
+    }
 )
 PHASE30_PARAMETER_COUNT_BY_VARIANT = {
     "baseline": 1_010_850,
     "candidate": 1_010_978,
+}
+PHASE31_PARAMETER_COUNT_BY_VARIANT = {
+    "baseline": 1_010_850,
+    "candidate": 1_010_850,
 }
 EXTERNAL_EVENT_NAMES = (
     "iquique-aftershock-2014-chile",
@@ -376,6 +391,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
     scheduler_t0 = training.get("scheduler_T0")
     stem_is_explicit = "radial_dynamic_range_stem" in model
     moment_skip_is_explicit = "moment_linear_skip" in model
+    moment_dropout_is_explicit = "moment_head_dropout" in model
     estimator_is_explicit = "event_balance_estimator" in training
     exponent_is_explicit = "event_balance_exponent" in training
     loss_config = training.get("stf_rate_loss")
@@ -393,6 +409,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 or scheduler_t0 != 15
                 or stem_is_explicit
                 or moment_skip_is_explicit
+                or moment_dropout_is_explicit
                 or estimator_is_explicit
                 or exponent_is_explicit
                 or magnitude_penalty_is_explicit
@@ -410,6 +427,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 or scheduler_t0 != 15
                 or stem_is_explicit
                 or moment_skip_is_explicit
+                or moment_dropout_is_explicit
                 or exponent_is_explicit
                 or magnitude_penalty_is_explicit
                 or training.get("event_balanced_sampling") is not True
@@ -429,6 +447,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 or scheduler_t0 != 15
                 or stem_is_explicit
                 or moment_skip_is_explicit
+                or moment_dropout_is_explicit
                 or exponent_is_explicit
                 or training.get("event_balanced_sampling") is not True
                 or training.get("event_balance_estimator")
@@ -449,6 +468,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 or scheduler_t0 != 15
                 or stem_is_explicit
                 or moment_skip_is_explicit
+                or moment_dropout_is_explicit
                 or training.get("event_balanced_sampling") is not True
                 or training.get("event_balance_estimator")
                 != INVERSE_COUNT_FULL_DATA_ESTIMATOR
@@ -473,6 +493,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                 or stem_is_explicit
                 or not moment_skip_is_explicit
                 or model.get("moment_linear_skip") is not False
+                or moment_dropout_is_explicit
                 or training.get("event_balanced_sampling") is not True
                 or training.get("event_balance_estimator")
                 != INVERSE_COUNT_FULL_DATA_ESTIMATOR
@@ -489,6 +510,30 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                     "model.moment_linear_skip=false"
                 )
             return MOMENT_LINEAR_SKIP_AXIS
+        if explicit_axis == MOMENT_HEAD_DROPOUT_AXIS:
+            if (
+                parameterization != "moment_shape_factorized"
+                or scheduler_t0 != 15
+                or stem_is_explicit
+                or moment_skip_is_explicit
+                or not moment_dropout_is_explicit
+                or model.get("moment_head_dropout") is not True
+                or training.get("event_balanced_sampling") is not True
+                or training.get("event_balance_estimator")
+                != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                or exponent_is_explicit
+                or magnitude_penalty_is_explicit
+                or loss_config.get("magnitude_penalty", "squared") != "squared"
+            ):
+                raise ValueError(
+                    "Phase31 moment-head-dropout baseline requires factorized "
+                    "STF, scheduler_T0=15, the original radial stem, "
+                    "event_balanced_sampling=true, "
+                    "event_balance_estimator='inverse_count_full_data', the "
+                    "default p=1 and squared magnitude penalty, no explicit "
+                    "moment-linear skip, and model.moment_head_dropout=true"
+                )
+            return MOMENT_HEAD_DROPOUT_AXIS
         else:
             raise ValueError(f"unsupported formal campaign axis: {explicit_axis!r}")
     if (
@@ -496,6 +541,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         and scheduler_t0 == 15
         and not stem_is_explicit
         and not moment_skip_is_explicit
+        and not moment_dropout_is_explicit
         and not estimator_is_explicit
         and not exponent_is_explicit
         and not magnitude_penalty_is_explicit
@@ -505,6 +551,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         parameterization == "moment_shape_factorized"
         and scheduler_t0 == 15
         and not moment_skip_is_explicit
+        and not moment_dropout_is_explicit
         and not estimator_is_explicit
         and not exponent_is_explicit
         and not magnitude_penalty_is_explicit
@@ -523,7 +570,8 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         "baseline with explicit radial dynamic-range stem or the explicitly "
         "marked Phase26/Phase27 event-balance baselines or Phase28 magnitude "
         "penalty baseline or Phase29 event-balance exponent baseline or "
-        "Phase30 moment-linear-skip baseline"
+        "Phase30 moment-linear-skip baseline or Phase31 moment-head-dropout "
+        "baseline"
     )
 
 
@@ -623,6 +671,7 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             MAGNITUDE_PENALTY_AXIS,
             EVENT_BALANCE_EXPONENT_AXIS,
             MOMENT_LINEAR_SKIP_AXIS,
+            MOMENT_HEAD_DROPOUT_AXIS,
         },
     )
     variants = build_variant_configs(config)
@@ -666,6 +715,27 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             )
             raise ValueError(
                 "Phase30 baseline differs from the frozen Phase27 candidate: "
+                f"{sorted(differences)}"
+            )
+    if variant_axis == MOMENT_HEAD_DROPOUT_AXIS:
+        phase27_config = _load_yaml(
+            PROJECT_ROOT
+            / "configs"
+            / "experiments"
+            / "manuscript_station_stf_usgs_event_loss_weighted.yaml"
+        )
+        phase27_incumbent = build_variant_configs(phase27_config)["candidate"]
+        phase31_baseline = copy.deepcopy(variants["baseline"])
+        phase27_incumbent.pop("campaign")
+        phase31_baseline.pop("campaign")
+        phase31_baseline["model"].pop("moment_head_dropout")
+        if phase31_baseline != phase27_incumbent:
+            differences = _config_diff_paths(
+                phase27_incumbent,
+                phase31_baseline,
+            )
+            raise ValueError(
+                "Phase31 baseline differs from the frozen Phase27 candidate: "
                 f"{sorted(differences)}"
             )
 
@@ -1235,6 +1305,7 @@ def _smoke_one_device(
             config
         ),
         "moment_linear_skip": moment_linear_skip_from_config(config),
+        "moment_head_dropout": moment_head_dropout_from_config(config),
         "sample_weights_exercised": sample_weights is not None,
         "sample_weight_probe": (
             dict(sample_weight_probe) if sample_weight_probe is not None else None
@@ -1297,12 +1368,24 @@ def run_smoke(
                     f"{PHASE30_PARAMETER_COUNT_BY_VARIANT[variant]}, "
                     f"actual={result['parameter_count']}"
                 )
+            if (
+                variant_axis == MOMENT_HEAD_DROPOUT_AXIS
+                and int(result["parameter_count"])
+                != PHASE31_PARAMETER_COUNT_BY_VARIANT[variant]
+            ):
+                raise ValueError(
+                    "Phase31 parameter count changed for "
+                    f"{variant}: expected="
+                    f"{PHASE31_PARAMETER_COUNT_BY_VARIANT[variant]}, "
+                    f"actual={result['parameter_count']}"
+                )
             results[variant][device.type] = result
     summary = {
         "stage": "smoke",
         "status": "complete",
         "created_at_utc": utc_now_iso(),
         "git_commit": current_git_commit(PROJECT_ROOT),
+        "variant_axis": variant_axis,
         "preflight_summary": _artifact(
             _stage_dir(output_root, "preflight") / "summary.json"
         ),
@@ -1572,6 +1655,7 @@ def _seed_summary_is_valid(
     expected_magnitude_penalty: str | None = None,
     expected_event_balance_exponent: float | None = None,
     expected_moment_linear_skip: bool | None = None,
+    expected_moment_head_dropout: bool | None = None,
     expected_variant: str | None = None,
     expected_seed: int | None = None,
     expected_split_assignment_sha256: str | None = None,
@@ -1593,6 +1677,12 @@ def _seed_summary_is_valid(
             expected_moment_linear_skip is not None
             and summary.get("moment_linear_skip")
             is not expected_moment_linear_skip
+        ):
+            return False
+        if (
+            expected_moment_head_dropout is not None
+            and summary.get("moment_head_dropout")
+            is not expected_moment_head_dropout
         ):
             return False
         if expected_event_balance_exponent is not None:
@@ -1618,7 +1708,10 @@ def _seed_summary_is_valid(
                 )
             ):
                 return False
-        if expected_moment_linear_skip is not None:
+        if (
+            expected_moment_linear_skip is not None
+            or expected_moment_head_dropout is not None
+        ):
             if expected_seed is None:
                 return False
             summary_exponent = summary.get("event_balance_exponent")
@@ -1708,6 +1801,7 @@ def _train_one_seed(
                 MAGNITUDE_PENALTY_AXIS,
                 EVENT_BALANCE_EXPONENT_AXIS,
                 MOMENT_LINEAR_SKIP_AXIS,
+                MOMENT_HEAD_DROPOUT_AXIS,
             }
         )
         expected_magnitude_penalty = (
@@ -1725,16 +1819,23 @@ def _train_one_seed(
             if campaign_axis == MOMENT_LINEAR_SKIP_AXIS
             else None
         )
+        expected_moment_head_dropout = (
+            moment_head_dropout_from_config(config)
+            if campaign_axis == MOMENT_HEAD_DROPOUT_AXIS
+            else None
+        )
         expected_git_commit = (
             current_git_commit(PROJECT_ROOT)
             if expected_event_balance_exponent is not None
             or expected_moment_linear_skip is not None
+            or expected_moment_head_dropout is not None
             else None
         )
         strict_resume = (
             expected_magnitude_penalty is not None
             or expected_event_balance_exponent is not None
             or expected_moment_linear_skip is not None
+            or expected_moment_head_dropout is not None
         )
         expected_runtime_config = (
             _runtime_config(
@@ -1752,6 +1853,7 @@ def _train_one_seed(
             expected_magnitude_penalty=expected_magnitude_penalty,
             expected_event_balance_exponent=expected_event_balance_exponent,
             expected_moment_linear_skip=expected_moment_linear_skip,
+            expected_moment_head_dropout=expected_moment_head_dropout,
             expected_variant=variant if strict_resume else None,
             expected_seed=seed if strict_resume else None,
             expected_split_assignment_sha256=(
@@ -1822,6 +1924,7 @@ def _train_one_seed(
             config
         ),
         "moment_linear_skip": moment_linear_skip_from_config(config),
+        "moment_head_dropout": moment_head_dropout_from_config(config),
         "seed": seed,
         "git_commit": current_git_commit(PROJECT_ROOT),
         **checkpoint_selection,
@@ -1892,7 +1995,11 @@ def run_train(
                 campaign_name = (
                     "Phase29 p=1"
                     if variant_axis == EVENT_BALANCE_EXPONENT_AXIS
-                    else "Phase30 moment-linear-skip"
+                    else (
+                        "Phase30 moment-linear-skip"
+                        if variant_axis == MOMENT_LINEAR_SKIP_AXIS
+                        else "Phase31 moment-head-dropout"
+                    )
                 )
                 raise ValueError(
                     f"{campaign_name} baseline did not exactly reproduce the frozen "
@@ -1930,6 +2037,9 @@ def run_train(
                 variant_config
             ),
             "moment_linear_skip": moment_linear_skip_from_config(
+                variant_config
+            ),
+            "moment_head_dropout": moment_head_dropout_from_config(
                 variant_config
             ),
             "scientific_diff_from_baseline": sorted(
@@ -1981,7 +2091,11 @@ def candidate_validation_improves(train_summary: Mapping[str, Any]) -> bool:
         campaign_name = (
             "Phase29"
             if train_summary.get("variant_axis") == EVENT_BALANCE_EXPONENT_AXIS
-            else "Phase30"
+            else (
+                "Phase30"
+                if train_summary.get("variant_axis") == MOMENT_LINEAR_SKIP_AXIS
+                else "Phase31"
+            )
         )
         reproduction = train_summary.get("incumbent_reproduction")
         if not isinstance(reproduction, Mapping) or reproduction.get("passed") is not True:

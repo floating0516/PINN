@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from typing import Optional
 
 from src.utils.config_v2 import (
+    moment_head_dropout_from_config,
     moment_linear_skip_from_config,
     radial_dynamic_range_stem_from_config,
     waveform_input_components_from_config,
@@ -110,6 +111,7 @@ class PINNModel(nn.Module):
                 'moment_shape_factorized'
             )
         self.use_moment_linear_skip = moment_linear_skip_from_config(config)
+        self.use_moment_head_dropout = moment_head_dropout_from_config(config)
         self.factorized_source_dt_sec: float | None = None
         self.factorized_m_ref: float | None = None
         if self.stf_output_parameterization == 'moment_shape_factorized':
@@ -378,7 +380,17 @@ class PINNModel(nn.Module):
         ).clamp_min(torch.finfo(positive_shape.dtype).tiny)
 
         pooled_features = sequence.mean(dim=1)
-        log10_moment = self.log10_moment_head(pooled_features).squeeze(-1)
+        moment_features = self.log10_moment_head[1](
+            self.log10_moment_head[0](pooled_features)
+        )
+        # Both variants execute dropout so their training RNG streams stay aligned.
+        dropped_moment_features = self.log10_moment_head[2](moment_features)
+        moment_head_input = (
+            dropped_moment_features
+            if self.use_moment_head_dropout
+            else moment_features
+        )
+        log10_moment = self.log10_moment_head[3](moment_head_input).squeeze(-1)
         if self.moment_linear_skip is not None:
             log10_moment = log10_moment + self.moment_linear_skip(
                 pooled_features
