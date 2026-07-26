@@ -87,6 +87,7 @@ MOMENT_LINEAR_SKIP_AXIS = "moment_linear_skip"
 MOMENT_HEAD_DROPOUT_AXIS = "moment_head_dropout"
 LOSS_WEIGHT_PROFILE_AXIS = "loss_weight_profile"
 SHAPE_LOSS_WEIGHT_AXIS = "shape_loss_weight"
+LOSS_TERM_ABLATION_AXIS = "loss_term_ablation"
 STATION_UNIFORM_ESTIMATOR = "station_uniform"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
@@ -187,6 +188,47 @@ LOSS_WEIGHT_PROPOSAL_POOL_SHA256 = (
 LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256 = (
     "2235d225dd480f675ab3bdd4b044fae420f4420a9a0f40c26fc70bfd9399df64"
 )
+LOSS_TERM_ABLATION_PROFILES = {
+    "baseline": {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.0,
+    },
+    "no_mse": {
+        "lambda_MSE": 0.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.0,
+    },
+    "no_synth": {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.0,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.0,
+    },
+    "no_mag": {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 0.0,
+        "lambda_shape": 0.0,
+    },
+}
+LOSS_TERM_ABLATION_REMOVED_WEIGHT = {
+    "no_mse": "lambda_MSE",
+    "no_synth": "lambda_synth",
+    "no_mag": "lambda_mag",
+}
+LOSS_TERM_ABLATION_PROFILE_SHA256 = (
+    "cdde0174fdb5da56c7016666c312d759a3ebf441e468debd41a99a59aa244759"
+)
+LOSS_TERM_ABLATION_DELTA_DEFINITION = (
+    "ablation validation Event MAE minus Full-3 validation Event MAE"
+)
+LOSS_TERM_ABLATION_SUPPORT_RULE = (
+    "at least two of three paired deltas > 0 and paired mean and median "
+    "deltas > 0"
+)
 # Backward-compatible alias for the Phase23 campaign and its persisted tests.
 VARIANTS = VARIANT_AXES[STF_OUTPUT_PARAMETERIZATION_AXIS]
 VALIDATION_METRIC = "validation_event_mae_catalog"
@@ -227,6 +269,17 @@ PHASE27_INCUMBENT_SELECTED_SEED = 17
 PHASE27_INCUMBENT_VALIDATION = PHASE27_INCUMBENT_VALIDATION_BY_SEED[
     PHASE27_INCUMBENT_SELECTED_SEED
 ]
+PHASE33_FULL_THREE_VALIDATION_BY_SEED = {
+    17: 0.10100007057189941,
+    42: 0.12154764334360758,
+    73: 0.17900975545247397,
+}
+PHASE33_FULL_THREE_CHECKPOINT_SHA256_BY_SEED = {
+    17: "9469acfb4e9a7cfbdca096ad69d939ac3408f5e3b1a8b3ff088016d37429ad83",
+    42: "120c4e89720625a11bb0ac51bcc2b0a9730dd74b035497f7b0930bddf53e3349",
+    73: "3bd45d2edc93e6df9f99403f857c77762f13def89fe4a74cf0405bd17bfb3bdc",
+}
+PHASE33_FULL_THREE_SELECTED_SEED = 17
 FROZEN_PHASE27_INCUMBENT_AXES = frozenset(
     {
         EVENT_BALANCE_EXPONENT_AXIS,
@@ -315,6 +368,10 @@ def _candidate_profile_sha256(profiles: Mapping[str, Any]) -> str:
         for name in sorted(set(profiles) - {"baseline"})
     }
     return hashlib.sha256(_compact_canonical_json_bytes(candidates)).hexdigest()
+
+
+def _profile_table_sha256(profiles: Mapping[str, Any]) -> str:
+    return hashlib.sha256(_compact_canonical_json_bytes(profiles)).hexdigest()
 
 
 def loss_weights_from_config(config: Mapping[str, Any]) -> dict[str, float]:
@@ -410,6 +467,72 @@ def loss_weight_profiles_from_config(
         raise ValueError(
             "loss-weight candidate profile hash changed: "
             f"expected={LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256}, actual={actual_hash}"
+        )
+    return profiles
+
+
+def loss_term_ablation_profiles_from_config(
+    config: Mapping[str, Any],
+) -> dict[str, dict[str, float]]:
+    campaign = config.get("campaign")
+    if not isinstance(campaign, Mapping):
+        raise ValueError("loss-term ablation campaign marker must be a mapping")
+    ablation = campaign.get("loss_term_ablation")
+    if not isinstance(ablation, Mapping):
+        raise ValueError("loss-term ablation metadata is missing")
+    if set(ablation) != {
+        "delta_definition",
+        "support_rule",
+        "profile_sha256",
+        "profiles",
+    }:
+        raise ValueError("loss-term ablation metadata schema changed")
+    expected_metadata = {
+        "delta_definition": LOSS_TERM_ABLATION_DELTA_DEFINITION,
+        "support_rule": LOSS_TERM_ABLATION_SUPPORT_RULE,
+        "profile_sha256": LOSS_TERM_ABLATION_PROFILE_SHA256,
+    }
+    for name, expected in expected_metadata.items():
+        value = ablation.get(name)
+        if value != expected or type(value) is not type(expected):
+            raise ValueError(
+                f"loss-term ablation {name} changed: expected={expected!r}, "
+                f"actual={value!r}"
+            )
+    raw_profiles = ablation.get("profiles")
+    if not isinstance(raw_profiles, Mapping) or set(raw_profiles) != set(
+        LOSS_TERM_ABLATION_PROFILES
+    ):
+        raise ValueError("loss-term ablation profile identities changed")
+    profiles: dict[str, dict[str, float]] = {}
+    for profile_id, expected_weights in LOSS_TERM_ABLATION_PROFILES.items():
+        raw_weights = raw_profiles.get(profile_id)
+        if not isinstance(raw_weights, Mapping) or set(raw_weights) != set(
+            LOSS_WEIGHT_KEYS
+        ):
+            raise ValueError(
+                f"loss-term ablation profile {profile_id} schema changed"
+            )
+        weights: dict[str, float] = {}
+        for name, expected in expected_weights.items():
+            value = raw_weights.get(name)
+            if type(value) is not float or not math.isfinite(value) or value < 0.0:
+                raise ValueError(
+                    f"loss-term ablation {profile_id}.{name} must be finite "
+                    "and nonnegative"
+                )
+            if value != expected:
+                raise ValueError(
+                    f"loss-term ablation {profile_id}.{name} changed: "
+                    f"expected={expected!r}, actual={value!r}"
+                )
+            weights[name] = value
+        profiles[profile_id] = weights
+    actual_hash = _profile_table_sha256(profiles)
+    if actual_hash != LOSS_TERM_ABLATION_PROFILE_SHA256:
+        raise ValueError(
+            "loss-term ablation profile hash changed: "
+            f"expected={LOSS_TERM_ABLATION_PROFILE_SHA256}, actual={actual_hash}"
         )
     return profiles
 
@@ -754,6 +877,33 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                     "and squared magnitude penalty"
                 )
             return SHAPE_LOSS_WEIGHT_AXIS
+        if explicit_axis == LOSS_TERM_ABLATION_AXIS:
+            if (
+                parameterization != "moment_shape_factorized"
+                or scheduler_t0 != 15
+                or stem_is_explicit
+                or moment_skip_is_explicit
+                or moment_dropout_is_explicit
+                or training.get("event_balanced_sampling") is not True
+                or training.get("event_balance_estimator")
+                != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                or exponent_is_explicit
+                or magnitude_penalty_is_explicit
+                or loss_config.get("magnitude_penalty", "squared") != "squared"
+            ):
+                raise ValueError(
+                    "Phase34 loss-term ablation requires the frozen Phase33 "
+                    "Full-3 model with scheduler_T0=15, the original radial "
+                    "stem, inverse-count full-data event balancing, p=1, and "
+                    "squared magnitude penalty"
+                )
+            profiles = loss_term_ablation_profiles_from_config(base_config)
+            if loss_weights_from_config(base_config) not in profiles.values():
+                raise ValueError(
+                    "Phase34 active loss weights do not match a frozen "
+                    "loss-term profile"
+                )
+            return LOSS_TERM_ABLATION_AXIS
         else:
             raise ValueError(f"unsupported formal campaign axis: {explicit_axis!r}")
     if (
@@ -792,7 +942,7 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         "penalty baseline or Phase29 event-balance exponent baseline or "
         "Phase30 moment-linear-skip baseline or Phase31 moment-head-dropout "
         "baseline or Phase32 loss-weight-profile baseline or Phase33 no-shape "
-        "baseline"
+        "baseline or Phase34 loss-term-ablation baseline"
     )
 
 
@@ -800,8 +950,12 @@ def build_variant_configs(
     base_config: Mapping[str, Any],
 ) -> dict[str, dict[str, Any]]:
     axis = variant_axis_from_config(base_config)
-    if axis == LOSS_WEIGHT_PROFILE_AXIS:
-        profiles = loss_weight_profiles_from_config(base_config)
+    if axis in {LOSS_WEIGHT_PROFILE_AXIS, LOSS_TERM_ABLATION_AXIS}:
+        profiles = (
+            loss_weight_profiles_from_config(base_config)
+            if axis == LOSS_WEIGHT_PROFILE_AXIS
+            else loss_term_ablation_profiles_from_config(base_config)
+        )
         variants: dict[str, dict[str, Any]] = {}
         for profile_id, weights in profiles.items():
             config = copy.deepcopy(dict(base_config))
@@ -811,14 +965,23 @@ def build_variant_configs(
             variants[profile_id] = config
         for profile_id, config in variants.items():
             differences = _config_diff_paths(variants["baseline"], config)
-            expected = (
-                set()
-                if profile_id == "baseline"
-                else {".".join(LOSS_WEIGHT_PATHS[name]) for name in LOSS_WEIGHT_KEYS}
-            )
+            if profile_id == "baseline":
+                expected: set[str] = set()
+            elif axis == LOSS_WEIGHT_PROFILE_AXIS:
+                expected = {
+                    ".".join(LOSS_WEIGHT_PATHS[name]) for name in LOSS_WEIGHT_KEYS
+                }
+            else:
+                expected = {
+                    ".".join(
+                        LOSS_WEIGHT_PATHS[
+                            LOSS_TERM_ABLATION_REMOVED_WEIGHT[profile_id]
+                        ]
+                    )
+                }
             if differences != expected:
                 raise ValueError(
-                    f"loss-weight profile {profile_id} scientific diff changed: "
+                    f"{axis} profile {profile_id} scientific diff changed: "
                     f"expected={sorted(expected)}, actual={sorted(differences)}"
                 )
         return variants
@@ -862,6 +1025,11 @@ def validate_formal_config(config: dict[str, Any]) -> None:
     variant_axis = variant_axis_from_config(config)
     if "workflow" in config:
         raise ValueError("manuscript STF config must use a source-aligned STF")
+    formal_loss_weights = (
+        LOSS_TERM_ABLATION_PROFILES["baseline"]
+        if variant_axis == LOSS_TERM_ABLATION_AXIS
+        else LOSS_WEIGHT_PROFILES["baseline"]
+    )
     required = {
         ("pipeline_version",): 2,
         ("dataset", "sample_rate_hz"): 1.0,
@@ -893,10 +1061,18 @@ def validate_formal_config(config: dict[str, Any]) -> None:
         ("training", "epochs"): 200,
         ("training", "warmup_epochs"): 5,
         ("training", "scheduler_T_mult"): 2,
-        ("training", "stf_rate_loss", "lambda_MSE"): 1.0,
-        ("training", "stf_rate_loss", "lambda_synth"): 0.5,
-        ("training", "stf_rate_loss", "lambda_mag"): 1.0,
-        ("training", "stf_rate_loss", "lambda_shape"): 0.1,
+        ("training", "stf_rate_loss", "lambda_MSE"): formal_loss_weights[
+            "lambda_MSE"
+        ],
+        ("training", "stf_rate_loss", "lambda_synth"): formal_loss_weights[
+            "lambda_synth"
+        ],
+        ("training", "stf_rate_loss", "lambda_mag"): formal_loss_weights[
+            "lambda_mag"
+        ],
+        ("training", "stf_rate_loss", "lambda_shape"): formal_loss_weights[
+            "lambda_shape"
+        ],
         ("training", "stf_rate_loss", "include_intermediate_field"): False,
         ("training", "stf_rate_loss", "include_far_field_P"): True,
         ("training", "stf_rate_loss", "include_far_field_S"): True,
@@ -917,6 +1093,7 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             MOMENT_HEAD_DROPOUT_AXIS,
             LOSS_WEIGHT_PROFILE_AXIS,
             SHAPE_LOSS_WEIGHT_AXIS,
+            LOSS_TERM_ABLATION_AXIS,
         },
     )
     variants = build_variant_configs(config)
@@ -1022,6 +1199,26 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             raise ValueError(
                 "Phase33 baseline differs from the frozen Phase27 candidate: "
                 f"{sorted(differences)}"
+            )
+    if variant_axis == LOSS_TERM_ABLATION_AXIS:
+        phase33_config = _load_yaml(
+            PROJECT_ROOT
+            / "configs"
+            / "experiments"
+            / "manuscript_station_stf_usgs_no_shape.yaml"
+        )
+        phase33_candidate = build_variant_configs(phase33_config)["candidate"]
+        phase34_baseline = copy.deepcopy(variants["baseline"])
+        phase33_candidate.pop("campaign")
+        phase34_baseline.pop("campaign")
+        if phase34_baseline != phase33_candidate:
+            differences = _config_diff_paths(
+                phase33_candidate,
+                phase34_baseline,
+            )
+            raise ValueError(
+                "Phase34 Full-3 baseline differs from the frozen Phase33 "
+                f"candidate: {sorted(differences)}"
             )
 
 
@@ -1604,6 +1801,80 @@ def _smoke_one_device(
     return result
 
 
+def _validated_loss_term_ablation_smoke(
+    summary: Mapping[str, Any],
+    *,
+    config: Mapping[str, Any],
+) -> None:
+    if (
+        summary.get("stage") != "smoke"
+        or summary.get("status") != "complete"
+        or summary.get("variant_axis") != LOSS_TERM_ABLATION_AXIS
+        or summary.get("test_evaluated") is not False
+        or summary.get("external_evaluated") is not False
+        or summary.get("loss_term_ablation_profiles")
+        != LOSS_TERM_ABLATION_PROFILES
+        or summary.get("loss_term_ablation_profile_sha256")
+        != LOSS_TERM_ABLATION_PROFILE_SHA256
+    ):
+        raise ValueError("Phase34 smoke summary contract changed")
+    if loss_term_ablation_profiles_from_config(config) != (
+        LOSS_TERM_ABLATION_PROFILES
+    ):
+        raise ValueError("Phase34 smoke config profile table changed")
+    results = summary.get("results")
+    if not isinstance(results, Mapping) or set(results) != set(
+        LOSS_TERM_ABLATION_PROFILES
+    ):
+        raise ValueError("Phase34 smoke profiles changed")
+    parameter_counts: set[int] = set()
+    for profile_id, expected_weights in LOSS_TERM_ABLATION_PROFILES.items():
+        device_results = results[profile_id]
+        if not isinstance(device_results, Mapping) or set(device_results) != {
+            "cpu",
+            "cuda",
+        }:
+            raise ValueError(f"Phase34 smoke devices changed for {profile_id}")
+        for device_name in ("cpu", "cuda"):
+            result = device_results[device_name]
+            try:
+                finite_values = [
+                    float(result["loss"]),
+                    *[float(value) for value in result["metrics"].values()],
+                ]
+                parameter_counts.add(int(result["parameter_count"]))
+                event_balance_exponent = float(
+                    result["event_balance_exponent"]
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Phase34 smoke result changed for {profile_id}/{device_name}"
+                ) from error
+            if (
+                result.get("passed") is not True
+                or (
+                    result.get("device") != device_name
+                    and not str(result.get("device", "")).startswith(
+                        f"{device_name}:"
+                    )
+                )
+                or result.get("loss_weights") != expected_weights
+                or result.get("loss_term_ablation_profile") != profile_id
+                or result.get("loss_term_ablation_profile_sha256")
+                != LOSS_TERM_ABLATION_PROFILE_SHA256
+                or result.get("event_balance_estimator")
+                != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                or event_balance_exponent != 1.0
+                or result.get("sample_weights_exercised") is not True
+                or not all(math.isfinite(value) for value in finite_values)
+            ):
+                raise ValueError(
+                    f"Phase34 smoke provenance changed for {profile_id}/{device_name}"
+                )
+    if len(parameter_counts) != 1:
+        raise ValueError("Phase34 smoke parameter counts changed across profiles")
+
+
 def run_smoke(
     *,
     output_root: Path,
@@ -1612,6 +1883,13 @@ def run_smoke(
     stage_dir = _stage_dir(output_root, "smoke")
     completed = _prepare_stage(stage_dir, resume=resume)
     if completed is not None:
+        preflight = _require_stage(output_root, "preflight")
+        completed_config, _ = _preflight_config(preflight)
+        if variant_axis_from_config(completed_config) == LOSS_TERM_ABLATION_AXIS:
+            _validated_loss_term_ablation_smoke(
+                completed,
+                config=completed_config,
+            )
         return completed
     preflight = _require_stage(output_root, "preflight")
     config, _ = _preflight_config(preflight)
@@ -1652,6 +1930,15 @@ def run_smoke(
                         ),
                     }
                 )
+            elif variant_axis == LOSS_TERM_ABLATION_AXIS:
+                result.update(
+                    {
+                        "loss_term_ablation_profile": variant,
+                        "loss_term_ablation_profile_sha256": (
+                            LOSS_TERM_ABLATION_PROFILE_SHA256
+                        ),
+                    }
+                )
             if (
                 variant_axis == MOMENT_LINEAR_SKIP_AXIS
                 and int(result["parameter_count"])
@@ -1675,6 +1962,16 @@ def run_smoke(
                     f"actual={result['parameter_count']}"
                 )
             results[variant][device.type] = result
+    if variant_axis == LOSS_TERM_ABLATION_AXIS:
+        parameter_counts = {
+            int(device_result["parameter_count"])
+            for profile_result in results.values()
+            for device_result in profile_result.values()
+        }
+        if len(parameter_counts) != 1:
+            raise ValueError(
+                "Phase34 loss-term ablations changed the model parameter count"
+            )
     summary = {
         "stage": "smoke",
         "status": "complete",
@@ -1694,6 +1991,17 @@ def run_smoke(
                 "loss_weight_profiles": loss_weight_profiles_from_config(config),
                 "loss_weight_profile_sha256": (
                     LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
+                ),
+            }
+        )
+    if variant_axis == LOSS_TERM_ABLATION_AXIS:
+        summary.update(
+            {
+                "loss_term_ablation_profiles": (
+                    loss_term_ablation_profiles_from_config(config)
+                ),
+                "loss_term_ablation_profile_sha256": (
+                    LOSS_TERM_ABLATION_PROFILE_SHA256
                 ),
             }
         )
@@ -1785,6 +2093,138 @@ def phase29_incumbent_reproduction(
         "expected_selected_seed": PHASE27_INCUMBENT_SELECTED_SEED,
         "selected_seed_matches": selected_seed_matches,
         "seeds": rows,
+    }
+
+
+def phase33_full_three_reproduction(
+    seed_rows: Mapping[int, Mapping[str, Any]],
+) -> dict[str, Any]:
+    if set(seed_rows) != set(SEEDS):
+        raise ValueError(
+            f"Phase34 Full-3 reproduction requires exactly {SEEDS}"
+        )
+    rows: dict[str, Any] = {}
+    passed = True
+    for seed in SEEDS:
+        actual_metric = float(seed_rows[seed][VALIDATION_METRIC])
+        actual_checkpoint_sha256 = str(seed_rows[seed]["checkpoint"]["sha256"])
+        expected_metric = PHASE33_FULL_THREE_VALIDATION_BY_SEED[seed]
+        expected_checkpoint_sha256 = (
+            PHASE33_FULL_THREE_CHECKPOINT_SHA256_BY_SEED[seed]
+        )
+        metric_matches = math.isclose(
+            actual_metric,
+            expected_metric,
+            rel_tol=0.0,
+            abs_tol=0.0,
+        )
+        checkpoint_matches = actual_checkpoint_sha256 == expected_checkpoint_sha256
+        seed_passed = metric_matches and checkpoint_matches
+        passed = passed and seed_passed
+        rows[str(seed)] = {
+            "passed": seed_passed,
+            "actual_validation_event_mae_catalog": actual_metric,
+            "expected_validation_event_mae_catalog": expected_metric,
+            "validation_metric_exact_match": metric_matches,
+            "actual_checkpoint_sha256": actual_checkpoint_sha256,
+            "expected_checkpoint_sha256": expected_checkpoint_sha256,
+            "checkpoint_sha256_exact_match": checkpoint_matches,
+        }
+    selected_seed = select_seed_by_validation(seed_rows)
+    selected_seed_matches = selected_seed == PHASE33_FULL_THREE_SELECTED_SEED
+    passed = passed and selected_seed_matches
+    return {
+        "passed": passed,
+        "rule": (
+            "all Full-3 validation metrics and checkpoint SHA-256 values must "
+            "exactly reproduce the frozen Phase33 candidate"
+        ),
+        "selected_seed": selected_seed,
+        "expected_selected_seed": PHASE33_FULL_THREE_SELECTED_SEED,
+        "selected_seed_matches": selected_seed_matches,
+        "seeds": rows,
+    }
+
+
+def select_loss_term_ablation_evidence(
+    variants: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    if set(variants) != set(LOSS_TERM_ABLATION_PROFILES):
+        raise ValueError(
+            "loss-term ablation evidence requires Full-3, no-MSE, no-synth, "
+            "and no-mag profiles"
+        )
+    expected_seed_keys = {str(seed) for seed in SEEDS}
+    profile_seed_rows: dict[str, Mapping[str, Any]] = {}
+    for profile_id in LOSS_TERM_ABLATION_PROFILES:
+        rows = variants[profile_id].get("seeds")
+        if not isinstance(rows, Mapping) or set(rows) != expected_seed_keys:
+            raise ValueError(
+                f"loss-term ablation {profile_id} seed summaries are missing"
+            )
+        profile_seed_rows[profile_id] = rows
+    evidence: dict[str, Any] = {}
+    for profile_id, removed_weight in LOSS_TERM_ABLATION_REMOVED_WEIGHT.items():
+        paired_deltas: dict[str, float] = {}
+        for seed in SEEDS:
+            baseline = float(
+                profile_seed_rows["baseline"][str(seed)][VALIDATION_METRIC]
+            )
+            ablated = float(
+                profile_seed_rows[profile_id][str(seed)][VALIDATION_METRIC]
+            )
+            if not math.isfinite(baseline) or not math.isfinite(ablated):
+                raise ValueError(
+                    "loss-term ablation paired validation metrics must be finite"
+                )
+            paired_deltas[str(seed)] = ablated - baseline
+        delta_values = [paired_deltas[str(seed)] for seed in SEEDS]
+        paired_mean_delta = sum(delta_values) / len(delta_values)
+        paired_median_delta = sorted(delta_values)[len(delta_values) // 2]
+        worsened_seed_count = sum(delta > 0.0 for delta in delta_values)
+        conditions = {
+            "worsened_seed_majority": worsened_seed_count >= 2,
+            "paired_mean_positive": paired_mean_delta > 0.0,
+            "paired_median_positive": paired_median_delta > 0.0,
+        }
+        ablated_rows = {
+            seed: profile_seed_rows[profile_id][str(seed)] for seed in SEEDS
+        }
+        selected_seed = select_seed_by_validation(ablated_rows)
+        evidence[profile_id] = {
+            "removed_weight": removed_weight,
+            "delta_definition": LOSS_TERM_ABLATION_DELTA_DEFINITION,
+            "paired_deltas_by_seed": paired_deltas,
+            "paired_mean_delta": paired_mean_delta,
+            "paired_median_delta": paired_median_delta,
+            "worsened_seed_count": worsened_seed_count,
+            "worsened_seed_majority": conditions["worsened_seed_majority"],
+            "selected_seed": selected_seed,
+            "selected_validation": float(
+                ablated_rows[selected_seed][VALIDATION_METRIC]
+            ),
+            "conditions": conditions,
+            "supports_retained_term": all(conditions.values()),
+        }
+    baseline_rows = {
+        seed: profile_seed_rows["baseline"][str(seed)] for seed in SEEDS
+    }
+    baseline_selected_seed = select_seed_by_validation(baseline_rows)
+    return {
+        "support_rule": LOSS_TERM_ABLATION_SUPPORT_RULE,
+        "delta_definition": LOSS_TERM_ABLATION_DELTA_DEFINITION,
+        "baseline_profile": "baseline",
+        "baseline_role": "Full-3",
+        "baseline_selected_seed": baseline_selected_seed,
+        "baseline_selected_validation": float(
+            baseline_rows[baseline_selected_seed][VALIDATION_METRIC]
+        ),
+        "profiles": evidence,
+        "all_three_terms_supported": all(
+            row["supports_retained_term"] for row in evidence.values()
+        ),
+        "winning_ablation_selected": False,
+        "ensemble_used": False,
     }
 
 
@@ -2104,6 +2544,8 @@ def _seed_summary_is_valid(
     expected_loss_weight_profile: str | None = None,
     expected_loss_weights: Mapping[str, float] | None = None,
     expected_loss_weight_profile_sha256: str | None = None,
+    expected_loss_term_ablation_profile: str | None = None,
+    expected_loss_term_ablation_profile_sha256: str | None = None,
     expected_variant: str | None = None,
     expected_seed: int | None = None,
     expected_split_assignment_sha256: str | None = None,
@@ -2148,6 +2590,18 @@ def _seed_summary_is_valid(
             expected_loss_weight_profile_sha256 is not None
             and summary.get("loss_weight_profile_sha256")
             != expected_loss_weight_profile_sha256
+        ):
+            return False
+        if (
+            expected_loss_term_ablation_profile is not None
+            and summary.get("loss_term_ablation_profile")
+            != expected_loss_term_ablation_profile
+        ):
+            return False
+        if (
+            expected_loss_term_ablation_profile_sha256 is not None
+            and summary.get("loss_term_ablation_profile_sha256")
+            != expected_loss_term_ablation_profile_sha256
         ):
             return False
         if expected_event_balance_exponent is not None:
@@ -2268,6 +2722,7 @@ def _train_one_seed(
                 MOMENT_HEAD_DROPOUT_AXIS,
                 LOSS_WEIGHT_PROFILE_AXIS,
                 SHAPE_LOSS_WEIGHT_AXIS,
+                LOSS_TERM_ABLATION_AXIS,
             }
         )
         expected_magnitude_penalty = (
@@ -2296,12 +2751,24 @@ def _train_one_seed(
         expected_loss_weights = (
             loss_weights_from_config(config)
             if campaign_axis
-            in {LOSS_WEIGHT_PROFILE_AXIS, SHAPE_LOSS_WEIGHT_AXIS}
+            in {
+                LOSS_WEIGHT_PROFILE_AXIS,
+                SHAPE_LOSS_WEIGHT_AXIS,
+                LOSS_TERM_ABLATION_AXIS,
+            }
             else None
         )
         expected_loss_weight_profile_sha256 = (
             LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
             if campaign_axis == LOSS_WEIGHT_PROFILE_AXIS
+            else None
+        )
+        expected_loss_term_ablation_profile = (
+            variant if campaign_axis == LOSS_TERM_ABLATION_AXIS else None
+        )
+        expected_loss_term_ablation_profile_sha256 = (
+            LOSS_TERM_ABLATION_PROFILE_SHA256
+            if campaign_axis == LOSS_TERM_ABLATION_AXIS
             else None
         )
         expected_git_commit = (
@@ -2340,6 +2807,12 @@ def _train_one_seed(
             expected_loss_weights=expected_loss_weights,
             expected_loss_weight_profile_sha256=(
                 expected_loss_weight_profile_sha256
+            ),
+            expected_loss_term_ablation_profile=(
+                expected_loss_term_ablation_profile
+            ),
+            expected_loss_term_ablation_profile_sha256=(
+                expected_loss_term_ablation_profile_sha256
             ),
             expected_variant=variant if strict_resume else None,
             expected_seed=seed if strict_resume else None,
@@ -2436,6 +2909,15 @@ def _train_one_seed(
                 ),
             }
         )
+    elif campaign_axis == LOSS_TERM_ABLATION_AXIS:
+        summary.update(
+            {
+                "loss_term_ablation_profile": variant,
+                "loss_term_ablation_profile_sha256": (
+                    LOSS_TERM_ABLATION_PROFILE_SHA256
+                ),
+            }
+        )
     _atomic_json(seed_summary_path, summary, overwrite=resume)
     return summary
 
@@ -2448,6 +2930,36 @@ def run_train(
     stage_dir = _stage_dir(output_root, "train")
     completed = _prepare_stage(stage_dir, resume=resume)
     if completed is not None:
+        preflight = _require_stage(output_root, "preflight")
+        completed_config, completed_dataset_manifest = _preflight_config(
+            preflight
+        )
+        preflight_axis = variant_axis_from_config(completed_config)
+        completed_axis = completed.get("variant_axis")
+        if LOSS_TERM_ABLATION_AXIS in {preflight_axis, completed_axis}:
+            if completed_axis != preflight_axis:
+                raise ValueError(
+                    "Phase34 completed train and preflight campaign axes differ"
+                )
+            completed_smoke = _require_stage(output_root, "smoke")
+            _validated_loss_term_ablation_smoke(
+                completed_smoke,
+                config=completed_config,
+            )
+            if (
+                completed.get("preflight_summary")
+                != _artifact(_stage_dir(output_root, "preflight") / "summary.json")
+                or completed.get("smoke_summary")
+                != _artifact(_stage_dir(output_root, "smoke") / "summary.json")
+            ):
+                raise ValueError("Phase34 train stage provenance changed")
+            _validated_completed_loss_term_ablation_campaign(
+                completed,
+                config=completed_config,
+                dataset_manifest=completed_dataset_manifest,
+                preflight=preflight,
+                stage_dir=stage_dir,
+            )
         return completed
     preflight = _require_stage(output_root, "preflight")
     smoke = _require_stage(output_root, "smoke")
@@ -2455,10 +2967,14 @@ def run_train(
         raise RuntimeError("smoke stage did not pass")
     config, dataset_manifest = _preflight_config(preflight)
     variant_axis = variant_axis_from_config(config)
+    if variant_axis == LOSS_TERM_ABLATION_AXIS:
+        _validated_loss_term_ablation_smoke(smoke, config=config)
     variants = build_variant_configs(config)
     variant_summaries: dict[str, Any] = {}
     incumbent_reproduction: dict[str, Any] | None = None
     incumbent_reproduction_artifact: dict[str, str] | None = None
+    full_three_reproduction: dict[str, Any] | None = None
+    full_three_reproduction_artifact: dict[str, str] | None = None
     for variant, variant_config in variants.items():
         seed_summaries: dict[int, dict[str, Any]] = {}
         for seed in SEEDS:
@@ -2466,7 +2982,7 @@ def run_train(
                 preflight["splits"][str(seed)]["manifest"],
                 label=f"preflight split seed {seed}",
             )
-            seed_summaries[seed] = _train_one_seed(
+            seed_summary = _train_one_seed(
                 variant=variant,
                 config=variant_config,
                 seed=seed,
@@ -2475,6 +2991,22 @@ def run_train(
                 frozen_split_path=frozen_split_path,
                 resume=resume,
             )
+            if variant_axis == LOSS_TERM_ABLATION_AXIS:
+                expected_seed_metadata = {
+                    "loss_weights": loss_weights_from_config(variant_config),
+                    "loss_term_ablation_profile": variant,
+                    "loss_term_ablation_profile_sha256": (
+                        LOSS_TERM_ABLATION_PROFILE_SHA256
+                    ),
+                }
+                for name, expected in expected_seed_metadata.items():
+                    if name in seed_summary and seed_summary[name] != expected:
+                        raise ValueError(
+                            f"Phase34 seed metadata changed for "
+                            f"{variant}/{seed}: {name}"
+                        )
+                    seed_summary[name] = expected
+            seed_summaries[seed] = seed_summary
         selected_seed = select_seed_by_validation(seed_summaries)
         if (
             variant_axis in FROZEN_PHASE27_INCUMBENT_AXES
@@ -2493,6 +3025,25 @@ def run_train(
                 raise ValueError(
                     f"{campaign_name} baseline did not exactly reproduce the frozen "
                     "Phase27 incumbent; refusing to train or compare the candidate"
+                )
+        if variant_axis == LOSS_TERM_ABLATION_AXIS and variant == "baseline":
+            full_three_reproduction = phase33_full_three_reproduction(
+                seed_summaries
+            )
+            reproduction_path = (
+                stage_dir / variant / "full_three_reproduction.json"
+            )
+            _atomic_json(
+                reproduction_path,
+                full_three_reproduction,
+                overwrite=resume,
+            )
+            full_three_reproduction_artifact = _artifact(reproduction_path)
+            if not full_three_reproduction["passed"]:
+                raise ValueError(
+                    "Phase34 Full-3 baseline did not exactly reproduce the "
+                    "frozen Phase33 candidate; refusing to train any loss-term "
+                    "ablation"
                 )
         selection = {
             "selected_seed": selected_seed,
@@ -2548,6 +3099,15 @@ def run_train(
                     ),
                 }
             )
+        elif variant_axis == LOSS_TERM_ABLATION_AXIS:
+            variant_summaries[variant].update(
+                {
+                    "loss_term_ablation_profile": variant,
+                    "loss_term_ablation_profile_sha256": (
+                        LOSS_TERM_ABLATION_PROFILE_SHA256
+                    ),
+                }
+            )
     profile_selection: dict[str, Any] | None = None
     profile_selection_artifact: dict[str, str] | None = None
     if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
@@ -2572,6 +3132,19 @@ def run_train(
             overwrite=resume,
         )
         shape_loss_compatibility_artifact = _artifact(compatibility_path)
+    loss_term_ablation_evidence: dict[str, Any] | None = None
+    loss_term_ablation_evidence_artifact: dict[str, str] | None = None
+    if variant_axis == LOSS_TERM_ABLATION_AXIS:
+        loss_term_ablation_evidence = select_loss_term_ablation_evidence(
+            variant_summaries
+        )
+        evidence_path = stage_dir / "loss_term_ablation_evidence.json"
+        _atomic_json(
+            evidence_path,
+            loss_term_ablation_evidence,
+            overwrite=resume,
+        )
+        loss_term_ablation_evidence_artifact = _artifact(evidence_path)
     summary = {
         "stage": "train",
         "status": "complete",
@@ -2626,6 +3199,34 @@ def run_train(
             **shape_loss_compatibility,
             "artifact": shape_loss_compatibility_artifact,
         }
+    if variant_axis == LOSS_TERM_ABLATION_AXIS:
+        if (
+            full_three_reproduction is None
+            or full_three_reproduction_artifact is None
+            or loss_term_ablation_evidence is None
+            or loss_term_ablation_evidence_artifact is None
+        ):
+            raise RuntimeError("Phase34 ablation evidence was not evaluated")
+        summary.update(
+            {
+                "full_three_reproduction": {
+                    **full_three_reproduction,
+                    "artifact": full_three_reproduction_artifact,
+                },
+                "loss_term_ablation_profiles": (
+                    loss_term_ablation_profiles_from_config(config)
+                ),
+                "loss_term_ablation_profile_sha256": (
+                    LOSS_TERM_ABLATION_PROFILE_SHA256
+                ),
+                "loss_term_ablation_evidence": {
+                    **loss_term_ablation_evidence,
+                    "artifact": loss_term_ablation_evidence_artifact,
+                },
+                "winning_ablation_selected": False,
+                "ensemble_used": False,
+            }
+        )
     _finish_stage(stage_dir, summary, resume=resume)
     return summary
 
@@ -2748,6 +3349,221 @@ def _validated_shape_loss_weight_campaign(
     if persisted != expected:
         raise ValueError("Phase33 validation compatibility evidence is inconsistent")
     return expected
+
+
+def _validated_phase33_full_three_reproduction(
+    train_summary: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    variants = train_summary.get("variants")
+    if not isinstance(variants, Mapping) or "baseline" not in variants:
+        raise ValueError("Phase34 Full-3 baseline is missing")
+    reproduction = train_summary.get("full_three_reproduction")
+    if not isinstance(reproduction, Mapping) or reproduction.get("passed") is not True:
+        raise ValueError("Phase34 Full-3 reproduction gate is missing or failed")
+    reproduction_path = _validate_artifact(
+        reproduction["artifact"],
+        label="Phase34 Full-3 reproduction",
+    )
+    persisted = _load_json(reproduction_path)
+    recorded = {
+        key: value for key, value in reproduction.items() if key != "artifact"
+    }
+    if persisted != recorded:
+        raise ValueError("Phase34 Full-3 reproduction artifact changed")
+    baseline_rows = {
+        seed: variants["baseline"]["seeds"][str(seed)] for seed in SEEDS
+    }
+    expected = phase33_full_three_reproduction(baseline_rows)
+    if persisted != expected:
+        raise ValueError("Phase34 Full-3 reproduction evidence is inconsistent")
+    return reproduction
+
+
+def _validated_loss_term_ablation_campaign(
+    train_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    if (
+        train_summary.get("stage") != "train"
+        or train_summary.get("status") != "complete"
+        or train_summary.get("variant_axis") != LOSS_TERM_ABLATION_AXIS
+        or train_summary.get("test_evaluated") is not False
+        or train_summary.get("external_evaluated") is not False
+        or train_summary.get("winning_ablation_selected") is not False
+        or train_summary.get("ensemble_used") is not False
+        or "selected_candidate_variant" in train_summary
+        or train_summary.get("git_commit") != current_git_commit(PROJECT_ROOT)
+    ):
+        raise ValueError("Phase34 train summary contract changed")
+    if train_summary.get("loss_term_ablation_profile_sha256") != (
+        LOSS_TERM_ABLATION_PROFILE_SHA256
+    ):
+        raise ValueError("Phase34 profile hash is missing or changed")
+    if train_summary.get("loss_term_ablation_profiles") != (
+        LOSS_TERM_ABLATION_PROFILES
+    ):
+        raise ValueError("Phase34 profile table is missing or changed")
+    variants = train_summary.get("variants")
+    if not isinstance(variants, Mapping) or set(variants) != set(
+        LOSS_TERM_ABLATION_PROFILES
+    ):
+        raise ValueError("Phase34 train variants changed")
+    expected_seed_keys = {str(seed) for seed in SEEDS}
+    for profile_id, expected_weights in LOSS_TERM_ABLATION_PROFILES.items():
+        profile = variants[profile_id]
+        expected_diff = (
+            []
+            if profile_id == "baseline"
+            else [
+                ".".join(
+                    LOSS_WEIGHT_PATHS[
+                        LOSS_TERM_ABLATION_REMOVED_WEIGHT[profile_id]
+                    ]
+                )
+            ]
+        )
+        if (
+            profile.get("loss_term_ablation_profile") != profile_id
+            or profile.get("loss_term_ablation_profile_sha256")
+            != LOSS_TERM_ABLATION_PROFILE_SHA256
+            or profile.get("loss_weights") != expected_weights
+            or profile.get("scientific_diff_from_baseline") != expected_diff
+        ):
+            raise ValueError(f"Phase34 train profile {profile_id} changed")
+        seeds = profile.get("seeds")
+        if not isinstance(seeds, Mapping) or set(seeds) != expected_seed_keys:
+            raise ValueError(f"Phase34 seed set changed for {profile_id}")
+        seed_rows: dict[int, Mapping[str, Any]] = {}
+        for seed in SEEDS:
+            row = seeds[str(seed)]
+            if (
+                not isinstance(row, Mapping)
+                or row.get("variant") != profile_id
+                or row.get("seed") != seed
+                or row.get("loss_weights") != expected_weights
+                or row.get("loss_term_ablation_profile") != profile_id
+                or row.get("loss_term_ablation_profile_sha256")
+                != LOSS_TERM_ABLATION_PROFILE_SHA256
+            ):
+                raise ValueError(
+                    f"Phase34 seed summary changed for {profile_id}/{seed}"
+                )
+            seed_rows[seed] = row
+        selection = profile.get("selection")
+        expected_selection = {
+            "selected_seed": select_seed_by_validation(seed_rows),
+            "selection_metric": VALIDATION_METRIC,
+            "ensemble_used": False,
+            "candidates": {
+                str(seed): float(seed_rows[seed][VALIDATION_METRIC])
+                for seed in SEEDS
+            },
+        }
+        if not isinstance(selection, Mapping) or dict(selection) != expected_selection:
+            raise ValueError(f"Phase34 seed selection changed for {profile_id}")
+        selection_path = _validate_artifact(
+            profile["selection_artifact"],
+            label=f"Phase34 seed selection {profile_id}",
+        )
+        if _load_json(selection_path) != expected_selection:
+            raise ValueError(
+                f"Phase34 seed selection artifact changed for {profile_id}"
+            )
+    _validated_phase33_full_three_reproduction(train_summary)
+    recorded = train_summary.get("loss_term_ablation_evidence")
+    if not isinstance(recorded, Mapping):
+        raise ValueError("Phase34 loss-term evidence is missing")
+    evidence_path = _validate_artifact(
+        recorded["artifact"],
+        label="Phase34 loss-term ablation evidence",
+    )
+    persisted = _load_json(evidence_path)
+    recorded_without_artifact = {
+        key: value for key, value in recorded.items() if key != "artifact"
+    }
+    if persisted != recorded_without_artifact:
+        raise ValueError("Phase34 loss-term evidence artifact changed")
+    expected = select_loss_term_ablation_evidence(variants)
+    if persisted != expected:
+        raise ValueError("Phase34 loss-term evidence is inconsistent")
+    return expected
+
+
+def _validated_completed_loss_term_ablation_campaign(
+    train_summary: Mapping[str, Any],
+    *,
+    config: Mapping[str, Any],
+    dataset_manifest: Path,
+    preflight: Mapping[str, Any],
+    stage_dir: Path,
+) -> dict[str, Any]:
+    evidence = _validated_loss_term_ablation_campaign(train_summary)
+    variants = train_summary["variants"]
+    expected_configs = build_variant_configs(config)
+    for profile_id, expected_weights in LOSS_TERM_ABLATION_PROFILES.items():
+        for seed in SEEDS:
+            row = variants[profile_id]["seeds"][str(seed)]
+            try:
+                for artifact_name in (
+                    "checkpoint",
+                    "config",
+                    "split",
+                    "training_log",
+                    "run_manifest",
+                    "sampling",
+                    "last_checkpoint",
+                ):
+                    _validate_artifact(
+                        row[artifact_name],
+                        label=f"Phase34 {profile_id}/{seed} {artifact_name}",
+                    )
+                persisted_config = _load_yaml(Path(str(row["config"]["path"])))
+                persisted_split = _load_json(Path(str(row["split"]["path"])))
+                persisted_sampling = _load_json(
+                    Path(str(row["sampling"]["path"]))
+                )
+                persisted_run_manifest = _load_json(
+                    Path(str(row["run_manifest"]["path"]))
+                )
+                frozen_split = _load_json(
+                    _validate_artifact(
+                        preflight["splits"][str(seed)]["manifest"],
+                        label=f"Phase34 preflight split {seed}",
+                    )
+                )
+            except (KeyError, OSError, TypeError, ValueError, yaml.YAMLError) as error:
+                raise ValueError(
+                    f"Phase34 seed artifacts changed for {profile_id}/{seed}"
+                ) from error
+            expected_runtime_config = _runtime_config(
+                expected_configs[profile_id],
+                run_root=stage_dir / profile_id / f"seed_{seed}",
+                seed=seed,
+                dataset_manifest=dataset_manifest,
+            )
+            if (
+                variant_axis_from_config(persisted_config)
+                != LOSS_TERM_ABLATION_AXIS
+                or persisted_config != expected_runtime_config
+                or persisted_config["training"].get("random_seed") != seed
+                or loss_weights_from_config(persisted_config) != expected_weights
+                or row.get("split_assignment_sha256")
+                != EXPECTED_SPLIT_SHA256[seed]
+                or row.get("git_commit") != train_summary.get("git_commit")
+                or persisted_run_manifest.get("git_commit")
+                != train_summary.get("git_commit")
+                or persisted_run_manifest.get("git_dirty") is not False
+                or not _phase30_sampling_manifest_is_valid(
+                    persisted_sampling,
+                    seed=seed,
+                )
+            ):
+                raise ValueError(
+                    f"Phase34 seed provenance changed for {profile_id}/{seed}"
+                )
+            _assert_split_manifest(frozen_split, seed=seed)
+            _assert_split_manifest(persisted_split, seed=seed)
+            _assert_same_split(persisted_split, frozen_split)
+    return evidence
 
 
 def _validated_loss_weight_profile_selection(
@@ -3299,11 +4115,37 @@ def _validate_completed_phase33_internal(
         raise ValueError("completed Phase33 internal gate evidence changed")
 
 
+def _available_formal_campaign_axis(output_root: Path) -> str | None:
+    observed_axes: set[str] = set()
+    preflight_dir = _stage_dir(output_root, "preflight")
+    if (
+        (preflight_dir / "COMPLETE").is_file()
+        and (preflight_dir / "summary.json").is_file()
+    ):
+        preflight = _require_stage(output_root, "preflight")
+        config, _ = _preflight_config(preflight)
+        observed_axes.add(variant_axis_from_config(config))
+    train_summary_path = _stage_dir(output_root, "train") / "summary.json"
+    if train_summary_path.is_file():
+        train_summary = _load_json(train_summary_path)
+        train_axis = train_summary.get("variant_axis")
+        if isinstance(train_axis, str):
+            observed_axes.add(train_axis)
+    if len(observed_axes) > 1:
+        raise ValueError("formal campaign axis provenance is inconsistent")
+    return next(iter(observed_axes), None)
+
+
 def run_internal(
     *,
     output_root: Path,
     resume: bool,
 ) -> dict[str, Any]:
+    if _available_formal_campaign_axis(output_root) == LOSS_TERM_ABLATION_AXIS:
+        raise RuntimeError(
+            "Phase34 loss-term ablation is validation-only; internal evaluation "
+            "is closed"
+        )
     stage_dir = _stage_dir(output_root, "internal")
     completed = _prepare_stage(stage_dir, resume=resume)
     if completed is not None:
@@ -3317,6 +4159,11 @@ def run_internal(
             )
         return completed
     train_summary = _require_stage(output_root, "train")
+    if train_summary.get("variant_axis") == LOSS_TERM_ABLATION_AXIS:
+        raise RuntimeError(
+            "Phase34 loss-term ablation is validation-only; internal evaluation "
+            "is closed"
+        )
     if train_summary.get("status") != "complete":
         raise RuntimeError("train stage did not complete")
     validation_passed = candidate_validation_improves(train_summary)
@@ -3758,6 +4605,11 @@ def run_external(
     event_root: Path,
     resume: bool,
 ) -> dict[str, Any]:
+    if _available_formal_campaign_axis(output_root) == LOSS_TERM_ABLATION_AXIS:
+        raise RuntimeError(
+            "Phase34 loss-term ablation is validation-only; external evaluation "
+            "is closed"
+        )
     stage_dir = _stage_dir(output_root, "external")
     train_dir = _stage_dir(output_root, "train")
     train_summary: dict[str, Any] | None = None
@@ -3770,6 +4622,14 @@ def run_external(
         raise RuntimeError(
             "Phase33 external evaluation is preregistered closed; report only "
             "validation compatibility and the locked internal test"
+        )
+    if (
+        train_summary is not None
+        and train_summary.get("variant_axis") == LOSS_TERM_ABLATION_AXIS
+    ):
+        raise RuntimeError(
+            "Phase34 loss-term ablation is validation-only; external evaluation "
+            "is closed"
         )
     completed = _prepare_stage(stage_dir, resume=resume)
     if completed is not None:
@@ -3788,6 +4648,11 @@ def run_external(
                 "Phase33 external evaluation is preregistered closed; report only "
                 "validation compatibility and the locked internal test"
             )
+        if train_summary.get("variant_axis") == LOSS_TERM_ABLATION_AXIS:
+            raise RuntimeError(
+                "Phase34 loss-term ablation is validation-only; external "
+                "evaluation is closed"
+            )
         return completed
     internal = _require_stage(output_root, "internal")
     if internal.get("status") != "complete" or not bool(
@@ -3800,6 +4665,11 @@ def run_external(
         raise RuntimeError(
             "Phase33 external evaluation is preregistered closed; report only "
             "validation compatibility and the locked internal test"
+        )
+    if train_summary.get("variant_axis") == LOSS_TERM_ABLATION_AXIS:
+        raise RuntimeError(
+            "Phase34 loss-term ablation is validation-only; external evaluation "
+            "is closed"
         )
     if train_summary.get("variant_axis") == LOSS_WEIGHT_PROFILE_AXIS:
         _validated_phase27_incumbent_reproduction(

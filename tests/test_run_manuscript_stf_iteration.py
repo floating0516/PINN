@@ -80,6 +80,12 @@ PHASE33_CONFIG_PATH = (
     / "experiments"
     / "manuscript_station_stf_usgs_no_shape.yaml"
 )
+PHASE34_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_three_loss_ablation.yaml"
+)
 CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
@@ -3573,3 +3579,560 @@ def test_cli_dispatches_exactly_one_stage(
 
     assert exit_code == 0
     assert calls == ["internal"]
+
+
+def _mark_phase34_smoke(output_root: Path) -> None:
+    results: dict[str, Any] = {}
+    for profile_id, weights in campaign.LOSS_TERM_ABLATION_PROFILES.items():
+        results[profile_id] = {
+            device: {
+                "passed": True,
+                "device": device,
+                "loss": 1.0,
+                "metrics": {"L_total": 1.0},
+                "parameter_count": 1_010_850,
+                "loss_weights": weights,
+                "loss_term_ablation_profile": profile_id,
+                "loss_term_ablation_profile_sha256": (
+                    campaign.LOSS_TERM_ABLATION_PROFILE_SHA256
+                ),
+                "event_balance_estimator": (
+                    campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                ),
+                "event_balance_exponent": 1.0,
+                "sample_weights_exercised": True,
+            }
+            for device in ("cpu", "cuda")
+        }
+    _mark_stage(
+        output_root,
+        "smoke",
+        {
+            "status": "complete",
+            "variant_axis": campaign.LOSS_TERM_ABLATION_AXIS,
+            "test_evaluated": False,
+            "external_evaluated": False,
+            "loss_term_ablation_profiles": campaign.LOSS_TERM_ABLATION_PROFILES,
+            "loss_term_ablation_profile_sha256": (
+                campaign.LOSS_TERM_ABLATION_PROFILE_SHA256
+            ),
+            "results": results,
+        },
+    )
+
+
+def _phase34_split_manifest(seed: int) -> dict[str, Any]:
+    return {
+        "seed": seed,
+        "protocol": "within_event_station",
+        "train_record_count": 1788,
+        "validation_record_count": 385,
+        "test_record_count": 385,
+        "assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[seed],
+        "sample_keys": [],
+        "per_event_station_counts": {},
+    }
+
+
+def _run_phase34_train_with_deltas(
+    *,
+    output_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    deltas: dict[str, dict[int, float]],
+) -> tuple[dict[str, Any], list[tuple[str, int]]]:
+    config_path = output_root / "frozen_config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(_config(PHASE34_CONFIG_PATH), sort_keys=False),
+        encoding="utf-8",
+    )
+    manifest_path = output_root / "dataset_manifest.csv"
+    manifest_path.write_text("event,station\n", encoding="utf-8")
+    splits: dict[str, Any] = {}
+    for seed in campaign.SEEDS:
+        split_path = output_root / f"split_{seed}.json"
+        _write_json(split_path, _phase34_split_manifest(seed))
+        splits[str(seed)] = {"manifest": _artifact(split_path)}
+    _mark_stage(
+        output_root,
+        "preflight",
+        {
+            "status": "complete",
+            "source_data": {"sha256": campaign.EXPECTED_SOURCE_SHA256},
+            "frozen_config": _artifact(config_path),
+            "dataset_manifest": _artifact(manifest_path),
+            "splits": splits,
+        },
+    )
+    _mark_phase34_smoke(output_root)
+    calls: list[tuple[str, int]] = []
+
+    def fake_train_one_seed(**kwargs: Any) -> dict[str, Any]:
+        profile_id = str(kwargs["variant"])
+        seed = int(kwargs["seed"])
+        calls.append((profile_id, seed))
+        metric = campaign.PHASE33_FULL_THREE_VALIDATION_BY_SEED[seed]
+        if profile_id != "baseline":
+            metric += deltas[profile_id][seed]
+        seed_root = Path(kwargs["seed_root"])
+        seed_root.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = seed_root / "best_model.pth"
+        checkpoint_path.write_text(f"{profile_id}-{seed}-best", encoding="utf-8")
+        last_checkpoint_path = seed_root / "last_state.pth"
+        last_checkpoint_path.write_text(
+            f"{profile_id}-{seed}-last", encoding="utf-8"
+        )
+        training_log_path = seed_root / "training.csv"
+        training_log_path.write_text("epoch\n", encoding="utf-8")
+        split_path = seed_root / "split.json"
+        _write_json(split_path, _phase34_split_manifest(seed))
+        sampling_path = seed_root / "sampling.json"
+        _write_json(sampling_path, _phase27_sampling_manifest(seed))
+        commit = campaign.current_git_commit(campaign.PROJECT_ROOT)
+        run_manifest_path = seed_root / "run_manifest.json"
+        _write_json(run_manifest_path, {"git_commit": commit, "git_dirty": False})
+        runtime = campaign._runtime_config(
+            kwargs["config"],
+            run_root=seed_root,
+            seed=seed,
+            dataset_manifest=Path(kwargs["dataset_manifest"]),
+        )
+        config_artifact_path = seed_root / "config.yaml"
+        config_artifact_path.write_text(
+            yaml.safe_dump(runtime, sort_keys=False), encoding="utf-8"
+        )
+        checkpoint = _artifact(checkpoint_path)
+        if profile_id == "baseline":
+            monkeypatch.setitem(
+                campaign.PHASE33_FULL_THREE_CHECKPOINT_SHA256_BY_SEED,
+                seed,
+                checkpoint["sha256"],
+            )
+        return {
+            "variant": profile_id,
+            "seed": seed,
+            "git_commit": commit,
+            "loss_weights": campaign.loss_weights_from_config(kwargs["config"]),
+            "loss_term_ablation_profile": profile_id,
+            "loss_term_ablation_profile_sha256": (
+                campaign.LOSS_TERM_ABLATION_PROFILE_SHA256
+            ),
+            "split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[seed],
+            campaign.VALIDATION_METRIC: metric,
+            "checkpoint": checkpoint,
+            "last_checkpoint": _artifact(last_checkpoint_path),
+            "config": _artifact(config_artifact_path),
+            "split": _artifact(split_path),
+            "training_log": _artifact(training_log_path),
+            "run_manifest": _artifact(run_manifest_path),
+            "sampling": _artifact(sampling_path),
+        }
+
+    monkeypatch.setattr(campaign, "_train_one_seed", fake_train_one_seed)
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_locked_test",
+        lambda **_kwargs: pytest.fail("Phase34 must never evaluate locked test"),
+    )
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_external_threshold",
+        lambda **_kwargs: pytest.fail("Phase34 must never evaluate external data"),
+    )
+    return campaign.run_train(output_root=output_root, resume=False), calls
+
+
+def test_phase34_config_is_exact_nested_three_loss_ablation() -> None:
+    phase33_candidate = campaign.build_variant_configs(
+        _config(PHASE33_CONFIG_PATH)
+    )["candidate"]
+    phase34_config = _config(PHASE34_CONFIG_PATH)
+    campaign.validate_formal_config(phase34_config)
+    variants = campaign.build_variant_configs(phase34_config)
+
+    assert campaign.variant_axis_from_config(phase34_config) == (
+        campaign.LOSS_TERM_ABLATION_AXIS
+    )
+    assert campaign._profile_table_sha256(
+        campaign.loss_term_ablation_profiles_from_config(phase34_config)
+    ) == campaign.LOSS_TERM_ABLATION_PROFILE_SHA256
+    phase33_candidate.pop("campaign")
+    phase34_baseline = copy.deepcopy(variants["baseline"])
+    phase34_baseline.pop("campaign")
+    assert phase34_baseline == phase33_candidate
+    for profile_id, weight_name in campaign.LOSS_TERM_ABLATION_REMOVED_WEIGHT.items():
+        assert campaign._config_diff_paths(
+            variants["baseline"], variants[profile_id]
+        ) == {".".join(campaign.LOSS_WEIGHT_PATHS[weight_name])}
+        assert variants[profile_id]["training"]["stf_rate_loss"][weight_name] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("tamper_kind", "match"),
+    [
+        ("profile_hash", "profile_sha256 changed"),
+        ("baseline_shape", "baseline.lambda_shape changed"),
+        ("extra_zero", "no_mse.lambda_synth changed"),
+        ("negative", "finite and nonnegative"),
+    ],
+)
+def test_phase34_profile_table_tampering_is_rejected(
+    tamper_kind: str,
+    match: str,
+) -> None:
+    config = _config(PHASE34_CONFIG_PATH)
+    ablation = config["campaign"]["loss_term_ablation"]
+    if tamper_kind == "profile_hash":
+        ablation["profile_sha256"] = "wrong"
+    elif tamper_kind == "baseline_shape":
+        ablation["profiles"]["baseline"]["lambda_shape"] = 0.1
+    elif tamper_kind == "extra_zero":
+        ablation["profiles"]["no_mse"]["lambda_synth"] = 0.0
+    elif tamper_kind == "negative":
+        ablation["profiles"]["no_mag"]["lambda_mag"] = -1.0
+    else:  # pragma: no cover
+        raise AssertionError(tamper_kind)
+
+    with pytest.raises(ValueError, match=match):
+        campaign.loss_term_ablation_profiles_from_config(config)
+
+
+def test_phase34_runs_full_three_then_each_ablation_for_all_seeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deltas = {
+        profile_id: {17: 0.01, 42: 0.02, 73: 0.03}
+        for profile_id in campaign.LOSS_TERM_ABLATION_REMOVED_WEIGHT
+    }
+    summary, calls = _run_phase34_train_with_deltas(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        deltas=deltas,
+    )
+
+    assert calls == [
+        (profile_id, seed)
+        for profile_id in campaign.LOSS_TERM_ABLATION_PROFILES
+        for seed in campaign.SEEDS
+    ]
+    assert summary["full_three_reproduction"]["passed"] is True
+    assert summary["loss_term_ablation_evidence"][
+        "all_three_terms_supported"
+    ] is True
+    assert summary["winning_ablation_selected"] is False
+    assert summary["ensemble_used"] is False
+    assert summary["test_evaluated"] is False
+    assert summary["external_evaluated"] is False
+    assert "selected_candidate_variant" not in summary
+    validated = campaign._validated_loss_term_ablation_campaign(summary)
+    assert validated["all_three_terms_supported"] is True
+
+
+def test_phase34_completed_train_resume_rejects_preflight_axis_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deltas = {
+        profile_id: {17: 0.01, 42: 0.02, 73: 0.03}
+        for profile_id in campaign.LOSS_TERM_ABLATION_REMOVED_WEIGHT
+    }
+    _run_phase34_train_with_deltas(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        deltas=deltas,
+    )
+
+    preflight_path = tmp_path / "preflight" / "summary.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    frozen_config_path = Path(preflight["frozen_config"]["path"])
+    frozen_config_path.write_text(
+        yaml.safe_dump(_config(PHASE33_CONFIG_PATH), sort_keys=False),
+        encoding="utf-8",
+    )
+    preflight["frozen_config"] = _artifact(frozen_config_path)
+    _write_json(preflight_path, preflight)
+
+    with pytest.raises(ValueError, match="campaign axes differ"):
+        campaign.run_train(output_root=tmp_path, resume=True)
+
+
+@pytest.mark.parametrize("tamper_kind", ["config", "split"])
+def test_phase34_completed_train_resume_rejects_seed_provenance_tampering(
+    tamper_kind: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deltas = {
+        profile_id: {17: 0.01, 42: 0.02, 73: 0.03}
+        for profile_id in campaign.LOSS_TERM_ABLATION_REMOVED_WEIGHT
+    }
+    _run_phase34_train_with_deltas(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        deltas=deltas,
+    )
+
+    summary_path = tmp_path / "train" / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    seed_row = summary["variants"]["no_mse"]["seeds"]["17"]
+    artifact_path = Path(seed_row[tamper_kind]["path"])
+    if tamper_kind == "config":
+        persisted = yaml.safe_load(artifact_path.read_text(encoding="utf-8"))
+        persisted["training"]["learning_rate"] = 0.5
+        artifact_path.write_text(
+            yaml.safe_dump(persisted, sort_keys=False), encoding="utf-8"
+        )
+    else:
+        persisted = json.loads(artifact_path.read_text(encoding="utf-8"))
+        persisted["sample_keys"] = ["changed-with-frozen-hash-field"]
+        _write_json(artifact_path, persisted)
+    seed_row[tamper_kind] = _artifact(artifact_path)
+    _write_json(summary_path, summary)
+
+    with pytest.raises(ValueError):
+        campaign.run_train(output_root=tmp_path, resume=True)
+
+
+@pytest.mark.parametrize("mismatch", ["validation_metric", "checkpoint_sha256"])
+def test_phase34_full_three_drift_stops_before_first_ablation(
+    mismatch: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "frozen_config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(_config(PHASE34_CONFIG_PATH), sort_keys=False),
+        encoding="utf-8",
+    )
+    manifest_path = tmp_path / "dataset_manifest.csv"
+    manifest_path.write_text("event,station\n", encoding="utf-8")
+    splits: dict[str, Any] = {}
+    for seed in campaign.SEEDS:
+        split_path = tmp_path / f"split_{seed}.json"
+        _write_json(split_path, {"seed": seed})
+        splits[str(seed)] = {"manifest": _artifact(split_path)}
+    _mark_stage(
+        tmp_path,
+        "preflight",
+        {
+            "status": "complete",
+            "source_data": {"sha256": campaign.EXPECTED_SOURCE_SHA256},
+            "frozen_config": _artifact(config_path),
+            "dataset_manifest": _artifact(manifest_path),
+            "splits": splits,
+        },
+    )
+    _mark_phase34_smoke(tmp_path)
+    calls: list[tuple[str, int]] = []
+
+    def fake_train_one_seed(**kwargs: Any) -> dict[str, Any]:
+        profile_id = str(kwargs["variant"])
+        seed = int(kwargs["seed"])
+        calls.append((profile_id, seed))
+        metric = campaign.PHASE33_FULL_THREE_VALIDATION_BY_SEED[seed]
+        checkpoint = campaign.PHASE33_FULL_THREE_CHECKPOINT_SHA256_BY_SEED[seed]
+        if seed == 42 and mismatch == "validation_metric":
+            metric += 1.0e-12
+        if seed == 42 and mismatch == "checkpoint_sha256":
+            checkpoint = "wrong"
+        return {
+            "variant": profile_id,
+            "seed": seed,
+            campaign.VALIDATION_METRIC: metric,
+            "checkpoint": {"sha256": checkpoint},
+        }
+
+    monkeypatch.setattr(campaign, "_train_one_seed", fake_train_one_seed)
+
+    with pytest.raises(ValueError, match="refusing to train any loss-term"):
+        campaign.run_train(output_root=tmp_path, resume=False)
+
+    assert calls == [("baseline", seed) for seed in campaign.SEEDS]
+
+
+def test_phase34_evidence_uses_strict_positive_paired_boundaries() -> None:
+    baseline = campaign.PHASE33_FULL_THREE_VALIDATION_BY_SEED
+    profile_deltas = {
+        "no_mse": {17: 0.0, 42: 0.0, 73: 0.0},
+        "no_synth": {17: 0.01, 42: 0.02, 73: 0.03},
+        "no_mag": {17: 0.01, 42: 0.02, 73: 0.03},
+    }
+    variants: dict[str, Any] = {
+        "baseline": {
+            "seeds": {
+                str(seed): {
+                    "seed": seed,
+                    campaign.VALIDATION_METRIC: baseline[seed],
+                }
+                for seed in campaign.SEEDS
+            }
+        }
+    }
+    for profile_id, deltas in profile_deltas.items():
+        variants[profile_id] = {
+            "seeds": {
+                str(seed): {
+                    "seed": seed,
+                    campaign.VALIDATION_METRIC: baseline[seed] + deltas[seed],
+                }
+                for seed in campaign.SEEDS
+            }
+        }
+
+    evidence = campaign.select_loss_term_ablation_evidence(variants)
+
+    no_mse = evidence["profiles"]["no_mse"]
+    assert no_mse["paired_mean_delta"] == pytest.approx(0.0)
+    assert no_mse["paired_median_delta"] == pytest.approx(0.0)
+    assert no_mse["conditions"] == {
+        "worsened_seed_majority": False,
+        "paired_mean_positive": False,
+        "paired_median_positive": False,
+    }
+    assert no_mse["supports_retained_term"] is False
+    assert evidence["profiles"]["no_synth"]["supports_retained_term"] is True
+    assert evidence["profiles"]["no_mag"]["supports_retained_term"] is True
+    assert evidence["all_three_terms_supported"] is False
+    assert evidence["winning_ablation_selected"] is False
+
+
+def test_phase34_seed_resume_binds_profile_hash_and_weights(tmp_path: Path) -> None:
+    seed = 17
+    commit = "phase34-commit"
+    profile_id = "no_mse"
+    weights = campaign.LOSS_TERM_ABLATION_PROFILES[profile_id]
+    checkpoint_path = tmp_path / "checkpoint.pt"
+    checkpoint_path.write_text("checkpoint", encoding="utf-8")
+    training_log_path = tmp_path / "training.csv"
+    training_log_path.write_text("epoch\n", encoding="utf-8")
+    run_manifest_path = tmp_path / "run_manifest.json"
+    _write_json(run_manifest_path, {"git_commit": commit, "git_dirty": False})
+    split_path = tmp_path / "split.json"
+    _write_json(
+        split_path,
+        {
+            "seed": seed,
+            "protocol": "within_event_station",
+            "train_record_count": 1788,
+            "validation_record_count": 385,
+            "test_record_count": 385,
+            "assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[seed],
+        },
+    )
+    sampling_path = tmp_path / "sampling.json"
+    _write_json(sampling_path, _phase27_sampling_manifest(seed))
+    expected_config = {
+        "training": {
+            "random_seed": seed,
+            "event_balance_estimator": campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+            "stf_rate_loss": weights,
+        }
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(expected_config, sort_keys=False), encoding="utf-8"
+    )
+    summary = {
+        "variant": profile_id,
+        "seed": seed,
+        "git_commit": commit,
+        "event_balance_exponent": 1.0,
+        "loss_weights": weights,
+        "loss_term_ablation_profile": profile_id,
+        "loss_term_ablation_profile_sha256": (
+            campaign.LOSS_TERM_ABLATION_PROFILE_SHA256
+        ),
+        "split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[seed],
+        campaign.VALIDATION_METRIC: 0.2,
+        "checkpoint": _artifact(checkpoint_path),
+        "config": _artifact(config_path),
+        "split": _artifact(split_path),
+        "training_log": _artifact(training_log_path),
+        "run_manifest": _artifact(run_manifest_path),
+        "sampling": _artifact(sampling_path),
+    }
+    arguments = {
+        "require_sampling": True,
+        "expected_loss_weights": weights,
+        "expected_loss_term_ablation_profile": profile_id,
+        "expected_loss_term_ablation_profile_sha256": (
+            campaign.LOSS_TERM_ABLATION_PROFILE_SHA256
+        ),
+        "expected_variant": profile_id,
+        "expected_seed": seed,
+        "expected_split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[seed],
+        "expected_config": expected_config,
+        "expected_git_commit": commit,
+    }
+
+    assert campaign._seed_summary_is_valid(summary, **arguments)
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "loss_term_ablation_profile": "no_synth"}, **arguments
+    )
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "loss_term_ablation_profile_sha256": "wrong"}, **arguments
+    )
+    changed_weights = dict(weights)
+    changed_weights["lambda_MSE"] = 1.0
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "loss_weights": changed_weights}, **arguments
+    )
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_phase34_internal_is_always_closed(
+    resume: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mark_stage(
+        tmp_path,
+        "train",
+        {"status": "complete", "variant_axis": campaign.LOSS_TERM_ABLATION_AXIS},
+    )
+    if resume:
+        _mark_stage(tmp_path, "internal", {"status": "complete"})
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_locked_test",
+        lambda **_kwargs: pytest.fail("Phase34 locked test must remain closed"),
+    )
+
+    with pytest.raises(RuntimeError, match="Phase34.*internal evaluation is closed"):
+        campaign.run_internal(output_root=tmp_path, resume=resume)
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_phase34_external_is_always_closed(
+    resume: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mark_stage(
+        tmp_path,
+        "train",
+        {"status": "complete", "variant_axis": campaign.LOSS_TERM_ABLATION_AXIS},
+    )
+    if resume:
+        _mark_stage(
+            tmp_path,
+            "external",
+            {
+                "status": "complete",
+                "external_waveform_grid_schema_version": (
+                    campaign.EXTERNAL_WAVEFORM_GRID_SCHEMA_VERSION
+                ),
+            },
+        )
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_external_threshold",
+        lambda **_kwargs: pytest.fail("Phase34 external must remain closed"),
+    )
+
+    with pytest.raises(RuntimeError, match="Phase34.*external evaluation is closed"):
+        campaign.run_external(
+            output_root=tmp_path,
+            event_root=tmp_path / "external-events",
+            resume=resume,
+        )
