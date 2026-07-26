@@ -74,6 +74,12 @@ PHASE32_CONFIG_PATH = (
     / "experiments"
     / "manuscript_station_stf_usgs_loss_weight_search.yaml"
 )
+PHASE33_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_no_shape.yaml"
+)
 CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
@@ -104,6 +110,42 @@ def _mark_stage(output_root: Path, stage: str, payload: dict[str, Any]) -> None:
 
 def _artifact(path: Path) -> dict[str, str]:
     return {"path": str(path.resolve()), "sha256": sha256_file(path)}
+
+
+def _phase27_sampling_manifest(seed: int) -> dict[str, Any]:
+    normalization = 1788 / 31
+    return {
+        "schema_version": 2,
+        "mode": "event_equal_inverse_count_full_data",
+        "event_balanced_sampling": True,
+        "event_balance_estimator": campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+        "sampler_class": "RandomSampler",
+        "replacement": False,
+        "draw_count": 1788,
+        "record_count": 1788,
+        "event_count": 31,
+        "event_record_count_minimum": 1,
+        "event_record_count_maximum": 482,
+        "expected_unique_record_count": 1788.0,
+        "expected_unique_record_fraction": 1.0,
+        "optimizer_step_count": 28,
+        "loss_weights_applied": True,
+        "objective_weight_formula": "N/(E*n_event)",
+        "objective_reduction": "mean(sample_weight * per_sample_loss)",
+        "objective_weight_minimum": normalization / 482,
+        "objective_weight_maximum": normalization,
+        "event_objective_mass_minimum": normalization,
+        "event_objective_mass_maximum": normalization,
+        "objective_weight_sha256": (
+            campaign.PHASE27_INCUMBENT_OBJECTIVE_WEIGHT_SHA256_BY_SEED[seed]
+        ),
+        "sample_weight_sha256": (
+            campaign.PHASE27_INCUMBENT_SAMPLE_WEIGHT_SHA256_BY_SEED[seed]
+        ),
+        "sampling_weight_sha256": (
+            campaign.PHASE27_INCUMBENT_SAMPLE_WEIGHT_SHA256_BY_SEED[seed]
+        ),
+    }
 
 
 def _selected_train_summary(
@@ -144,6 +186,155 @@ def _selected_train_summary(
             "candidate": variant("candidate", candidate),
         },
     }
+
+
+def _run_phase33_train_with_deltas(
+    *,
+    output_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    candidate_deltas: dict[int, float],
+) -> tuple[dict[str, Any], list[tuple[str, int]]]:
+    config_path = output_root / "frozen_config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(_config(PHASE33_CONFIG_PATH), sort_keys=False),
+        encoding="utf-8",
+    )
+    manifest_path = output_root / "dataset_manifest.csv"
+    manifest_path.write_text("event,station\n", encoding="utf-8")
+    splits: dict[str, Any] = {}
+    for seed in campaign.SEEDS:
+        split_path = output_root / f"split_{seed}.json"
+        _write_json(split_path, {"seed": seed})
+        splits[str(seed)] = {"manifest": _artifact(split_path)}
+    _mark_stage(
+        output_root,
+        "preflight",
+        {
+            "status": "complete",
+            "source_data": {"sha256": campaign.EXPECTED_SOURCE_SHA256},
+            "frozen_config": _artifact(config_path),
+            "dataset_manifest": _artifact(manifest_path),
+            "splits": splits,
+        },
+    )
+    _mark_stage(output_root, "smoke", {"status": "complete"})
+    calls: list[tuple[str, int]] = []
+
+    def fake_train_one_seed(**kwargs: Any) -> dict[str, Any]:
+        variant = str(kwargs["variant"])
+        seed = int(kwargs["seed"])
+        calls.append((variant, seed))
+        metric = campaign.PHASE27_INCUMBENT_VALIDATION_BY_SEED[seed]
+        if variant == "candidate":
+            metric += candidate_deltas[seed]
+        return {
+            "variant": variant,
+            "seed": seed,
+            "loss_weights": campaign.loss_weights_from_config(kwargs["config"]),
+            campaign.VALIDATION_METRIC: metric,
+            "checkpoint": {
+                "sha256": (
+                    campaign.PHASE27_INCUMBENT_CHECKPOINT_SHA256_BY_SEED[seed]
+                    if variant == "baseline"
+                    else f"candidate-{seed}"
+                )
+            },
+        }
+
+    monkeypatch.setattr(campaign, "_train_one_seed", fake_train_one_seed)
+    return campaign.run_train(output_root=output_root, resume=False), calls
+
+
+def _complete_phase33_internal(
+    *,
+    output_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, Any], list[tuple[int, bool]]]:
+    candidate_deltas = {
+        17: 0.0,
+        42: 0.0,
+        73: 0.10 - campaign.PHASE27_INCUMBENT_VALIDATION_BY_SEED[73],
+    }
+    train_summary, _calls = _run_phase33_train_with_deltas(
+        output_root=output_root,
+        monkeypatch=monkeypatch,
+        candidate_deltas=candidate_deltas,
+    )
+    assert train_summary["shape_loss_validation_compatibility"]["passed"] is True
+    calls: list[tuple[int, bool]] = []
+
+    def fake_locked_test(**kwargs: Any) -> dict[str, Any]:
+        seed = int(kwargs["seed_summary"]["seed"])
+        delayed = bool(kwargs["include_delayed_prefix"])
+        calls.append((seed, delayed))
+        output_dir = Path(kwargs["output_dir"])
+        metrics = {
+            "station_mae": 0.10,
+            "station_rmse": 0.12,
+            "station_bias": -0.01,
+            "event_mae": 0.14 if delayed else 0.137,
+            "event_rmse": 0.16,
+            "event_bias": -0.02,
+        }
+        metrics_path = output_dir / "metrics.json"
+        _write_json(metrics_path, metrics)
+        station_path = output_dir / "station_predictions.csv"
+        station_path.parent.mkdir(parents=True, exist_ok=True)
+        station_path.write_text("event,station\n", encoding="utf-8")
+        event_path = output_dir / "event_predictions.csv"
+        event_path.write_text("event,mw_pred\n", encoding="utf-8")
+        registry_path = output_dir / "result_registry.json"
+        _write_json(registry_path, {"seed": seed})
+        result: dict[str, Any] = {
+            "selected_seed": seed,
+            "metrics": metrics,
+            "artifacts": {
+                "metrics": _artifact(metrics_path),
+                "station_predictions": _artifact(station_path),
+                "event_predictions": _artifact(event_path),
+                "result_registry": _artifact(registry_path),
+            },
+        }
+        if delayed:
+            delayed_dir = output_dir / "delayed_prefix"
+            delayed_station_path = delayed_dir / "station_predictions.csv"
+            delayed_station_path.parent.mkdir(parents=True, exist_ok=True)
+            delayed_station_path.write_text("event,station\n", encoding="utf-8")
+            delayed_event_path = delayed_dir / "event_predictions.csv"
+            delayed_event_path.write_text("event,mw_pred\n", encoding="utf-8")
+            unavailable_path = delayed_dir / "unavailable_stations.csv"
+            unavailable_path.write_text("event,station\n", encoding="utf-8")
+            horizon_metrics = [
+                {
+                    "observation_horizon_sec": float(horizon),
+                    "event_equal_mae": 0.14,
+                }
+                for horizon in campaign.DEFAULT_HORIZONS_SEC
+            ]
+            horizon_path = delayed_dir / "horizon_metrics.json"
+            _write_json(horizon_path, horizon_metrics)
+            cohort = {
+                "waveform_prefix_causal": True,
+                "station_selection_causal": False,
+            }
+            cohort_path = delayed_dir / "cohort_contract.json"
+            _write_json(cohort_path, cohort)
+            result["delayed_prefix"] = {
+                "horizons_sec": list(campaign.DEFAULT_HORIZONS_SEC),
+                "horizon_metrics": horizon_metrics,
+                "cohort": cohort,
+                "artifacts": {
+                    "station_predictions": _artifact(delayed_station_path),
+                    "event_predictions": _artifact(delayed_event_path),
+                    "unavailable_stations": _artifact(unavailable_path),
+                    "horizon_metrics": _artifact(horizon_path),
+                    "cohort_contract": _artifact(cohort_path),
+                },
+            }
+        return result
+
+    monkeypatch.setattr(campaign, "_evaluate_locked_test", fake_locked_test)
+    return campaign.run_internal(output_root=output_root, resume=False), calls
 
 
 @pytest.mark.parametrize(
@@ -203,6 +394,12 @@ def _selected_train_summary(
             True,
             False,
         ),
+        (
+            PHASE33_CONFIG_PATH,
+            campaign.SHAPE_LOSS_WEIGHT_AXIS,
+            0.1,
+            0.0,
+        ),
     ],
 )
 def test_formal_configs_and_variants_have_one_scientific_difference(
@@ -233,6 +430,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         campaign.EVENT_BALANCE_EXPONENT_AXIS,
         campaign.MOMENT_LINEAR_SKIP_AXIS,
         campaign.MOMENT_HEAD_DROPOUT_AXIS,
+        campaign.SHAPE_LOSS_WEIGHT_AXIS,
     }:
         assert {
             variant["model"]["stf_output_parameterization"]
@@ -250,6 +448,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         campaign.EVENT_BALANCE_EXPONENT_AXIS,
         campaign.MOMENT_LINEAR_SKIP_AXIS,
         campaign.MOMENT_HEAD_DROPOUT_AXIS,
+        campaign.SHAPE_LOSS_WEIGHT_AXIS,
     }:
         assert {
             variant["training"]["scheduler_T0"] for variant in variants.values()
@@ -268,6 +467,7 @@ def test_formal_configs_and_variants_have_one_scientific_difference(
         (PHASE29_CONFIG_PATH, campaign.EVENT_BALANCE_EXPONENT_AXIS),
         (PHASE30_CONFIG_PATH, campaign.MOMENT_LINEAR_SKIP_AXIS),
         (PHASE31_CONFIG_PATH, campaign.MOMENT_HEAD_DROPOUT_AXIS),
+        (PHASE33_CONFIG_PATH, campaign.SHAPE_LOSS_WEIGHT_AXIS),
     ],
 )
 def test_formal_config_rejects_a_second_scientific_change(
@@ -673,6 +873,101 @@ def test_phase32_profile_selection_uses_paired_median_and_profile_id_tie_break()
     assert selection["winner_paired_mean_delta"] < 0.0
     assert selection["winner_improved_seed_count"] == 2
     assert selection["winner_improved_seed_majority"] is True
+
+
+def test_phase33_is_exactly_phase27_with_only_shape_loss_removed() -> None:
+    config = _config(PHASE33_CONFIG_PATH)
+
+    campaign.validate_formal_config(config)
+    assert (
+        campaign.variant_axis_from_config(config)
+        == campaign.SHAPE_LOSS_WEIGHT_AXIS
+    )
+    variants = campaign.build_variant_configs(config)
+    assert list(variants) == ["baseline", "candidate"]
+    assert campaign.loss_weights_from_config(variants["baseline"]) == {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.1,
+    }
+    assert campaign.loss_weights_from_config(variants["candidate"]) == {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.0,
+    }
+    assert campaign._config_diff_paths(
+        variants["baseline"], variants["candidate"]
+    ) == {"training.stf_rate_loss.lambda_shape"}
+
+    phase27_incumbent = campaign.build_variant_configs(
+        _config(PHASE27_CONFIG_PATH)
+    )["candidate"]
+    phase33_baseline = copy.deepcopy(variants["baseline"])
+    phase27_incumbent.pop("campaign")
+    phase33_baseline.pop("campaign")
+    assert phase33_baseline == phase27_incumbent
+
+
+def test_phase33_zero_shape_weight_is_a_valid_loss_configuration() -> None:
+    candidate = campaign.build_variant_configs(_config(PHASE33_CONFIG_PATH))[
+        "candidate"
+    ]
+
+    assert campaign.loss_weights_from_config(candidate)["lambda_shape"] == 0.0
+
+
+@pytest.mark.parametrize("weight_name", campaign.LOSS_WEIGHT_KEYS)
+@pytest.mark.parametrize("invalid", [-1.0, float("nan"), float("inf")])
+def test_loss_weights_reject_negative_or_nonfinite_values(
+    weight_name: str,
+    invalid: float,
+) -> None:
+    config = _config(PHASE33_CONFIG_PATH)
+    config["training"]["stf_rate_loss"][weight_name] = invalid
+
+    with pytest.raises(ValueError):
+        campaign.loss_weights_from_config(config)
+
+
+def test_phase33_train_uses_three_seed_pairs_and_accepts_exact_ties(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary, calls = _run_phase33_train_with_deltas(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        candidate_deltas={seed: 0.0 for seed in campaign.SEEDS},
+    )
+
+    assert calls == [
+        (variant, seed)
+        for variant in ("baseline", "candidate")
+        for seed in campaign.SEEDS
+    ]
+    assert summary["incumbent_reproduction"]["passed"] is True
+    compatibility = summary["shape_loss_validation_compatibility"]
+    assert compatibility["passed"] is True
+    assert compatibility["paired_deltas_by_seed"] == {
+        str(seed): 0.0 for seed in campaign.SEEDS
+    }
+    assert compatibility["paired_mean_delta"] == 0.0
+    assert compatibility["paired_median_delta"] == 0.0
+    assert compatibility["improved_or_equal_seed_count"] == 3
+    assert compatibility["candidate_selected_seed"] == 17
+    assert compatibility["candidate_selected_validation"] == (
+        campaign.PHASE27_INCUMBENT_VALIDATION
+    )
+    assert all(compatibility["conditions"].values())
+    compatibility_path = campaign._validate_artifact(
+        compatibility["artifact"],
+        label="Phase33 compatibility",
+    )
+    persisted = json.loads(compatibility_path.read_text(encoding="utf-8"))
+    assert persisted == {
+        key: value for key, value in compatibility.items() if key != "artifact"
+    }
 
 
 def test_split_contract_is_frozen_for_all_three_seeds() -> None:
@@ -1225,6 +1520,128 @@ def test_phase30_seed_summary_resume_binds_bool_and_schema2_sampling(
         )
 
 
+def test_phase33_seed_resume_binds_weights_config_commit_split_and_sampling(
+    tmp_path: Path,
+) -> None:
+    seed = 17
+    commit = "phase33-commit"
+    weights = {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.0,
+    }
+    checkpoint_path = tmp_path / "checkpoint.pt"
+    checkpoint_path.write_text("checkpoint", encoding="utf-8")
+    training_log_path = tmp_path / "training.csv"
+    training_log_path.write_text("epoch\n", encoding="utf-8")
+    run_manifest_path = tmp_path / "run_manifest.json"
+    _write_json(run_manifest_path, {"git_commit": commit, "git_dirty": False})
+    split_path = tmp_path / "split.json"
+    _write_json(
+        split_path,
+        {
+            "seed": seed,
+            "protocol": "within_event_station",
+            "train_record_count": 1788,
+            "validation_record_count": 385,
+            "test_record_count": 385,
+            "assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[seed],
+        },
+    )
+    sampling_manifest = _phase27_sampling_manifest(seed)
+    sampling_path = tmp_path / "sampling.json"
+    _write_json(sampling_path, sampling_manifest)
+    expected_config = {
+        "training": {
+            "random_seed": seed,
+            "event_balance_estimator": campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR,
+            "stf_rate_loss": weights,
+        }
+    }
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(expected_config, sort_keys=False),
+        encoding="utf-8",
+    )
+    summary = {
+        "variant": "candidate",
+        "seed": seed,
+        "git_commit": commit,
+        "event_balance_exponent": 1.0,
+        "loss_weights": weights,
+        "split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[seed],
+        campaign.VALIDATION_METRIC: 0.1,
+        "checkpoint": _artifact(checkpoint_path),
+        "config": _artifact(config_path),
+        "split": _artifact(split_path),
+        "training_log": _artifact(training_log_path),
+        "run_manifest": _artifact(run_manifest_path),
+        "sampling": _artifact(sampling_path),
+    }
+    arguments = {
+        "require_sampling": True,
+        "expected_loss_weights": weights,
+        "expected_variant": "candidate",
+        "expected_seed": seed,
+        "expected_split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[seed],
+        "expected_config": expected_config,
+        "expected_git_commit": commit,
+    }
+
+    assert campaign._seed_summary_is_valid(summary, **arguments)
+
+    changed_weights = dict(weights)
+    changed_weights["lambda_shape"] = 0.1
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "loss_weights": changed_weights},
+        **arguments,
+    )
+
+    changed_config = copy.deepcopy(expected_config)
+    changed_config["training"]["stf_rate_loss"]["lambda_shape"] = 0.1
+    changed_config_path = tmp_path / "changed_config.yaml"
+    changed_config_path.write_text(
+        yaml.safe_dump(changed_config, sort_keys=False),
+        encoding="utf-8",
+    )
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "config": _artifact(changed_config_path)},
+        **arguments,
+    )
+
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "git_commit": "other-commit"},
+        **arguments,
+    )
+
+    changed_split_path = tmp_path / "changed_split.json"
+    _write_json(
+        changed_split_path,
+        {
+            "seed": seed,
+            "protocol": "within_event_station",
+            "train_record_count": 1788,
+            "validation_record_count": 385,
+            "test_record_count": 385,
+            "assignment_sha256": "wrong",
+        },
+    )
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "split": _artifact(changed_split_path)},
+        **arguments,
+    )
+
+    changed_sampling = dict(sampling_manifest)
+    changed_sampling["objective_weight_sha256"] = "wrong"
+    changed_sampling_path = tmp_path / "changed_sampling.json"
+    _write_json(changed_sampling_path, changed_sampling)
+    assert not campaign._seed_summary_is_valid(
+        {**summary, "sampling": _artifact(changed_sampling_path)},
+        **arguments,
+    )
+
+
 def test_phase30_train_resume_passes_complete_strict_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1306,6 +1723,54 @@ def test_phase31_train_resume_passes_complete_strict_context(
     assert "moment_linear_skip" not in captured["expected_config"]["model"]
     assert "event_balance_exponent" not in captured["expected_config"]["training"]
     assert captured["expected_git_commit"] == "phase31"
+
+
+def test_phase33_train_resume_passes_complete_strict_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seed_root = tmp_path / "seed_17"
+    _write_json(seed_root / "seed_summary.json", {"existing": True})
+    config = campaign.build_variant_configs(_config(PHASE33_CONFIG_PATH))[
+        "candidate"
+    ]
+    captured: dict[str, Any] = {}
+
+    def fake_validate(_summary: dict[str, Any], **kwargs: Any) -> bool:
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(campaign, "_seed_summary_is_valid", fake_validate)
+    monkeypatch.setattr(campaign, "current_git_commit", lambda _root: "phase33")
+
+    resumed = campaign._train_one_seed(
+        variant="candidate",
+        config=config,
+        seed=17,
+        seed_root=seed_root,
+        dataset_manifest=tmp_path / "dataset.csv",
+        frozen_split_path=tmp_path / "split.json",
+        resume=True,
+    )
+
+    assert resumed == {"existing": True}
+    assert captured["require_sampling"] is True
+    assert captured["expected_loss_weights"] == {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.0,
+    }
+    assert captured["expected_variant"] == "candidate"
+    assert captured["expected_seed"] == 17
+    assert captured["expected_split_assignment_sha256"] == (
+        campaign.EXPECTED_SPLIT_SHA256[17]
+    )
+    assert captured["expected_config"]["training"]["stf_rate_loss"][
+        "lambda_shape"
+    ] == 0.0
+    assert captured["expected_config"]["training"]["random_seed"] == 17
+    assert captured["expected_git_commit"] == "phase33"
 
 
 def _logged_scheduler_learning_rates(scheduler_t0: int) -> list[float]:
@@ -1814,6 +2279,15 @@ def test_phase31_smoke_enforces_equal_frozen_parameter_counts(
             (True, True),
             ("inverse_count_full_data", "inverse_count_full_data"),
         ),
+        (
+            PHASE33_CONFIG_PATH,
+            campaign.SHAPE_LOSS_WEIGHT_AXIS,
+            ("moment_shape_factorized", "moment_shape_factorized"),
+            (15, 15),
+            ("none", "none"),
+            (True, True),
+            ("inverse_count_full_data", "inverse_count_full_data"),
+        ),
     ],
 )
 def test_train_stage_selects_from_validation_without_test_or_external(
@@ -1974,6 +2448,15 @@ def test_train_stage_selects_from_validation_without_test_or_external(
         summary["variants"][name]["moment_head_dropout"]
         for name in variant_names
     ) == expected_moment_dropouts
+    expected_shape_weights = (
+        (0.1, 0.0)
+        if expected_axis == campaign.SHAPE_LOSS_WEIGHT_AXIS
+        else (0.1, 0.1)
+    )
+    assert tuple(
+        summary["variants"][name]["loss_weights"]["lambda_shape"]
+        for name in variant_names
+    ) == expected_shape_weights
     assert summary["variants"]["candidate"]["scientific_diff_from_baseline"] == [
         ".".join(campaign.VARIANT_AXIS_PATHS[expected_axis])
     ]
@@ -2056,6 +2539,7 @@ def test_phase32_train_runs_baseline_then_two_profiles_for_all_seeds(
         PHASE30_CONFIG_PATH,
         PHASE31_CONFIG_PATH,
         PHASE32_CONFIG_PATH,
+        PHASE33_CONFIG_PATH,
     ],
 )
 @pytest.mark.parametrize("mismatch", ["validation_metric", "checkpoint_sha256"])
@@ -2380,6 +2864,405 @@ def test_phase32_validation_failures_never_read_locked_test(
     assert summary["validation_gate"]["passed"] is False
     assert summary["test_evaluated"] is False
     assert "variants" not in summary
+
+
+@pytest.mark.parametrize(
+    ("failed_condition", "candidate_deltas"),
+    [
+        (
+            "improved_or_equal_seed_majority",
+            {17: -0.02, 42: 0.02, 73: 0.02},
+        ),
+        (
+            "paired_mean_nonpositive",
+            {17: -0.02, 42: -0.01, 73: 0.10},
+        ),
+        (
+            "paired_median_nonpositive",
+            {17: -0.001, 42: 0.001, 73: 0.001},
+        ),
+        (
+            "candidate_selected_at_or_below_phase27_incumbent",
+            {17: 0.02, 42: -0.02, 73: -0.08},
+        ),
+    ],
+)
+def test_phase33_each_validation_condition_failure_keeps_test_locked(
+    failed_condition: str,
+    candidate_deltas: dict[int, float],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    train_summary, _calls = _run_phase33_train_with_deltas(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        candidate_deltas=candidate_deltas,
+    )
+    compatibility = train_summary["shape_loss_validation_compatibility"]
+    assert compatibility["passed"] is False
+    assert compatibility["conditions"][failed_condition] is False
+    locked_test_calls = 0
+
+    def forbidden_locked_test(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal locked_test_calls
+        locked_test_calls += 1
+        raise AssertionError("Phase33 locked test must remain unread")
+
+    monkeypatch.setattr(campaign, "_evaluate_locked_test", forbidden_locked_test)
+
+    summary = campaign.run_internal(output_root=tmp_path, resume=False)
+
+    assert locked_test_calls == 0
+    assert summary["status"] == "candidate_validation_gate_failed"
+    assert summary["validation_gate"]["passed"] is False
+    assert summary["validation_gate"]["conditions"][failed_condition] is False
+    assert summary["test_evaluated"] is False
+    assert summary["external_evaluated"] is False
+    assert "variants" not in summary
+
+
+@pytest.mark.parametrize(
+    ("candidate_event_mae", "expected_status"),
+    [
+        (0.14, "complete"),
+        (0.15, "candidate_internal_gate_failed"),
+    ],
+)
+def test_phase33_internal_uses_selected_seeds_and_only_the_point15_gate(
+    candidate_event_mae: float,
+    expected_status: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_deltas = {
+        17: 0.0,
+        42: 0.0,
+        73: 0.10 - campaign.PHASE27_INCUMBENT_VALIDATION_BY_SEED[73],
+    }
+    train_summary, _calls = _run_phase33_train_with_deltas(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        candidate_deltas=candidate_deltas,
+    )
+    assert train_summary["shape_loss_validation_compatibility"]["passed"] is True
+    calls: list[tuple[int, bool]] = []
+
+    def fake_locked_test(**kwargs: Any) -> dict[str, Any]:
+        seed = int(kwargs["seed_summary"]["seed"])
+        delayed = bool(kwargs["include_delayed_prefix"])
+        calls.append((seed, delayed))
+        return {
+            "selected_seed": seed,
+            "metrics": {
+                "event_mae": candidate_event_mae if delayed else 0.137,
+            },
+            "artifacts": {},
+        }
+
+    monkeypatch.setattr(campaign, "_evaluate_locked_test", fake_locked_test)
+
+    summary = campaign.run_internal(output_root=tmp_path, resume=False)
+
+    assert calls == [(17, False), (73, True)]
+    assert summary["status"] == expected_status
+    assert summary["candidate_gate"] == {
+        "passed": expected_status == "complete",
+        "event_mae": candidate_event_mae,
+        "maximum_exclusive": campaign.INTERNAL_EVENT_MAE_MAXIMUM,
+    }
+    assert summary["variants"]["baseline"]["source_variant"] == "baseline"
+    assert summary["variants"]["baseline"]["loss_weights"] == {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.1,
+    }
+    assert summary["variants"]["candidate"]["source_variant"] == "candidate"
+    assert summary["variants"]["candidate"]["loss_weights"] == {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.0,
+    }
+    diagnostic = summary["frozen_test_diagnostic"]
+    assert diagnostic["phase27_incumbent_event_mae"] == (
+        campaign.PHASE27_INCUMBENT_TEST_EVENT_MAE
+    )
+    assert diagnostic["used_for_selection_or_gate"] is False
+    assert summary["external_evaluated"] is False
+
+
+@pytest.mark.parametrize(
+    ("tampered_field", "tampered_value"),
+    [
+        ("selected_seed", 42),
+        ("source_variant", "baseline"),
+        (
+            "loss_weights",
+            {
+                "lambda_MSE": 1.0,
+                "lambda_synth": 0.5,
+                "lambda_mag": 1.0,
+                "lambda_shape": 0.1,
+            },
+        ),
+    ],
+)
+def test_phase33_internal_resume_rejects_seed_variant_or_weight_tampering(
+    tampered_field: str,
+    tampered_value: Any,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_deltas = {
+        17: 0.0,
+        42: 0.0,
+        73: 0.10 - campaign.PHASE27_INCUMBENT_VALIDATION_BY_SEED[73],
+    }
+    train_summary, _calls = _run_phase33_train_with_deltas(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        candidate_deltas=candidate_deltas,
+    )
+    assert train_summary["shape_loss_validation_compatibility"]["passed"] is True
+    results = {
+        "baseline": {
+            "selected_seed": 17,
+            "source_variant": "baseline",
+            "loss_weights": {
+                "lambda_MSE": 1.0,
+                "lambda_synth": 0.5,
+                "lambda_mag": 1.0,
+                "lambda_shape": 0.1,
+            },
+            "metrics": {"event_mae": 0.137},
+            "artifacts": {},
+        },
+        "candidate": {
+            "selected_seed": 73,
+            "source_variant": "candidate",
+            "loss_weights": {
+                "lambda_MSE": 1.0,
+                "lambda_synth": 0.5,
+                "lambda_mag": 1.0,
+                "lambda_shape": 0.0,
+            },
+            "metrics": {"event_mae": 0.14},
+            "artifacts": {},
+            "delayed_prefix": {"artifacts": {}},
+        },
+    }
+    results["candidate"][tampered_field] = tampered_value
+
+    def fake_load_completed(
+        path: Path,
+        *,
+        require_delayed_prefix: bool,
+    ) -> dict[str, Any]:
+        assert require_delayed_prefix is (path.name == "candidate")
+        return copy.deepcopy(results[path.name])
+
+    locked_test_calls = 0
+
+    def forbidden_locked_test(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal locked_test_calls
+        locked_test_calls += 1
+        raise AssertionError("tampered Phase33 resume must not re-evaluate test")
+
+    monkeypatch.setattr(campaign, "_load_completed_evaluation", fake_load_completed)
+    monkeypatch.setattr(campaign, "_evaluate_locked_test", forbidden_locked_test)
+
+    with pytest.raises(ValueError, match="resumed Phase33 internal evaluation changed"):
+        campaign.run_internal(output_root=tmp_path, resume=True)
+
+    assert locked_test_calls == 0
+
+
+def test_phase33_completed_internal_resume_revalidates_and_never_reevaluates(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed, initial_calls = _complete_phase33_internal(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    assert initial_calls == [(17, False), (73, True)]
+    resume_evaluation_calls = 0
+
+    def forbidden_locked_test(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal resume_evaluation_calls
+        resume_evaluation_calls += 1
+        raise AssertionError("valid completed Phase33 internal must not re-evaluate")
+
+    monkeypatch.setattr(campaign, "_evaluate_locked_test", forbidden_locked_test)
+
+    resumed = campaign.run_internal(output_root=tmp_path, resume=True)
+
+    assert resumed == completed
+    assert resume_evaluation_calls == 0
+
+
+@pytest.mark.parametrize(
+    "tamper_kind",
+    [
+        "train_paired",
+        "validation_gate",
+        "candidate_gate",
+        "selected_seed",
+        "source_variant",
+        "loss_weights",
+        "artifact",
+        "status",
+        "test_evaluated",
+        "external_evaluated",
+    ],
+)
+def test_phase33_completed_internal_resume_rejects_provenance_tampering(
+    tamper_kind: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _completed, _initial_calls = _complete_phase33_internal(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    internal_summary_path = tmp_path / "internal" / "summary.json"
+    internal_summary = json.loads(internal_summary_path.read_text(encoding="utf-8"))
+
+    if tamper_kind == "train_paired":
+        train_summary_path = tmp_path / "train" / "summary.json"
+        train_summary = json.loads(train_summary_path.read_text(encoding="utf-8"))
+        train_summary["shape_loss_validation_compatibility"]["conditions"][
+            "paired_mean_nonpositive"
+        ] = False
+        _write_json(train_summary_path, train_summary)
+        internal_summary["train_summary"] = _artifact(train_summary_path)
+    elif tamper_kind == "validation_gate":
+        internal_summary["validation_gate"]["paired_mean_delta"] = 1.0
+    elif tamper_kind == "candidate_gate":
+        internal_summary["candidate_gate"]["event_mae"] = 0.01
+    elif tamper_kind == "selected_seed":
+        internal_summary["variants"]["candidate"]["selected_seed"] = 42
+    elif tamper_kind == "source_variant":
+        internal_summary["variants"]["candidate"]["source_variant"] = "baseline"
+    elif tamper_kind == "loss_weights":
+        internal_summary["variants"]["candidate"]["loss_weights"][
+            "lambda_shape"
+        ] = 0.1
+    elif tamper_kind == "artifact":
+        internal_summary["variants"]["candidate"]["artifacts"]["metrics"][
+            "sha256"
+        ] = "wrong"
+    elif tamper_kind == "status":
+        internal_summary["status"] = "candidate_internal_gate_failed"
+    elif tamper_kind == "test_evaluated":
+        internal_summary["test_evaluated"] = False
+    elif tamper_kind == "external_evaluated":
+        internal_summary["external_evaluated"] = True
+    else:  # pragma: no cover - exhaustive parametrization guard
+        raise AssertionError(f"unknown tamper kind: {tamper_kind}")
+    _write_json(internal_summary_path, internal_summary)
+    resume_evaluation_calls = 0
+
+    def forbidden_locked_test(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal resume_evaluation_calls
+        resume_evaluation_calls += 1
+        raise AssertionError("tampered completed Phase33 internal must be rejected")
+
+    monkeypatch.setattr(campaign, "_evaluate_locked_test", forbidden_locked_test)
+
+    with pytest.raises(ValueError):
+        campaign.run_internal(output_root=tmp_path, resume=True)
+
+    assert resume_evaluation_calls == 0
+
+
+def test_phase33_external_stage_is_always_closed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mark_stage(
+        tmp_path,
+        "train",
+        {
+            "status": "complete",
+            "variant_axis": campaign.SHAPE_LOSS_WEIGHT_AXIS,
+        },
+    )
+    _mark_stage(
+        tmp_path,
+        "internal",
+        {
+            "status": "complete",
+            "candidate_gate": {"passed": True},
+        },
+    )
+    external_calls = 0
+
+    def forbidden_external(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal external_calls
+        external_calls += 1
+        raise AssertionError("Phase33 external benchmark must remain closed")
+
+    monkeypatch.setattr(campaign, "_evaluate_external_threshold", forbidden_external)
+
+    with pytest.raises(RuntimeError, match="Phase33 external evaluation.*closed"):
+        campaign.run_external(
+            output_root=tmp_path,
+            event_root=tmp_path / "external-events",
+            resume=False,
+        )
+
+    assert external_calls == 0
+
+
+def test_phase33_completed_external_resume_is_still_rejected(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mark_stage(
+        tmp_path,
+        "train",
+        {
+            "status": "complete",
+            "variant_axis": campaign.SHAPE_LOSS_WEIGHT_AXIS,
+        },
+    )
+    _mark_stage(
+        tmp_path,
+        "internal",
+        {
+            "status": "complete",
+            "candidate_gate": {"passed": True},
+        },
+    )
+    _mark_stage(
+        tmp_path,
+        "external",
+        {
+            "status": "complete",
+            "external_waveform_grid_schema_version": (
+                campaign.EXTERNAL_WAVEFORM_GRID_SCHEMA_VERSION
+            ),
+        },
+    )
+    external_calls = 0
+
+    def forbidden_external(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal external_calls
+        external_calls += 1
+        raise AssertionError("completed Phase33 external must not be reused")
+
+    monkeypatch.setattr(campaign, "_evaluate_external_threshold", forbidden_external)
+
+    with pytest.raises(RuntimeError, match="Phase33 external evaluation.*closed"):
+        campaign.run_external(
+            output_root=tmp_path,
+            event_root=tmp_path / "external-events",
+            resume=True,
+        )
+
+    assert external_calls == 0
 
 
 def test_internal_validation_gate_fails_before_locked_test(

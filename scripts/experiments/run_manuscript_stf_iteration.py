@@ -86,6 +86,7 @@ EVENT_BALANCE_EXPONENT_AXIS = "event_balance_exponent"
 MOMENT_LINEAR_SKIP_AXIS = "moment_linear_skip"
 MOMENT_HEAD_DROPOUT_AXIS = "moment_head_dropout"
 LOSS_WEIGHT_PROFILE_AXIS = "loss_weight_profile"
+SHAPE_LOSS_WEIGHT_AXIS = "shape_loss_weight"
 STATION_UNIFORM_ESTIMATOR = "station_uniform"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
@@ -124,6 +125,10 @@ VARIANT_AXES = {
         "baseline": True,
         "candidate": False,
     },
+    SHAPE_LOSS_WEIGHT_AXIS: {
+        "baseline": 0.1,
+        "candidate": 0.0,
+    },
 }
 VARIANT_AXIS_PATHS = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: ("model", "stf_output_parameterization"),
@@ -139,6 +144,11 @@ VARIANT_AXIS_PATHS = {
     EVENT_BALANCE_EXPONENT_AXIS: ("training", "event_balance_exponent"),
     MOMENT_LINEAR_SKIP_AXIS: ("model", "moment_linear_skip"),
     MOMENT_HEAD_DROPOUT_AXIS: ("model", "moment_head_dropout"),
+    SHAPE_LOSS_WEIGHT_AXIS: (
+        "training",
+        "stf_rate_loss",
+        "lambda_shape",
+    ),
 }
 LOSS_WEIGHT_KEYS = (
     "lambda_MSE",
@@ -223,8 +233,16 @@ FROZEN_PHASE27_INCUMBENT_AXES = frozenset(
         MOMENT_LINEAR_SKIP_AXIS,
         MOMENT_HEAD_DROPOUT_AXIS,
         LOSS_WEIGHT_PROFILE_AXIS,
+        SHAPE_LOSS_WEIGHT_AXIS,
     }
 )
+FROZEN_PHASE27_CAMPAIGN_NAMES = {
+    EVENT_BALANCE_EXPONENT_AXIS: "Phase29 p=1",
+    MOMENT_LINEAR_SKIP_AXIS: "Phase30 moment-linear-skip",
+    MOMENT_HEAD_DROPOUT_AXIS: "Phase31 moment-head-dropout",
+    LOSS_WEIGHT_PROFILE_AXIS: "Phase32 loss-weight-profile",
+    SHAPE_LOSS_WEIGHT_AXIS: "Phase33 no-shape",
+}
 PHASE30_PARAMETER_COUNT_BY_VARIANT = {
     "baseline": 1_010_850,
     "candidate": 1_010_978,
@@ -310,10 +328,14 @@ def loss_weights_from_config(config: Mapping[str, Any]) -> dict[str, float]:
     for name in LOSS_WEIGHT_KEYS:
         value = loss_config.get(name)
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise ValueError(f"loss weight {name} must be a finite positive number")
+            raise ValueError(
+                f"loss weight {name} must be a finite nonnegative number"
+            )
         numeric = float(value)
-        if not math.isfinite(numeric) or numeric <= 0.0:
-            raise ValueError(f"loss weight {name} must be a finite positive number")
+        if not math.isfinite(numeric) or numeric < 0.0:
+            raise ValueError(
+                f"loss weight {name} must be a finite nonnegative number"
+            )
         weights[name] = numeric
     return weights
 
@@ -711,6 +733,27 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                     "Phase32 active loss weights do not match a frozen profile"
                 )
             return LOSS_WEIGHT_PROFILE_AXIS
+        if explicit_axis == SHAPE_LOSS_WEIGHT_AXIS:
+            if (
+                parameterization != "moment_shape_factorized"
+                or scheduler_t0 != 15
+                or stem_is_explicit
+                or moment_skip_is_explicit
+                or moment_dropout_is_explicit
+                or training.get("event_balanced_sampling") is not True
+                or training.get("event_balance_estimator")
+                != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                or exponent_is_explicit
+                or magnitude_penalty_is_explicit
+                or loss_config.get("magnitude_penalty", "squared") != "squared"
+            ):
+                raise ValueError(
+                    "Phase33 no-shape baseline requires the frozen Phase27 "
+                    "factorized STF candidate with scheduler_T0=15, the original "
+                    "radial stem, inverse-count full-data event balancing, p=1, "
+                    "and squared magnitude penalty"
+                )
+            return SHAPE_LOSS_WEIGHT_AXIS
         else:
             raise ValueError(f"unsupported formal campaign axis: {explicit_axis!r}")
     if (
@@ -748,7 +791,8 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         "marked Phase26/Phase27 event-balance baselines or Phase28 magnitude "
         "penalty baseline or Phase29 event-balance exponent baseline or "
         "Phase30 moment-linear-skip baseline or Phase31 moment-head-dropout "
-        "baseline or Phase32 loss-weight-profile baseline"
+        "baseline or Phase32 loss-weight-profile baseline or Phase33 no-shape "
+        "baseline"
     )
 
 
@@ -872,6 +916,7 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             MOMENT_LINEAR_SKIP_AXIS,
             MOMENT_HEAD_DROPOUT_AXIS,
             LOSS_WEIGHT_PROFILE_AXIS,
+            SHAPE_LOSS_WEIGHT_AXIS,
         },
     )
     variants = build_variant_configs(config)
@@ -956,6 +1001,26 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             )
             raise ValueError(
                 "Phase32 baseline differs from the frozen Phase27 candidate: "
+                f"{sorted(differences)}"
+            )
+    if variant_axis == SHAPE_LOSS_WEIGHT_AXIS:
+        phase27_config = _load_yaml(
+            PROJECT_ROOT
+            / "configs"
+            / "experiments"
+            / "manuscript_station_stf_usgs_event_loss_weighted.yaml"
+        )
+        phase27_incumbent = build_variant_configs(phase27_config)["candidate"]
+        phase33_baseline = copy.deepcopy(variants["baseline"])
+        phase27_incumbent.pop("campaign")
+        phase33_baseline.pop("campaign")
+        if phase33_baseline != phase27_incumbent:
+            differences = _config_diff_paths(
+                phase27_incumbent,
+                phase33_baseline,
+            )
+            raise ValueError(
+                "Phase33 baseline differs from the frozen Phase27 candidate: "
                 f"{sorted(differences)}"
             )
 
@@ -1723,6 +1788,73 @@ def phase29_incumbent_reproduction(
     }
 
 
+def select_shape_loss_validation_compatibility(
+    variants: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    if set(variants) != {"baseline", "candidate"}:
+        raise ValueError(
+            "shape-loss validation comparison requires baseline and candidate"
+        )
+    expected_seed_keys = {str(seed) for seed in SEEDS}
+    seed_rows: dict[str, Mapping[str, Any]] = {}
+    for variant in ("baseline", "candidate"):
+        rows = variants[variant].get("seeds")
+        if not isinstance(rows, Mapping) or set(rows) != expected_seed_keys:
+            raise ValueError(f"shape-loss {variant} seed summaries are missing")
+        seed_rows[variant] = rows
+    paired_deltas: dict[str, float] = {}
+    for seed in SEEDS:
+        baseline = float(
+            seed_rows["baseline"][str(seed)][VALIDATION_METRIC]
+        )
+        candidate = float(
+            seed_rows["candidate"][str(seed)][VALIDATION_METRIC]
+        )
+        if not math.isfinite(baseline) or not math.isfinite(candidate):
+            raise ValueError("shape-loss paired validation metrics must be finite")
+        paired_deltas[str(seed)] = candidate - baseline
+    delta_values = [paired_deltas[str(seed)] for seed in SEEDS]
+    paired_mean_delta = sum(delta_values) / len(delta_values)
+    paired_median_delta = sorted(delta_values)[len(delta_values) // 2]
+    improved_or_equal_seed_count = sum(
+        delta <= 0.0 for delta in delta_values
+    )
+    candidate_rows = {
+        seed: seed_rows["candidate"][str(seed)] for seed in SEEDS
+    }
+    candidate_selected_seed = select_seed_by_validation(candidate_rows)
+    candidate_selected_validation = float(
+        candidate_rows[candidate_selected_seed][VALIDATION_METRIC]
+    )
+    conditions = {
+        "improved_or_equal_seed_majority": improved_or_equal_seed_count >= 2,
+        "paired_mean_nonpositive": paired_mean_delta <= 0.0,
+        "paired_median_nonpositive": paired_median_delta <= 0.0,
+        "candidate_selected_at_or_below_phase27_incumbent": (
+            candidate_selected_validation <= PHASE27_INCUMBENT_VALIDATION
+        ),
+    }
+    return {
+        "passed": all(conditions.values()),
+        "rule": (
+            "at least two of three same-seed deltas <= 0, paired mean and "
+            "median deltas <= 0, and candidate-selected validation <= the "
+            "frozen Phase27 incumbent"
+        ),
+        "paired_deltas_by_seed": paired_deltas,
+        "paired_mean_delta": paired_mean_delta,
+        "paired_median_delta": paired_median_delta,
+        "improved_or_equal_seed_count": improved_or_equal_seed_count,
+        "improved_or_equal_seed_majority": conditions[
+            "improved_or_equal_seed_majority"
+        ],
+        "candidate_selected_seed": candidate_selected_seed,
+        "candidate_selected_validation": candidate_selected_validation,
+        "phase27_incumbent_validation": PHASE27_INCUMBENT_VALIDATION,
+        "conditions": conditions,
+    }
+
+
 def select_loss_weight_profile(
     variants: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
@@ -2044,7 +2176,7 @@ def _seed_summary_is_valid(
         if (
             expected_moment_linear_skip is not None
             or expected_moment_head_dropout is not None
-            or expected_loss_weight_profile is not None
+            or expected_loss_weights is not None
         ):
             if expected_seed is None:
                 return False
@@ -2135,6 +2267,7 @@ def _train_one_seed(
                 MOMENT_LINEAR_SKIP_AXIS,
                 MOMENT_HEAD_DROPOUT_AXIS,
                 LOSS_WEIGHT_PROFILE_AXIS,
+                SHAPE_LOSS_WEIGHT_AXIS,
             }
         )
         expected_magnitude_penalty = (
@@ -2162,7 +2295,8 @@ def _train_one_seed(
         )
         expected_loss_weights = (
             loss_weights_from_config(config)
-            if campaign_axis == LOSS_WEIGHT_PROFILE_AXIS
+            if campaign_axis
+            in {LOSS_WEIGHT_PROFILE_AXIS, SHAPE_LOSS_WEIGHT_AXIS}
             else None
         )
         expected_loss_weight_profile_sha256 = (
@@ -2175,7 +2309,7 @@ def _train_one_seed(
             if expected_event_balance_exponent is not None
             or expected_moment_linear_skip is not None
             or expected_moment_head_dropout is not None
-            or expected_loss_weight_profile is not None
+            or expected_loss_weights is not None
             else None
         )
         strict_resume = (
@@ -2183,7 +2317,7 @@ def _train_one_seed(
             or expected_event_balance_exponent is not None
             or expected_moment_linear_skip is not None
             or expected_moment_head_dropout is not None
-            or expected_loss_weight_profile is not None
+            or expected_loss_weights is not None
         )
         expected_runtime_config = (
             _runtime_config(
@@ -2355,19 +2489,7 @@ def run_train(
             )
             incumbent_reproduction_artifact = _artifact(reproduction_path)
             if not incumbent_reproduction["passed"]:
-                campaign_name = (
-                    "Phase29 p=1"
-                    if variant_axis == EVENT_BALANCE_EXPONENT_AXIS
-                    else (
-                        "Phase30 moment-linear-skip"
-                        if variant_axis == MOMENT_LINEAR_SKIP_AXIS
-                        else (
-                            "Phase31 moment-head-dropout"
-                            if variant_axis == MOMENT_HEAD_DROPOUT_AXIS
-                            else "Phase32 loss-weight-profile"
-                        )
-                    )
-                )
+                campaign_name = FROZEN_PHASE27_CAMPAIGN_NAMES[variant_axis]
                 raise ValueError(
                     f"{campaign_name} baseline did not exactly reproduce the frozen "
                     "Phase27 incumbent; refusing to train or compare the candidate"
@@ -2437,6 +2559,19 @@ def run_train(
             overwrite=resume,
         )
         profile_selection_artifact = _artifact(profile_selection_path)
+    shape_loss_compatibility: dict[str, Any] | None = None
+    shape_loss_compatibility_artifact: dict[str, str] | None = None
+    if variant_axis == SHAPE_LOSS_WEIGHT_AXIS:
+        shape_loss_compatibility = select_shape_loss_validation_compatibility(
+            variant_summaries
+        )
+        compatibility_path = stage_dir / "shape_loss_validation_compatibility.json"
+        _atomic_json(
+            compatibility_path,
+            shape_loss_compatibility,
+            overwrite=resume,
+        )
+        shape_loss_compatibility_artifact = _artifact(compatibility_path)
     summary = {
         "stage": "train",
         "status": "complete",
@@ -2479,6 +2614,18 @@ def run_train(
                 ],
             }
         )
+    if variant_axis == SHAPE_LOSS_WEIGHT_AXIS:
+        if (
+            shape_loss_compatibility is None
+            or shape_loss_compatibility_artifact is None
+        ):
+            raise RuntimeError(
+                "shape-loss validation compatibility was not evaluated"
+            )
+        summary["shape_loss_validation_compatibility"] = {
+            **shape_loss_compatibility,
+            "artifact": shape_loss_compatibility_artifact,
+        }
     _finish_stage(stage_dir, summary, resume=resume)
     return summary
 
@@ -2513,6 +2660,94 @@ def _validated_phase27_incumbent_reproduction(
             f"{campaign_name} incumbent reproduction evidence is inconsistent"
         )
     return reproduction
+
+
+def _validated_shape_loss_weight_campaign(
+    train_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    variants = train_summary.get("variants")
+    if not isinstance(variants, Mapping) or set(variants) != {
+        "baseline",
+        "candidate",
+    }:
+        raise ValueError("Phase33 train variants changed")
+    expected_seed_keys = {str(seed) for seed in SEEDS}
+    expected_weights = {
+        "baseline": {
+            "lambda_MSE": 1.0,
+            "lambda_synth": 0.5,
+            "lambda_mag": 1.0,
+            "lambda_shape": 0.1,
+        },
+        "candidate": {
+            "lambda_MSE": 1.0,
+            "lambda_synth": 0.5,
+            "lambda_mag": 1.0,
+            "lambda_shape": 0.0,
+        },
+    }
+    shape_path = ".".join(VARIANT_AXIS_PATHS[SHAPE_LOSS_WEIGHT_AXIS])
+    for variant in ("baseline", "candidate"):
+        variant_summary = variants[variant]
+        expected_diff = [] if variant == "baseline" else [shape_path]
+        if (
+            variant_summary.get("loss_weights") != expected_weights[variant]
+            or variant_summary.get("scientific_diff_from_baseline")
+            != expected_diff
+        ):
+            raise ValueError(f"Phase33 train variant {variant} changed")
+        seeds = variant_summary.get("seeds")
+        if not isinstance(seeds, Mapping) or set(seeds) != expected_seed_keys:
+            raise ValueError(f"Phase33 seed set changed for {variant}")
+        seed_rows: dict[int, Mapping[str, Any]] = {}
+        for seed in SEEDS:
+            row = seeds[str(seed)]
+            if (
+                not isinstance(row, Mapping)
+                or row.get("variant") != variant
+                or row.get("loss_weights") != expected_weights[variant]
+            ):
+                raise ValueError(
+                    f"Phase33 seed summary changed for {variant}/{seed}"
+                )
+            seed_rows[seed] = row
+        selection = variant_summary.get("selection")
+        expected_selection = {
+            "selected_seed": select_seed_by_validation(seed_rows),
+            "selection_metric": VALIDATION_METRIC,
+            "ensemble_used": False,
+            "candidates": {
+                str(seed): float(seed_rows[seed][VALIDATION_METRIC])
+                for seed in SEEDS
+            },
+        }
+        if not isinstance(selection, Mapping) or dict(selection) != expected_selection:
+            raise ValueError(f"Phase33 seed selection changed for {variant}")
+        selection_path = _validate_artifact(
+            variant_summary["selection_artifact"],
+            label=f"Phase33 seed selection {variant}",
+        )
+        if _load_json(selection_path) != expected_selection:
+            raise ValueError(
+                f"Phase33 seed selection artifact changed for {variant}"
+            )
+    recorded = train_summary.get("shape_loss_validation_compatibility")
+    if not isinstance(recorded, Mapping):
+        raise ValueError("Phase33 validation compatibility evidence is missing")
+    compatibility_path = _validate_artifact(
+        recorded["artifact"],
+        label="Phase33 validation compatibility",
+    )
+    persisted = _load_json(compatibility_path)
+    recorded_without_artifact = {
+        key: value for key, value in recorded.items() if key != "artifact"
+    }
+    if persisted != recorded_without_artifact:
+        raise ValueError("Phase33 validation compatibility artifact changed")
+    expected = select_shape_loss_validation_compatibility(variants)
+    if persisted != expected:
+        raise ValueError("Phase33 validation compatibility evidence is inconsistent")
+    return expected
 
 
 def _validated_loss_weight_profile_selection(
@@ -2619,6 +2854,13 @@ def candidate_validation_improves(train_summary: Mapping[str, Any]) -> bool:
             and float(selection["winner_paired_median_delta"]) < 0.0
             and winner_validation < PHASE27_INCUMBENT_VALIDATION
         )
+    if variant_axis == SHAPE_LOSS_WEIGHT_AXIS:
+        _validated_phase27_incumbent_reproduction(
+            train_summary,
+            campaign_name=FROZEN_PHASE27_CAMPAIGN_NAMES[variant_axis],
+        )
+        compatibility = _validated_shape_loss_weight_campaign(train_summary)
+        return bool(compatibility["passed"])
     baseline_selection = variants["baseline"]["selection"]
     candidate_selection = variants["candidate"]["selection"]
     baseline_seed = str(baseline_selection["selected_seed"])
@@ -2628,18 +2870,9 @@ def candidate_validation_improves(train_summary: Mapping[str, Any]) -> bool:
     if not math.isfinite(baseline) or not math.isfinite(candidate):
         raise ValueError("selected validation metrics must be finite")
     if variant_axis in FROZEN_PHASE27_INCUMBENT_AXES:
-        campaign_name = (
-            "Phase29"
-            if variant_axis == EVENT_BALANCE_EXPONENT_AXIS
-            else (
-                "Phase30"
-                if variant_axis == MOMENT_LINEAR_SKIP_AXIS
-                else "Phase31"
-            )
-        )
         _validated_phase27_incumbent_reproduction(
             train_summary,
-            campaign_name=campaign_name,
+            campaign_name=FROZEN_PHASE27_CAMPAIGN_NAMES[variant_axis],
         )
         return candidate < PHASE27_INCUMBENT_VALIDATION
     return candidate < baseline
@@ -2829,6 +3062,243 @@ def _load_completed_evaluation(
     return summary
 
 
+def _phase33_validation_gate(
+    train_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    _validated_phase27_incumbent_reproduction(
+        train_summary,
+        campaign_name=FROZEN_PHASE27_CAMPAIGN_NAMES[SHAPE_LOSS_WEIGHT_AXIS],
+    )
+    compatibility = _validated_shape_loss_weight_campaign(train_summary)
+    baseline_seed = _selected_seed_summary(train_summary, "baseline")
+    candidate_seed = _selected_seed_summary(train_summary, "candidate")
+    return {
+        "passed": bool(compatibility["passed"]),
+        "baseline_reproduction": float(baseline_seed[VALIDATION_METRIC]),
+        "frozen_incumbent": PHASE27_INCUMBENT_VALIDATION,
+        "frozen_incumbent_seed": PHASE27_INCUMBENT_SELECTED_SEED,
+        "candidate": float(candidate_seed[VALIDATION_METRIC]),
+        "paired_deltas_by_seed": compatibility["paired_deltas_by_seed"],
+        "paired_mean_delta": compatibility["paired_mean_delta"],
+        "paired_median_delta": compatibility["paired_median_delta"],
+        "improved_or_equal_seed_count": compatibility[
+            "improved_or_equal_seed_count"
+        ],
+        "improved_or_equal_seed_majority": compatibility[
+            "improved_or_equal_seed_majority"
+        ],
+        "conditions": compatibility["conditions"],
+        "metric": VALIDATION_METRIC,
+        "rule": compatibility["rule"],
+        "incumbent_reproduction_verified": True,
+    }
+
+
+def _validate_phase33_evaluation_payload(
+    result: Mapping[str, Any],
+    *,
+    expected_seed: int,
+    expected_variant: str,
+    expected_loss_weights: Mapping[str, float],
+    require_delayed_prefix: bool,
+) -> None:
+    expected_keys = {
+        "selected_seed",
+        "metrics",
+        "artifacts",
+        "source_variant",
+        "loss_weights",
+    }
+    if require_delayed_prefix:
+        expected_keys.add("delayed_prefix")
+    if (
+        set(result) != expected_keys
+        or int(result.get("selected_seed", -1)) != expected_seed
+        or result.get("source_variant") != expected_variant
+        or result.get("loss_weights") != dict(expected_loss_weights)
+    ):
+        raise ValueError("completed Phase33 internal evaluation identity changed")
+    artifacts = result.get("artifacts")
+    if not isinstance(artifacts, Mapping) or set(artifacts) != {
+        "metrics",
+        "station_predictions",
+        "event_predictions",
+        "result_registry",
+    }:
+        raise ValueError("completed Phase33 internal evaluation artifacts changed")
+    metrics = result.get("metrics")
+    if not isinstance(metrics, Mapping):
+        raise ValueError("completed Phase33 internal evaluation metrics changed")
+    required_metrics = {
+        "station_mae",
+        "station_rmse",
+        "station_bias",
+        "event_mae",
+        "event_rmse",
+        "event_bias",
+    }
+    try:
+        if not all(
+            math.isfinite(float(metrics[name])) for name in required_metrics
+        ):
+            raise ValueError
+        metrics_path = _validate_artifact(
+            artifacts["metrics"],
+            label="completed Phase33 internal metrics",
+        )
+        persisted_metrics = _load_json(metrics_path)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(
+            "completed Phase33 internal evaluation metrics changed"
+        ) from error
+    if not isinstance(persisted_metrics, Mapping) or any(
+        name not in persisted_metrics or persisted_metrics[name] != value
+        for name, value in metrics.items()
+    ):
+        raise ValueError("completed Phase33 internal evaluation metrics changed")
+    if not require_delayed_prefix:
+        return
+    delayed = result.get("delayed_prefix")
+    if not isinstance(delayed, Mapping):
+        raise ValueError("completed Phase33 delayed-prefix evaluation changed")
+    delayed_artifacts = delayed.get("artifacts")
+    if not isinstance(delayed_artifacts, Mapping) or set(delayed_artifacts) != {
+        "station_predictions",
+        "event_predictions",
+        "unavailable_stations",
+        "horizon_metrics",
+        "cohort_contract",
+    }:
+        raise ValueError("completed Phase33 delayed-prefix artifacts changed")
+    horizon_path = _validate_artifact(
+        delayed_artifacts["horizon_metrics"],
+        label="completed Phase33 horizon metrics",
+    )
+    cohort_path = _validate_artifact(
+        delayed_artifacts["cohort_contract"],
+        label="completed Phase33 cohort contract",
+    )
+    if (
+        delayed.get("horizons_sec") != list(DEFAULT_HORIZONS_SEC)
+        or delayed.get("horizon_metrics") != _load_json(horizon_path)
+        or delayed.get("cohort") != _load_json(cohort_path)
+    ):
+        raise ValueError("completed Phase33 delayed-prefix evaluation changed")
+
+
+def _validate_completed_phase33_internal(
+    *,
+    output_root: Path,
+    stage_dir: Path,
+    completed: Mapping[str, Any],
+    train_summary: Mapping[str, Any],
+) -> None:
+    if train_summary.get("status") != "complete":
+        raise ValueError("completed Phase33 internal train stage changed")
+    validation_gate = _phase33_validation_gate(train_summary)
+    expected_train_artifact = _artifact(
+        _stage_dir(output_root, "train") / "summary.json"
+    )
+    common_valid = (
+        completed.get("stage") == "internal"
+        and isinstance(completed.get("created_at_utc"), str)
+        and bool(completed.get("created_at_utc"))
+        and completed.get("train_summary") == expected_train_artifact
+        and completed.get("validation_gate") == validation_gate
+        and completed.get("external_evaluated") is False
+    )
+    if not common_valid:
+        raise ValueError("completed Phase33 internal summary changed")
+    if not validation_gate["passed"]:
+        expected_keys = {
+            "stage",
+            "status",
+            "created_at_utc",
+            "train_summary",
+            "validation_gate",
+            "test_evaluated",
+            "external_evaluated",
+        }
+        if (
+            set(completed) != expected_keys
+            or completed.get("status") != "candidate_validation_gate_failed"
+            or completed.get("test_evaluated") is not False
+        ):
+            raise ValueError("completed Phase33 internal validation failure changed")
+        return
+
+    expected_keys = {
+        "stage",
+        "status",
+        "created_at_utc",
+        "train_summary",
+        "validation_gate",
+        "candidate_gate",
+        "frozen_test_diagnostic",
+        "test_evaluated",
+        "external_evaluated",
+        "variants",
+    }
+    variants = completed.get("variants")
+    if (
+        set(completed) != expected_keys
+        or completed.get("test_evaluated") is not True
+        or not isinstance(variants, Mapping)
+        or set(variants) != {"baseline", "candidate"}
+    ):
+        raise ValueError("completed Phase33 internal evaluation summary changed")
+    evaluations: dict[str, Mapping[str, Any]] = {}
+    for variant in ("baseline", "candidate"):
+        expected_seed_summary = _selected_seed_summary(train_summary, variant)
+        expected_weights = train_summary["variants"][variant]["loss_weights"]
+        persisted = _load_completed_evaluation(
+            stage_dir / variant,
+            require_delayed_prefix=variant == "candidate",
+        )
+        if persisted is None or persisted != variants[variant]:
+            raise ValueError(
+                f"completed Phase33 internal {variant} evaluation changed"
+            )
+        _validate_phase33_evaluation_payload(
+            persisted,
+            expected_seed=int(expected_seed_summary["seed"]),
+            expected_variant=variant,
+            expected_loss_weights=expected_weights,
+            require_delayed_prefix=variant == "candidate",
+        )
+        evaluations[variant] = persisted
+    baseline_event_mae = float(evaluations["baseline"]["metrics"]["event_mae"])
+    candidate_event_mae = float(evaluations["candidate"]["metrics"]["event_mae"])
+    candidate_gate = {
+        "passed": candidate_event_mae < INTERNAL_EVENT_MAE_MAXIMUM,
+        "event_mae": candidate_event_mae,
+        "maximum_exclusive": INTERNAL_EVENT_MAE_MAXIMUM,
+    }
+    diagnostic = {
+        "baseline_event_mae": baseline_event_mae,
+        "candidate_event_mae": candidate_event_mae,
+        "candidate_minus_baseline": candidate_event_mae - baseline_event_mae,
+        "candidate_improved": candidate_event_mae < baseline_event_mae,
+        "used_for_selection_or_gate": False,
+        "phase27_incumbent_event_mae": PHASE27_INCUMBENT_TEST_EVENT_MAE,
+        "candidate_minus_phase27_incumbent": (
+            candidate_event_mae - PHASE27_INCUMBENT_TEST_EVENT_MAE
+        ),
+        "candidate_improved_phase27_incumbent": (
+            candidate_event_mae < PHASE27_INCUMBENT_TEST_EVENT_MAE
+        ),
+    }
+    expected_status = (
+        "complete" if candidate_gate["passed"] else "candidate_internal_gate_failed"
+    )
+    if (
+        completed.get("status") != expected_status
+        or completed.get("candidate_gate") != candidate_gate
+        or completed.get("frozen_test_diagnostic") != diagnostic
+    ):
+        raise ValueError("completed Phase33 internal gate evidence changed")
+
+
 def run_internal(
     *,
     output_root: Path,
@@ -2837,6 +3307,14 @@ def run_internal(
     stage_dir = _stage_dir(output_root, "internal")
     completed = _prepare_stage(stage_dir, resume=resume)
     if completed is not None:
+        train_summary = _require_stage(output_root, "train")
+        if train_summary.get("variant_axis") == SHAPE_LOSS_WEIGHT_AXIS:
+            _validate_completed_phase33_internal(
+                output_root=output_root,
+                stage_dir=stage_dir,
+                completed=completed,
+                train_summary=train_summary,
+            )
         return completed
     train_summary = _require_stage(output_root, "train")
     if train_summary.get("status") != "complete":
@@ -2879,6 +3357,10 @@ def run_internal(
             ),
             "incumbent_reproduction_verified": True,
         }
+    elif variant_axis == SHAPE_LOSS_WEIGHT_AXIS:
+        validation_gate = _phase33_validation_gate(train_summary)
+        if validation_gate["passed"] is not validation_passed:
+            raise ValueError("Phase33 validation gate evidence is inconsistent")
     elif variant_axis in FROZEN_PHASE27_INCUMBENT_AXES:
         validation_gate = {
             "passed": validation_passed,
@@ -2946,6 +3428,15 @@ def run_internal(
                         ),
                     }
                 )
+            elif variant_axis == SHAPE_LOSS_WEIGHT_AXIS:
+                result.update(
+                    {
+                        "source_variant": source_variant,
+                        "loss_weights": train_summary["variants"][
+                            source_variant
+                        ]["loss_weights"],
+                    }
+                )
             _atomic_json(variant_dir / "summary.json", result, overwrite=resume)
         elif variant_axis == LOSS_WEIGHT_PROFILE_AXIS and (
             int(result.get("selected_seed", -1)) != int(seed_summary["seed"])
@@ -2956,6 +3447,13 @@ def run_internal(
             != LOSS_WEIGHT_CANDIDATE_PROFILE_SHA256
         ):
             raise ValueError("resumed loss-weight internal evaluation changed")
+        elif variant_axis == SHAPE_LOSS_WEIGHT_AXIS and (
+            int(result.get("selected_seed", -1)) != int(seed_summary["seed"])
+            or result.get("source_variant") != source_variant
+            or result.get("loss_weights")
+            != train_summary["variants"][source_variant]["loss_weights"]
+        ):
+            raise ValueError("resumed Phase33 internal evaluation changed")
         evaluations[variant] = result
     baseline_event_mae = float(evaluations["baseline"]["metrics"]["event_mae"])
     candidate_event_mae = float(evaluations["candidate"]["metrics"]["event_mae"])
@@ -2987,6 +3485,20 @@ def run_internal(
         "candidate_improved": candidate_event_mae < baseline_event_mae,
         "used_for_selection_or_gate": False,
     }
+    if variant_axis == SHAPE_LOSS_WEIGHT_AXIS:
+        frozen_test_diagnostic.update(
+            {
+                "phase27_incumbent_event_mae": (
+                    PHASE27_INCUMBENT_TEST_EVENT_MAE
+                ),
+                "candidate_minus_phase27_incumbent": (
+                    candidate_event_mae - PHASE27_INCUMBENT_TEST_EVENT_MAE
+                ),
+                "candidate_improved_phase27_incumbent": (
+                    candidate_event_mae < PHASE27_INCUMBENT_TEST_EVENT_MAE
+                ),
+            }
+        )
     status = "complete" if candidate_gate["passed"] else "candidate_internal_gate_failed"
     summary = {
         "stage": "internal",
@@ -3247,6 +3759,18 @@ def run_external(
     resume: bool,
 ) -> dict[str, Any]:
     stage_dir = _stage_dir(output_root, "external")
+    train_dir = _stage_dir(output_root, "train")
+    train_summary: dict[str, Any] | None = None
+    if (train_dir / "COMPLETE").is_file() and (train_dir / "summary.json").is_file():
+        train_summary = _require_stage(output_root, "train")
+    if (
+        train_summary is not None
+        and train_summary.get("variant_axis") == SHAPE_LOSS_WEIGHT_AXIS
+    ):
+        raise RuntimeError(
+            "Phase33 external evaluation is preregistered closed; report only "
+            "validation compatibility and the locked internal test"
+        )
     completed = _prepare_stage(stage_dir, resume=resume)
     if completed is not None:
         if (
@@ -3257,13 +3781,26 @@ def run_external(
                 "completed external stage uses an obsolete waveform-grid schema; "
                 "preserve it and use a new output namespace"
             )
+        if train_summary is None:
+            train_summary = _require_stage(output_root, "train")
+        if train_summary.get("variant_axis") == SHAPE_LOSS_WEIGHT_AXIS:
+            raise RuntimeError(
+                "Phase33 external evaluation is preregistered closed; report only "
+                "validation compatibility and the locked internal test"
+            )
         return completed
     internal = _require_stage(output_root, "internal")
     if internal.get("status") != "complete" or not bool(
         internal.get("candidate_gate", {}).get("passed")
     ):
         raise RuntimeError("external stage requires a passed internal candidate gate")
-    train_summary = _require_stage(output_root, "train")
+    if train_summary is None:
+        train_summary = _require_stage(output_root, "train")
+    if train_summary.get("variant_axis") == SHAPE_LOSS_WEIGHT_AXIS:
+        raise RuntimeError(
+            "Phase33 external evaluation is preregistered closed; report only "
+            "validation compatibility and the locked internal test"
+        )
     if train_summary.get("variant_axis") == LOSS_WEIGHT_PROFILE_AXIS:
         _validated_phase27_incumbent_reproduction(
             train_summary,
