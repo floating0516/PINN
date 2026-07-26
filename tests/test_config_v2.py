@@ -10,6 +10,7 @@ from src.training.train import train
 from src.utils.config_v2 import (
     magnitude_penalty_from_config,
     moment_linear_skip_from_config,
+    radiation_coefficient_contract_from_config,
     stf_m_ref_from_config,
     stf_output_steps_from_config,
     synth_polarity_mode_from_config,
@@ -140,6 +141,28 @@ def test_synth_polarity_mode_defaults_and_validates() -> None:
     for value in ("absolute", "GLOBAL_INVARIANT", True, 1, None):
         config["training"]["stf_rate_loss"]["synth_polarity_mode"] = value
         with pytest.raises(ValueError, match="synth_polarity_mode"):
+            validate_config_v2(config)
+
+
+def test_radiation_coefficient_contract_defaults_and_validates() -> None:
+    config = _minimal_v2()
+    assert (
+        radiation_coefficient_contract_from_config(config)
+        == "horizontal_projected"
+    )
+
+    for value in ("horizontal_projected", "glehman_scalar"):
+        config["training"]["stf_rate_loss"][
+            "radiation_coefficient_contract"
+        ] = value
+        validate_config_v2(config)
+        assert radiation_coefficient_contract_from_config(config) == value
+
+    for value in ("paper", "GLEHMAN_SCALAR", True, 1, None):
+        config["training"]["stf_rate_loss"][
+            "radiation_coefficient_contract"
+        ] = value
+        with pytest.raises(ValueError, match="radiation_coefficient_contract"):
             validate_config_v2(config)
 
 

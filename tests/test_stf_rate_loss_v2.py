@@ -1,5 +1,6 @@
 import copy
 import inspect
+import math
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,7 @@ from src.training.loss_stf_rate_v2 import (
     STFRateWaveformLossV2,
     _per_sample_masked_normalized_waveform_mse,
     compute_physical_coefficients,
+    compute_radiation_coefficients,
     forward_displacement_from_origin_rate,
     masked_normalized_waveform_mse,
     moment_magnitude_from_rate,
@@ -190,6 +192,177 @@ def test_synth_polarity_mode_rejects_unknown_value() -> None:
             torch.ones(1, 2, dtype=torch.bool),
             synth_polarity_mode="pointwise_absolute",
         )
+
+
+def test_glehman_scalar_radiation_matches_paper_kilauea_oracle() -> None:
+    theta = torch.tensor([90.0], dtype=torch.float64)
+    phi = torch.tensor([180.0], dtype=torch.float64)
+
+    projected = compute_radiation_coefficients(theta, phi, mode="full")
+    paper = compute_radiation_coefficients(
+        theta,
+        phi,
+        mode="full",
+        coefficient_contract="glehman_scalar",
+    )
+
+    assert abs(projected[3].item()) < 1.0e-12
+    assert paper[3].item() == pytest.approx(1.0, abs=1.0e-12)
+
+
+def test_glehman_scalar_radiation_matches_independent_equations() -> None:
+    theta = torch.tensor([30.0], dtype=torch.float64)
+    phi = torch.tensor([0.0], dtype=torch.float64)
+    sqrt_three = math.sqrt(3.0)
+    expected = (
+        2.0 * sqrt_three - 1.0,
+        1.5 - 1.5 * sqrt_three,
+        0.5 * sqrt_three,
+        0.5,
+    )
+
+    actual = compute_radiation_coefficients(
+        theta,
+        phi,
+        mode="full",
+        coefficient_contract="glehman_scalar",
+    )
+
+    for actual_coefficient, expected_value in zip(
+        actual,
+        expected,
+        strict=True,
+    ):
+        assert actual_coefficient.item() == pytest.approx(
+            expected_value,
+            abs=1.0e-12,
+        )
+
+
+def test_glehman_scalar_radiation_phi_symmetry() -> None:
+    theta = torch.tensor([15.0, 45.0, 80.0], dtype=torch.float64)
+    phi = torch.tensor([23.0, -41.0, 170.0], dtype=torch.float64)
+
+    coefficients = compute_radiation_coefficients(
+        theta,
+        phi,
+        mode="full",
+        coefficient_contract="glehman_scalar",
+    )
+    opposite = compute_radiation_coefficients(
+        theta,
+        phi + 180.0,
+        mode="full",
+        coefficient_contract="glehman_scalar",
+    )
+    nodal = compute_radiation_coefficients(
+        theta,
+        torch.full_like(phi, 90.0),
+        mode="full",
+        coefficient_contract="glehman_scalar",
+    )
+
+    for values, opposite_values, nodal_values in zip(
+        coefficients,
+        opposite,
+        nodal,
+        strict=True,
+    ):
+        assert torch.allclose(
+            values,
+            -opposite_values,
+            atol=1.0e-12,
+            rtol=0.0,
+        )
+        assert torch.allclose(
+            nodal_values,
+            torch.zeros_like(nodal_values),
+            atol=1.0e-12,
+            rtol=0.0,
+        )
+
+
+def test_glehman_scalar_far_s_oracle_produces_delayed_pulse() -> None:
+    rho = 2.0
+    alpha = 8.0
+    beta = 4.0
+    distance = torch.tensor([4.0], dtype=torch.float64)
+    radiation = compute_radiation_coefficients(
+        torch.tensor([90.0], dtype=torch.float64),
+        torch.tensor([180.0], dtype=torch.float64),
+        mode="full",
+        coefficient_contract="glehman_scalar",
+    )
+    coefficients = compute_physical_coefficients(
+        distance,
+        rho,
+        alpha,
+        beta,
+        *radiation,
+    )
+
+    displacement = forward_displacement_from_origin_rate(
+        torch.tensor([[1.0, 0.0, 0.0]], dtype=torch.float64),
+        torch.ones(1, dtype=torch.float64),
+        torch.ones(1, dtype=torch.float64),
+        4,
+        distance,
+        ConstantVelocityTravelTime(alpha, beta),
+        *coefficients,
+        include_intermediate=False,
+        include_far_P=False,
+        include_far_S=True,
+        include_intermediate_P=False,
+        include_intermediate_S=False,
+    )
+
+    expected_coefficient = 1.0 / (4.0 * math.pi * rho * beta**3 * 4.0)
+    assert displacement[0, 1].item() == pytest.approx(
+        expected_coefficient,
+        abs=1.0e-15,
+    )
+    assert torch.count_nonzero(displacement).item() == 1
+
+
+def test_horizontal_projected_radiation_default_is_legacy_exact() -> None:
+    theta = torch.tensor([12.0, 85.0], dtype=torch.float64)
+    phi = torch.tensor([-20.0, 173.0], dtype=torch.float64)
+
+    implicit = compute_radiation_coefficients(theta, phi, mode="full")
+    explicit = compute_radiation_coefficients(
+        theta,
+        phi,
+        mode="full",
+        coefficient_contract="horizontal_projected",
+    )
+
+    for implicit_coefficient, explicit_coefficient in zip(
+        implicit,
+        explicit,
+        strict=True,
+    ):
+        assert torch.equal(implicit_coefficient, explicit_coefficient)
+
+
+def test_radiation_coefficient_contract_rejects_unknown_value() -> None:
+    with pytest.raises(ValueError, match="coefficient_contract"):
+        compute_radiation_coefficients(
+            torch.zeros(1),
+            torch.zeros(1),
+            mode="full",
+            coefficient_contract="paperish",
+        )
+
+
+def test_stf_rate_criterion_uses_configured_radiation_contract() -> None:
+    config = _v2_config()
+    config["training"]["stf_rate_loss"][
+        "radiation_coefficient_contract"
+    ] = "glehman_scalar"
+
+    criterion = STFRateWaveformLossV2(config)
+
+    assert criterion.radiation_coefficient_contract == "glehman_scalar"
 
 
 def test_weighted_four_term_loss_uses_batch_mean_not_weight_sum() -> None:

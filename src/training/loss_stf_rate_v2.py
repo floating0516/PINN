@@ -14,6 +14,7 @@ from src.physics.travel_time import (
 from src.training.time_sampling import sample_source_history
 from src.utils.config_v2 import (
     magnitude_penalty_from_config,
+    radiation_coefficient_contract_from_config,
     synth_polarity_mode_from_config,
     stf_m_ref_from_config,
     validate_config_v2,
@@ -249,9 +250,18 @@ def compute_radiation_coefficients(
     phi_slip_deg: torch.Tensor,
     *,
     mode: str,
+    coefficient_contract: str = "horizontal_projected",
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
     if theta_deg.shape != phi_slip_deg.shape or theta_deg.ndim != 1:
         raise ValueError("radiation angles must have matching (batch,) shapes")
+    if coefficient_contract not in {
+        "horizontal_projected",
+        "glehman_scalar",
+    }:
+        raise ValueError(
+            "coefficient_contract must be horizontal_projected or "
+            "glehman_scalar"
+        )
     if mode == "none":
         zeros = torch.zeros_like(theta_deg)
         return zeros, zeros, zeros, zeros
@@ -268,6 +278,15 @@ def compute_radiation_coefficients(
     sin_2theta = torch.sin(2.0 * theta)
     cos_2theta = torch.cos(2.0 * theta)
     cos_phi = torch.cos(phi)
+    if coefficient_contract == "glehman_scalar":
+        # Glehman et al. (2026), Eq. 4 with the scalar convention used by
+        # Eqs. 7-8 and the Kilauea A_FS=1 example. Phase39 disables the
+        # intermediate field, so only the unambiguous far-P/S terms contribute.
+        A_IP = cos_phi * (4.0 * sin_2theta - 2.0 * cos_2theta)
+        A_IS = cos_phi * (-3.0 * sin_2theta + 3.0 * cos_2theta)
+        A_FP = cos_phi * sin_2theta
+        A_FS = cos_phi * cos_2theta
+        return A_IP, A_IS, A_FP, A_FS
     A_IP = cos_phi * (
         4.0 * sin_2theta * sin_theta
         - 2.0 * cos_2theta * cos_theta
@@ -425,6 +444,7 @@ def pinn_loss_stf_rate_v2(
     sample_weights: torch.Tensor | None = None,
     magnitude_penalty: str = "squared",
     synth_polarity_mode: str = "signed",
+    radiation_coefficient_contract: str = "horizontal_projected",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch_size = rate_hat.shape[0]
     if pred_rate_encoded.shape != rate_hat.shape:
@@ -454,6 +474,7 @@ def pinn_loss_stf_rate_v2(
         angles_theta,
         angles_phi,
         mode=radiation_mode,
+        coefficient_contract=radiation_coefficient_contract,
     )
     coefficients = compute_physical_coefficients(
         _batch_vector(
@@ -625,6 +646,7 @@ def causal_event_stf_rate_loss_v2(
     include_intermediate_S: bool,
     magnitude_penalty: str = "squared",
     synth_polarity_mode: str = "signed",
+    radiation_coefficient_contract: str = "horizontal_projected",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Apply the original four losses to a shared origin-aligned event STF."""
     if magnitude_penalty not in {"squared", "absolute"}:
@@ -666,6 +688,7 @@ def causal_event_stf_rate_loss_v2(
         selected_theta,
         selected_phi,
         mode=radiation_mode,
+        coefficient_contract=radiation_coefficient_contract,
     )
     coefficients = compute_physical_coefficients(
         selected_distance,
@@ -748,6 +771,9 @@ class CausalEventSTFRateWaveformLossV2(nn.Module):
         self.lambda_shape = float(loss_config["lambda_shape"])
         self.magnitude_penalty = magnitude_penalty_from_config(config)
         self.synth_polarity_mode = synth_polarity_mode_from_config(config)
+        self.radiation_coefficient_contract = (
+            radiation_coefficient_contract_from_config(config)
+        )
         self.rate_representation = str(
             config["training"]["rate_representation"]
         ).lower()
@@ -837,6 +863,7 @@ class CausalEventSTFRateWaveformLossV2(nn.Module):
             include_intermediate_S=self.include_intermediate_S,
             magnitude_penalty=self.magnitude_penalty,
             synth_polarity_mode=self.synth_polarity_mode,
+            radiation_coefficient_contract=self.radiation_coefficient_contract,
         )
 
 
@@ -857,6 +884,9 @@ class STFRateWaveformLossV2(nn.Module):
             config
         )
         self.synth_polarity_mode = synth_polarity_mode_from_config(config)
+        self.radiation_coefficient_contract = (
+            radiation_coefficient_contract_from_config(config)
+        )
         self.rate_representation = str(
             config["training"]["rate_representation"]
         ).lower()
@@ -971,4 +1001,5 @@ class STFRateWaveformLossV2(nn.Module):
             sample_weights=sample_weights,
             magnitude_penalty=self.magnitude_penalty,
             synth_polarity_mode=self.synth_polarity_mode,
+            radiation_coefficient_contract=self.radiation_coefficient_contract,
         )
