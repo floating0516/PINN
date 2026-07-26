@@ -11,6 +11,7 @@ from scripts.plotting.plot_training_curves import build_loss_summary
 from src.physics.travel_time import ConstantVelocityTravelTime
 from src.training.loss_stf_rate_v2 import (
     STFRateWaveformLossV2,
+    _per_sample_masked_normalized_waveform_mse,
     compute_physical_coefficients,
     forward_displacement_from_origin_rate,
     masked_normalized_waveform_mse,
@@ -86,6 +87,109 @@ def test_invalid_waveform_samples_do_not_enter_synth_loss() -> None:
     )
 
     assert loss.item() == 0.0
+
+
+def test_signed_synth_polarity_mode_preserves_legacy_loss_exactly() -> None:
+    predicted = torch.tensor([[1.0, -2.0, 0.5], [-0.5, 1.0, 2.0]])
+    observed = torch.tensor([[0.5, -1.0, 0.25], [1.0, -0.5, 2.0]])
+    valid_mask = torch.tensor([[True, True, False], [True, True, True]])
+
+    legacy = masked_normalized_waveform_mse(
+        predicted,
+        observed,
+        valid_mask,
+    )
+    explicit = masked_normalized_waveform_mse(
+        predicted,
+        observed,
+        valid_mask,
+        synth_polarity_mode="signed",
+    )
+
+    assert torch.equal(legacy, explicit)
+
+
+def test_global_invariant_synth_selects_one_sign_per_station() -> None:
+    predicted = torch.tensor([[1.0, -2.0], [1.0, -2.0]])
+    observed = torch.tensor([[1.0, -2.0], [-1.0, 2.0]])
+    valid_mask = torch.ones_like(predicted, dtype=torch.bool)
+
+    per_sample = _per_sample_masked_normalized_waveform_mse(
+        predicted,
+        observed,
+        valid_mask,
+        synth_polarity_mode="global_invariant",
+    )
+    loss = masked_normalized_waveform_mse(
+        predicted,
+        observed,
+        valid_mask,
+        synth_polarity_mode="global_invariant",
+    )
+
+    assert torch.equal(per_sample, torch.zeros_like(per_sample))
+    assert loss.item() == 0.0
+
+
+def test_global_invariant_synth_does_not_flip_individual_time_samples() -> None:
+    predicted = torch.tensor([[1.0, -1.0]])
+    observed = torch.tensor([[1.0, 1.0]])
+    valid_mask = torch.ones_like(predicted, dtype=torch.bool)
+
+    per_sample = _per_sample_masked_normalized_waveform_mse(
+        predicted,
+        observed,
+        valid_mask,
+        synth_polarity_mode="global_invariant",
+    )
+    loss = masked_normalized_waveform_mse(
+        predicted,
+        observed,
+        valid_mask,
+        synth_polarity_mode="global_invariant",
+    )
+
+    # Either whole-waveform sign leaves one of the two samples wrong by 2.
+    assert per_sample.item() == pytest.approx(2.0)
+    assert loss.item() == pytest.approx(2.0)
+
+
+def test_global_invariant_synth_is_symmetric_and_differentiable() -> None:
+    predicted = torch.tensor(
+        [[0.8, -1.5, 0.2], [0.7, -1.8, 0.4]],
+        requires_grad=True,
+    )
+    observed = torch.tensor([[1.0, -2.0, 0.5], [-1.0, 2.0, -0.5]])
+    valid_mask = torch.ones_like(predicted, dtype=torch.bool)
+
+    loss = masked_normalized_waveform_mse(
+        predicted,
+        observed,
+        valid_mask,
+        synth_polarity_mode="global_invariant",
+    )
+    flipped = masked_normalized_waveform_mse(
+        -predicted,
+        observed,
+        valid_mask,
+        synth_polarity_mode="global_invariant",
+    )
+    loss.backward()
+
+    assert torch.equal(loss, flipped)
+    assert predicted.grad is not None
+    assert torch.isfinite(predicted.grad).all()
+    assert torch.count_nonzero(predicted.grad) > 0
+
+
+def test_synth_polarity_mode_rejects_unknown_value() -> None:
+    with pytest.raises(ValueError, match="synth_polarity_mode"):
+        masked_normalized_waveform_mse(
+            torch.ones(1, 2),
+            torch.ones(1, 2),
+            torch.ones(1, 2, dtype=torch.bool),
+            synth_polarity_mode="pointwise_absolute",
+        )
 
 
 def test_weighted_four_term_loss_uses_batch_mean_not_weight_sum() -> None:

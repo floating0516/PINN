@@ -86,6 +86,12 @@ PHASE34_CONFIG_PATH = (
     / "experiments"
     / "manuscript_station_stf_usgs_three_loss_ablation.yaml"
 )
+PHASE38_CONFIG_PATH = (
+    PROJECT_ROOT
+    / "configs"
+    / "experiments"
+    / "manuscript_station_stf_usgs_polarity_robust.yaml"
+)
 CONFIG_PATH = PHASE23_CONFIG_PATH
 
 
@@ -4136,3 +4142,905 @@ def test_phase34_external_is_always_closed(
             event_root=tmp_path / "external-events",
             resume=resume,
         )
+
+
+def test_phase38_config_changes_only_station_global_synth_polarity() -> None:
+    phase33_candidate = campaign.build_variant_configs(
+        _config(PHASE33_CONFIG_PATH)
+    )["candidate"]
+    phase38_config = _config(PHASE38_CONFIG_PATH)
+
+    campaign.validate_formal_config(phase38_config)
+    variants = campaign.build_variant_configs(phase38_config)
+
+    assert campaign.variant_axis_from_config(phase38_config) == (
+        campaign.SYNTH_POLARITY_MODE_AXIS
+    )
+    assert campaign._config_diff_paths(
+        variants["baseline"], variants["candidate"]
+    ) == {"training.stf_rate_loss.synth_polarity_mode"}
+    assert campaign.synth_polarity_mode_from_config(variants["baseline"]) == "signed"
+    assert (
+        campaign.synth_polarity_mode_from_config(variants["candidate"])
+        == "global_invariant"
+    )
+    assert campaign.loss_weights_from_config(variants["baseline"]) == {
+        "lambda_MSE": 1.0,
+        "lambda_synth": 0.5,
+        "lambda_mag": 1.0,
+        "lambda_shape": 0.0,
+    }
+    phase33_candidate.pop("campaign")
+    phase38_baseline = copy.deepcopy(variants["baseline"])
+    phase38_baseline.pop("campaign")
+    phase38_baseline["training"]["stf_rate_loss"].pop("synth_polarity_mode")
+    assert phase38_baseline == phase33_candidate
+
+
+def test_explicit_synth_polarity_mode_is_rejected_for_older_campaigns() -> None:
+    config = _config(PHASE33_CONFIG_PATH)
+    config["training"]["stf_rate_loss"][
+        "synth_polarity_mode"
+    ] = "global_invariant"
+
+    with pytest.raises(ValueError, match="reserved for Phase38"):
+        campaign.validate_formal_config(config)
+
+
+def test_phase38_frozen_no_synth_resolver_audits_temporary_phase34_campaign(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_root = tmp_path / "phase34-source"
+    source_root.mkdir()
+    source_summary, _calls = _run_phase34_train_with_deltas(
+        output_root=source_root,
+        monkeypatch=monkeypatch,
+        deltas={
+            "no_mse": {seed: 0.01 for seed in campaign.SEEDS},
+            "no_synth": {17: 0.03, 42: -0.01, 73: -0.02},
+            "no_mag": {seed: 0.10 for seed in campaign.SEEDS},
+        },
+    )
+    no_synth_rows = source_summary["variants"]["no_synth"]["seeds"]
+    for seed in campaign.SEEDS:
+        row = no_synth_rows[str(seed)]
+        row["epoch"] = 1
+        metric = float(row[campaign.VALIDATION_METRIC])
+        training_log_path = Path(row["training_log"]["path"])
+        training_log_path.write_text(
+            f"Epoch,{campaign.VALIDATION_METRIC}\n1,{metric!r}\n",
+            encoding="utf-8",
+        )
+        row["training_log"] = _artifact(training_log_path)
+        monkeypatch.setitem(
+            campaign.PHASE34_NO_SYNTH_VALIDATION_BY_SEED,
+            seed,
+            metric,
+        )
+        monkeypatch.setitem(
+            campaign.PHASE34_NO_SYNTH_CHECKPOINT_SHA256_BY_SEED,
+            seed,
+            row["checkpoint"]["sha256"],
+        )
+    source_summary_path = source_root / "train" / "summary.json"
+    _write_json(source_summary_path, source_summary)
+    monkeypatch.setattr(
+        campaign,
+        "PHASE34_NO_SYNTH_TRAIN_SUMMARY_PATH",
+        source_summary_path,
+    )
+    monkeypatch.setattr(
+        campaign,
+        "PHASE34_NO_SYNTH_TRAIN_SUMMARY_SHA256",
+        campaign.sha256_file(source_summary_path),
+    )
+    monkeypatch.setattr(
+        campaign,
+        "PHASE34_SOURCE_GIT_COMMIT",
+        source_summary["git_commit"],
+    )
+    monkeypatch.setattr(campaign, "PHASE34_NO_SYNTH_SELECTED_SEED", 42)
+
+    provenance = campaign.frozen_phase34_no_synth_provenance()
+
+    assert provenance["not_retrained"] is True
+    assert provenance["selected_seed"] == 42
+    assert provenance["effective_synth_polarity_mode"] == "signed"
+    assert set(provenance["seeds"]) == {"17", "42", "73"}
+
+    selected_checkpoint = Path(no_synth_rows["42"]["checkpoint"]["path"])
+    selected_checkpoint.write_text("tampered", encoding="utf-8")
+    with pytest.raises(ValueError, match="artifacts changed"):
+        campaign.frozen_phase34_no_synth_provenance()
+
+
+def _mark_phase38_smoke(output_root: Path) -> None:
+    modes = campaign.VARIANT_AXES[campaign.SYNTH_POLARITY_MODE_AXIS]
+    results = {
+        variant: {
+            device: {
+                "passed": True,
+                "device": device,
+                "loss": 1.0,
+                "metrics": {"L_total": 1.0},
+                "parameter_count": 1_010_850,
+                "loss_weights": campaign.LOSS_TERM_ABLATION_PROFILES["baseline"],
+                "synth_polarity_mode": mode,
+                "event_balance_estimator": (
+                    campaign.INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                ),
+                "event_balance_exponent": 1.0,
+                "sample_weights_exercised": True,
+            }
+            for device in ("cpu", "cuda")
+        }
+        for variant, mode in modes.items()
+    }
+    _mark_stage(
+        output_root,
+        "smoke",
+        {
+            "status": "complete",
+            "created_at_utc": "2026-07-26T00:00:00+00:00",
+            "git_commit": campaign.current_git_commit(campaign.PROJECT_ROOT),
+            "variant_axis": campaign.SYNTH_POLARITY_MODE_AXIS,
+            "test_evaluated": False,
+            "external_evaluated": False,
+            "synth_polarity_modes": modes,
+            "results": results,
+        },
+    )
+
+
+def _install_fake_phase38_frozen_no_synth(
+    *,
+    output_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_path = output_root / "frozen_phase34_train_summary.json"
+    _write_json(source_path, {"stage": "train", "status": "complete"})
+    provenance_seeds: dict[str, Any] = {}
+    source_rows: dict[int, dict[str, Any]] = {}
+    for seed in campaign.SEEDS:
+        checkpoint_path = output_root / f"frozen_no_synth_{seed}.pth"
+        checkpoint_path.write_text(f"no-synth-{seed}", encoding="utf-8")
+        checkpoint = _artifact(checkpoint_path)
+        provenance_seeds[str(seed)] = {
+            campaign.VALIDATION_METRIC: (
+                campaign.PHASE34_NO_SYNTH_VALIDATION_BY_SEED[seed]
+            ),
+            "checkpoint": checkpoint,
+            "split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[seed],
+        }
+        source_rows[seed] = {
+            "variant": "no_synth",
+            "seed": seed,
+            campaign.VALIDATION_METRIC: (
+                campaign.PHASE34_NO_SYNTH_VALIDATION_BY_SEED[seed]
+            ),
+            "checkpoint": checkpoint,
+        }
+    provenance = {
+        "source_campaign": "Phase34 loss-term ablation",
+        "source_variant": "no_synth",
+        "source_train_summary": _artifact(source_path),
+        "source_git_commit": campaign.PHASE34_SOURCE_GIT_COMMIT,
+        "loss_weights": dict(campaign.LOSS_TERM_ABLATION_PROFILES["no_synth"]),
+        "effective_synth_polarity_mode": "signed",
+        "polarity_mode_is_objectively_inactive": True,
+        "not_retrained": True,
+        "selected_seed": campaign.PHASE34_NO_SYNTH_SELECTED_SEED,
+        "selection_metric": campaign.VALIDATION_METRIC,
+        "ensemble_used": False,
+        "seeds": provenance_seeds,
+    }
+    monkeypatch.setattr(
+        campaign,
+        "frozen_phase34_no_synth_provenance",
+        lambda: copy.deepcopy(provenance),
+    )
+    monkeypatch.setattr(
+        campaign,
+        "_frozen_phase34_no_synth_seed_summary",
+        lambda seed: copy.deepcopy(source_rows[int(seed)]),
+    )
+
+
+def _run_phase38_train(
+    *,
+    output_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    candidate_values: dict[int, float],
+    baseline_metric_deltas: dict[int, float] | None = None,
+    baseline_checkpoint_mismatch_seed: int | None = None,
+    resume: bool = False,
+) -> tuple[dict[str, Any], list[tuple[str, int]]]:
+    _install_fake_phase38_frozen_no_synth(
+        output_root=output_root,
+        monkeypatch=monkeypatch,
+    )
+    baseline_metric_deltas = baseline_metric_deltas or {
+        seed: 0.0 for seed in campaign.SEEDS
+    }
+    config_path = output_root / "frozen_config.yaml"
+    config_path.write_text(
+        yaml.safe_dump(_config(PHASE38_CONFIG_PATH), sort_keys=False),
+        encoding="utf-8",
+    )
+    manifest_path = output_root / "dataset_manifest.csv"
+    manifest_path.write_text("event,station\n", encoding="utf-8")
+    splits: dict[str, Any] = {}
+    for seed in campaign.SEEDS:
+        split_path = output_root / f"split_{seed}.json"
+        _write_json(split_path, _phase34_split_manifest(seed))
+        splits[str(seed)] = {"manifest": _artifact(split_path)}
+    _mark_stage(
+        output_root,
+        "preflight",
+        {
+            "status": "complete",
+            "source_data": {"sha256": campaign.EXPECTED_SOURCE_SHA256},
+            "frozen_config": _artifact(config_path),
+            "dataset_manifest": _artifact(manifest_path),
+            "splits": splits,
+        },
+    )
+    _mark_phase38_smoke(output_root)
+    calls: list[tuple[str, int]] = []
+
+    def fake_train_one_seed(**kwargs: Any) -> dict[str, Any]:
+        variant = str(kwargs["variant"])
+        seed = int(kwargs["seed"])
+        calls.append((variant, seed))
+        seed_root = Path(kwargs["seed_root"])
+        seed_root.mkdir(parents=True, exist_ok=True)
+        checkpoint_path = seed_root / "best_model.pth"
+        checkpoint_path.write_text(f"{variant}-{seed}-best", encoding="utf-8")
+        last_checkpoint_path = seed_root / "last_state.pth"
+        last_checkpoint_path.write_text(f"{variant}-{seed}-last", encoding="utf-8")
+        training_log_path = seed_root / "training.csv"
+        training_log_path.write_text("epoch\n", encoding="utf-8")
+        split_path = seed_root / "split.json"
+        _write_json(split_path, _phase34_split_manifest(seed))
+        sampling_path = seed_root / "sampling.json"
+        _write_json(sampling_path, _phase27_sampling_manifest(seed))
+        commit = campaign.current_git_commit(campaign.PROJECT_ROOT)
+        run_manifest_path = seed_root / "run_manifest.json"
+        _write_json(run_manifest_path, {"git_commit": commit, "git_dirty": False})
+        runtime = campaign._runtime_config(
+            kwargs["config"],
+            run_root=seed_root,
+            seed=seed,
+            dataset_manifest=Path(kwargs["dataset_manifest"]),
+        )
+        config_artifact_path = seed_root / "config.yaml"
+        config_artifact_path.write_text(
+            yaml.safe_dump(runtime, sort_keys=False), encoding="utf-8"
+        )
+        checkpoint = _artifact(checkpoint_path)
+        if variant == "baseline" and seed != baseline_checkpoint_mismatch_seed:
+            monkeypatch.setitem(
+                campaign.PHASE33_FULL_THREE_CHECKPOINT_SHA256_BY_SEED,
+                seed,
+                checkpoint["sha256"],
+            )
+        metric = (
+            campaign.PHASE33_FULL_THREE_VALIDATION_BY_SEED[seed]
+            + baseline_metric_deltas[seed]
+            if variant == "baseline"
+            else candidate_values[seed]
+        )
+        return {
+            "variant": variant,
+            "seed": seed,
+            "git_commit": commit,
+            "loss_weights": campaign.loss_weights_from_config(kwargs["config"]),
+            "synth_polarity_mode": campaign.synth_polarity_mode_from_config(
+                kwargs["config"]
+            ),
+            "split_assignment_sha256": campaign.EXPECTED_SPLIT_SHA256[seed],
+            campaign.VALIDATION_METRIC: metric,
+            "checkpoint": checkpoint,
+            "last_checkpoint": _artifact(last_checkpoint_path),
+            "config": _artifact(config_artifact_path),
+            "split": _artifact(split_path),
+            "training_log": _artifact(training_log_path),
+            "run_manifest": _artifact(run_manifest_path),
+            "sampling": _artifact(sampling_path),
+        }
+
+    monkeypatch.setattr(campaign, "_train_one_seed", fake_train_one_seed)
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_locked_test",
+        lambda **_kwargs: pytest.fail("Phase38 train must not evaluate locked test"),
+    )
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_external_threshold",
+        lambda **_kwargs: pytest.fail("Phase38 external must remain closed"),
+    )
+    return campaign.run_train(output_root=output_root, resume=resume), calls
+
+
+def _phase38_evidence_inputs(
+    *,
+    candidate_values: dict[int, float],
+    signed_deltas: dict[int, float],
+    frozen_no_synth_deltas: dict[int, float],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    def rows(values: dict[int, float]) -> dict[str, Any]:
+        return {
+            str(seed): {
+                "seed": seed,
+                campaign.VALIDATION_METRIC: values[seed],
+            }
+            for seed in campaign.SEEDS
+        }
+
+    signed_values = {
+        seed: candidate_values[seed] - signed_deltas[seed]
+        for seed in campaign.SEEDS
+    }
+    frozen_values = {
+        seed: candidate_values[seed] - frozen_no_synth_deltas[seed]
+        for seed in campaign.SEEDS
+    }
+    return (
+        {
+            "baseline": {"seeds": rows(signed_values)},
+            "candidate": {"seeds": rows(candidate_values)},
+        },
+        {"seeds": rows(frozen_values)},
+    )
+
+
+def test_phase38_validation_evidence_selects_seed_from_candidate_only() -> None:
+    candidate_values = {17: 0.11, 42: 0.09, 73: 0.10}
+    variants, frozen = _phase38_evidence_inputs(
+        candidate_values=candidate_values,
+        signed_deltas={seed: -0.01 for seed in campaign.SEEDS},
+        frozen_no_synth_deltas={seed: -0.02 for seed in campaign.SEEDS},
+    )
+
+    evidence = campaign.select_synth_polarity_validation_evidence(
+        variants, frozen
+    )
+
+    assert evidence["passed"] is True
+    assert evidence["selected_candidate_seed"] == 42
+    assert evidence["selected_candidate_validation"] == pytest.approx(0.09)
+    assert evidence["numerical_zero_abs_tolerance"] == pytest.approx(1.0e-12)
+    assert evidence["selection_uses_candidate_validation_only"] is True
+    assert evidence["ensemble_used"] is False
+    assert all(
+        comparison["passed"]
+        for comparison in evidence["comparisons"].values()
+    )
+
+
+@pytest.mark.parametrize("comparator", ["signed", "frozen_no_synth"])
+@pytest.mark.parametrize(
+    ("target_deltas", "expected_conditions"),
+    [
+        (
+            {17: -0.10, 42: 0.0, 73: 0.0},
+            {
+                "improved_seed_majority": False,
+                "paired_mean_negative": True,
+                "paired_median_negative": False,
+            },
+        ),
+        (
+            {17: -0.01, 42: -0.01, 73: 0.10},
+            {
+                "improved_seed_majority": True,
+                "paired_mean_negative": False,
+                "paired_median_negative": True,
+            },
+        ),
+        (
+            {17: -0.125, 42: -0.125, 73: 0.25},
+            {
+                "improved_seed_majority": True,
+                "paired_mean_negative": False,
+                "paired_median_negative": True,
+            },
+        ),
+    ],
+)
+def test_phase38_each_paired_validation_gate_failure_stops_the_candidate(
+    comparator: str,
+    target_deltas: dict[int, float],
+    expected_conditions: dict[str, bool],
+) -> None:
+    passing_deltas = {seed: -0.10 for seed in campaign.SEEDS}
+    variants, frozen = _phase38_evidence_inputs(
+        candidate_values={17: 1.0, 42: 1.0, 73: 1.0},
+        signed_deltas=(
+            target_deltas if comparator == "signed" else passing_deltas
+        ),
+        frozen_no_synth_deltas=(
+            target_deltas
+            if comparator == "frozen_no_synth"
+            else passing_deltas
+        ),
+    )
+
+    evidence = campaign.select_synth_polarity_validation_evidence(
+        variants, frozen
+    )
+
+    assert evidence["comparisons"][comparator]["conditions"] == (
+        expected_conditions
+    )
+    assert evidence["comparisons"][comparator]["passed"] is False
+    other = "frozen_no_synth" if comparator == "signed" else "signed"
+    assert evidence["comparisons"][other]["passed"] is True
+    assert evidence["passed"] is False
+
+
+@pytest.mark.parametrize("comparator", ["signed", "frozen_no_synth"])
+def test_phase38_paired_mean_and_median_zero_are_strict_failures(
+    comparator: str,
+) -> None:
+    zero_deltas = {seed: 0.0 for seed in campaign.SEEDS}
+    passing_deltas = {seed: -0.10 for seed in campaign.SEEDS}
+    variants, frozen = _phase38_evidence_inputs(
+        candidate_values={17: 1.0, 42: 1.0, 73: 1.0},
+        signed_deltas=zero_deltas if comparator == "signed" else passing_deltas,
+        frozen_no_synth_deltas=(
+            zero_deltas
+            if comparator == "frozen_no_synth"
+            else passing_deltas
+        ),
+    )
+
+    evidence = campaign.select_synth_polarity_validation_evidence(
+        variants, frozen
+    )
+
+    comparison = evidence["comparisons"][comparator]
+    assert comparison["paired_mean_delta"] == pytest.approx(0.0)
+    assert comparison["paired_median_delta"] == pytest.approx(0.0)
+    assert comparison["passed"] is False
+    assert evidence["passed"] is False
+
+
+def test_phase38_runs_only_signed_and_global_invariant_three_seed_pairs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary, calls = _run_phase38_train(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        candidate_values={17: 0.09, 42: 0.10, 73: 0.15},
+    )
+
+    assert calls == [
+        (variant, seed)
+        for variant in ("baseline", "candidate")
+        for seed in campaign.SEEDS
+    ]
+    assert summary["full_three_reproduction"]["passed"] is True
+    assert summary["frozen_no_synth_provenance"]["not_retrained"] is True
+    assert summary["frozen_no_synth_provenance"]["selected_seed"] == 42
+    assert summary["synth_polarity_validation_evidence"]["passed"] is True
+    assert summary["selected_candidate_seed"] == 17
+    assert summary["variants"]["candidate"]["selection"]["selected_seed"] == 17
+    assert summary["variants"]["baseline"]["synth_polarity_mode"] == "signed"
+    assert (
+        summary["variants"]["candidate"]["synth_polarity_mode"]
+        == "global_invariant"
+    )
+    assert summary["test_evaluated"] is False
+    assert summary["external_evaluated"] is False
+    assert summary["ensemble_used"] is False
+
+
+@pytest.mark.parametrize("mismatch", ["validation_metric", "checkpoint_sha256"])
+def test_phase38_signed_reproduction_drift_stops_before_candidate_training(
+    mismatch: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    arguments: dict[str, Any] = {}
+    if mismatch == "validation_metric":
+        arguments["baseline_metric_deltas"] = {17: 0.0, 42: 1.0e-12, 73: 0.0}
+    else:
+        arguments["baseline_checkpoint_mismatch_seed"] = 42
+
+    with pytest.raises(ValueError, match="Phase38 signed baseline did not exactly"):
+        _run_phase38_train(
+            output_root=tmp_path,
+            monkeypatch=monkeypatch,
+            candidate_values={17: 0.09, 42: 0.10, 73: 0.15},
+            **arguments,
+        )
+
+    assert not (tmp_path / "train" / "candidate").exists()
+
+
+def test_phase38_completed_train_resume_revalidates_without_retraining(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    summary, calls = _run_phase38_train(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        candidate_values={17: 0.09, 42: 0.10, 73: 0.15},
+    )
+    calls.clear()
+
+    resumed = campaign.run_train(output_root=tmp_path, resume=True)
+
+    assert resumed == summary
+    assert calls == []
+
+
+def test_phase38_completed_train_resume_rejects_preflight_axis_swap(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _run_phase38_train(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        candidate_values={17: 0.09, 42: 0.10, 73: 0.15},
+    )
+    preflight_path = tmp_path / "preflight" / "summary.json"
+    preflight = json.loads(preflight_path.read_text(encoding="utf-8"))
+    frozen_config_path = Path(preflight["frozen_config"]["path"])
+    frozen_config_path.write_text(
+        yaml.safe_dump(_config(PHASE34_CONFIG_PATH), sort_keys=False),
+        encoding="utf-8",
+    )
+    preflight["frozen_config"] = _artifact(frozen_config_path)
+    _write_json(preflight_path, preflight)
+
+    with pytest.raises(ValueError, match="campaign axes differ"):
+        campaign.run_train(output_root=tmp_path, resume=True)
+
+
+@pytest.mark.parametrize("tamper_kind", ["candidate_config", "frozen_provenance"])
+def test_phase38_completed_train_resume_rejects_provenance_tampering(
+    tamper_kind: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _run_phase38_train(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        candidate_values={17: 0.09, 42: 0.10, 73: 0.15},
+    )
+    summary_path = tmp_path / "train" / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if tamper_kind == "candidate_config":
+        seed_row = summary["variants"]["candidate"]["seeds"]["17"]
+        config_path = Path(seed_row["config"]["path"])
+        persisted_config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        persisted_config["training"]["stf_rate_loss"][
+            "synth_polarity_mode"
+        ] = "signed"
+        config_path.write_text(
+            yaml.safe_dump(persisted_config, sort_keys=False), encoding="utf-8"
+        )
+        seed_row["config"] = _artifact(config_path)
+    else:
+        recorded = summary["frozen_no_synth_provenance"]
+        provenance_path = Path(recorded["artifact"]["path"])
+        persisted_provenance = json.loads(
+            provenance_path.read_text(encoding="utf-8")
+        )
+        persisted_provenance["selected_seed"] = 17
+        _write_json(provenance_path, persisted_provenance)
+        recorded["selected_seed"] = 17
+        recorded["artifact"] = _artifact(provenance_path)
+    _write_json(summary_path, summary)
+
+    with pytest.raises(ValueError, match="Phase38"):
+        campaign.run_train(output_root=tmp_path, resume=True)
+
+
+def _phase38_fake_locked_test(
+    *,
+    event_mae_by_source_variant: dict[str, float],
+    calls: list[tuple[str, int, bool]],
+):
+    def evaluate(**kwargs: Any) -> dict[str, Any]:
+        seed_summary = kwargs["seed_summary"]
+        source_variant = str(seed_summary["variant"])
+        seed = int(seed_summary["seed"])
+        include_delayed = bool(kwargs["include_delayed_prefix"])
+        calls.append((source_variant, seed, include_delayed))
+        output_dir = Path(kwargs["output_dir"])
+        metrics = {
+            "station_mae": 0.10,
+            "station_rmse": 0.12,
+            "station_bias": -0.01,
+            "event_mae": event_mae_by_source_variant[source_variant],
+            "event_rmse": 0.16,
+            "event_bias": -0.02,
+        }
+        metrics_path = output_dir / "metrics.json"
+        _write_json(metrics_path, metrics)
+        station_path = output_dir / "station_predictions.csv"
+        station_path.parent.mkdir(parents=True, exist_ok=True)
+        station_path.write_text("event,station\n", encoding="utf-8")
+        event_path = output_dir / "event_predictions.csv"
+        event_path.write_text("event,mw_pred\n", encoding="utf-8")
+        registry_path = output_dir / "result_registry.json"
+        _write_json(registry_path, {"seed": seed})
+        result: dict[str, Any] = {
+            "selected_seed": seed,
+            "metrics": metrics,
+            "artifacts": {
+                "metrics": _artifact(metrics_path),
+                "station_predictions": _artifact(station_path),
+                "event_predictions": _artifact(event_path),
+                "result_registry": _artifact(registry_path),
+            },
+        }
+        if include_delayed:
+            delayed_dir = output_dir / "delayed_prefix"
+            delayed_station_path = delayed_dir / "station_predictions.csv"
+            delayed_station_path.parent.mkdir(parents=True, exist_ok=True)
+            delayed_station_path.write_text("event,station\n", encoding="utf-8")
+            delayed_event_path = delayed_dir / "event_predictions.csv"
+            delayed_event_path.write_text("event,mw_pred\n", encoding="utf-8")
+            unavailable_path = delayed_dir / "unavailable_stations.csv"
+            unavailable_path.write_text("event,station\n", encoding="utf-8")
+            horizon_metrics = [
+                {
+                    "observation_horizon_sec": float(horizon),
+                    "event_equal_mae": event_mae_by_source_variant[source_variant],
+                }
+                for horizon in campaign.DEFAULT_HORIZONS_SEC
+            ]
+            horizon_path = delayed_dir / "horizon_metrics.json"
+            _write_json(horizon_path, horizon_metrics)
+            cohort = {
+                "waveform_prefix_causal": True,
+                "station_selection_causal": False,
+            }
+            cohort_path = delayed_dir / "cohort_contract.json"
+            _write_json(cohort_path, cohort)
+            result["delayed_prefix"] = {
+                "horizons_sec": list(campaign.DEFAULT_HORIZONS_SEC),
+                "horizon_metrics": horizon_metrics,
+                "cohort": cohort,
+                "artifacts": {
+                    "station_predictions": _artifact(delayed_station_path),
+                    "event_predictions": _artifact(delayed_event_path),
+                    "unavailable_stations": _artifact(unavailable_path),
+                    "horizon_metrics": _artifact(horizon_path),
+                    "cohort_contract": _artifact(cohort_path),
+                },
+            }
+        return result
+
+    return evaluate
+
+
+def test_phase38_failed_validation_gate_keeps_internal_test_locked(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _run_phase38_train(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        candidate_values=dict(campaign.PHASE33_FULL_THREE_VALIDATION_BY_SEED),
+    )
+    calls: list[tuple[str, int, bool]] = []
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_locked_test",
+        _phase38_fake_locked_test(
+            event_mae_by_source_variant={
+                "baseline": 0.10,
+                "candidate": 0.10,
+                "no_synth": 0.10,
+            },
+            calls=calls,
+        ),
+    )
+
+    summary = campaign.run_internal(output_root=tmp_path, resume=False)
+
+    assert calls == []
+    assert summary["status"] == "candidate_validation_gate_failed"
+    assert summary["validation_gate"]["passed"] is False
+    assert summary["test_evaluated"] is False
+    assert summary["external_evaluated"] is False
+
+
+@pytest.mark.parametrize(
+    ("candidate_event_mae", "expected_passed"),
+    [(0.149999, True), (0.15, False)],
+)
+def test_phase38_internal_gate_is_frozen_absolute_threshold_only(
+    candidate_event_mae: float,
+    expected_passed: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _run_phase38_train(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+        candidate_values={17: 0.09, 42: 0.10, 73: 0.15},
+    )
+    calls: list[tuple[str, int, bool]] = []
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_locked_test",
+        _phase38_fake_locked_test(
+            event_mae_by_source_variant={
+                "baseline": 0.12,
+                "candidate": candidate_event_mae,
+                "no_synth": 0.11,
+            },
+            calls=calls,
+        ),
+    )
+
+    summary = campaign.run_internal(output_root=tmp_path, resume=False)
+
+    assert calls == [
+        ("baseline", 17, False),
+        ("candidate", 17, True),
+        ("no_synth", campaign.PHASE34_NO_SYNTH_SELECTED_SEED, False),
+    ]
+    assert summary["candidate_gate"] == {
+        "passed": expected_passed,
+        "event_mae": candidate_event_mae,
+        "maximum_exclusive": campaign.INTERNAL_EVENT_MAE_MAXIMUM,
+        "comparators_used_for_selection_or_gate": False,
+    }
+    assert summary["status"] == (
+        "complete" if expected_passed else "candidate_internal_gate_failed"
+    )
+    diagnostic = summary["frozen_test_diagnostic"]
+    assert diagnostic["signed_event_mae"] == pytest.approx(0.12)
+    assert diagnostic["frozen_no_synth_event_mae"] == pytest.approx(0.11)
+    assert diagnostic["candidate_event_mae"] == pytest.approx(candidate_event_mae)
+    assert diagnostic["used_for_selection_or_gate"] is False
+    assert summary["test_evaluated"] is True
+    assert summary["external_evaluated"] is False
+
+
+@pytest.mark.parametrize("resume", [False, True])
+def test_phase38_external_is_permanently_closed(
+    resume: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _mark_stage(
+        tmp_path,
+        "train",
+        {"status": "complete", "variant_axis": campaign.SYNTH_POLARITY_MODE_AXIS},
+    )
+    if resume:
+        _mark_stage(
+            tmp_path,
+            "external",
+            {
+                "status": "complete",
+                "external_waveform_grid_schema_version": (
+                    campaign.EXTERNAL_WAVEFORM_GRID_SCHEMA_VERSION
+                ),
+            },
+        )
+    calls = 0
+
+    def forbidden_external(**_kwargs: Any) -> dict[str, Any]:
+        nonlocal calls
+        calls += 1
+        raise AssertionError("Phase38 external data must remain unread")
+
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_external_threshold",
+        forbidden_external,
+    )
+
+    with pytest.raises(RuntimeError, match="Phase38 external evaluation.*closed"):
+        campaign.run_external(
+            output_root=tmp_path,
+            event_root=tmp_path / "external-events",
+            resume=resume,
+        )
+
+    assert calls == 0
+
+
+def _complete_phase38_internal(
+    *,
+    output_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, Any]:
+    _run_phase38_train(
+        output_root=output_root,
+        monkeypatch=monkeypatch,
+        candidate_values={17: 0.09, 42: 0.10, 73: 0.15},
+    )
+    calls: list[tuple[str, int, bool]] = []
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_locked_test",
+        _phase38_fake_locked_test(
+            event_mae_by_source_variant={
+                "baseline": 0.12,
+                "candidate": 0.14,
+                "no_synth": 0.11,
+            },
+            calls=calls,
+        ),
+    )
+    completed = campaign.run_internal(output_root=output_root, resume=False)
+    assert len(calls) == 3
+    return completed
+
+
+def test_phase38_completed_internal_resume_revalidates_without_reevaluation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    completed = _complete_phase38_internal(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_locked_test",
+        lambda **_kwargs: pytest.fail(
+            "valid completed Phase38 internal must not re-evaluate test"
+        ),
+    )
+
+    resumed = campaign.run_internal(output_root=tmp_path, resume=True)
+
+    assert resumed == completed
+
+
+@pytest.mark.parametrize(
+    "tamper_kind",
+    ["candidate_mode", "candidate_seed", "frozen_source", "candidate_gate"],
+)
+def test_phase38_completed_internal_resume_rejects_coordinated_tampering(
+    tamper_kind: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _complete_phase38_internal(
+        output_root=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    summary_path = tmp_path / "internal" / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if tamper_kind == "candidate_gate":
+        summary["candidate_gate"]["passed"] = False
+    else:
+        variant = (
+            "frozen_no_synth" if tamper_kind == "frozen_source" else "candidate"
+        )
+        evaluation_path = tmp_path / "internal" / variant / "summary.json"
+        evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+        if tamper_kind == "candidate_mode":
+            evaluation["synth_polarity_mode"] = "signed"
+        elif tamper_kind == "candidate_seed":
+            evaluation["selected_seed"] = 42
+        else:
+            evaluation["frozen_source_train_summary"]["sha256"] = "wrong"
+        summary["variants"][variant] = evaluation
+        _write_json(evaluation_path, evaluation)
+    _write_json(summary_path, summary)
+    monkeypatch.setattr(
+        campaign,
+        "_evaluate_locked_test",
+        lambda **_kwargs: pytest.fail(
+            "tampered completed Phase38 internal must not re-evaluate test"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="completed Phase38 internal"):
+        campaign.run_internal(output_root=tmp_path, resume=True)

@@ -247,6 +247,23 @@ def magnitude_penalty_from_config(config: dict[str, Any]) -> str:
     return value
 
 
+def synth_polarity_mode_from_config(config: dict[str, Any]) -> str:
+    training = config.get("training", {}) or {}
+    loss_config = training.get("stf_rate_loss", {}) or {}
+    if not isinstance(loss_config, dict):
+        raise ValueError("training.stf_rate_loss must be a mapping")
+    value = loss_config.get("synth_polarity_mode", "signed")
+    if not isinstance(value, str) or value not in {
+        "signed",
+        "global_invariant",
+    }:
+        raise ValueError(
+            "training.stf_rate_loss.synth_polarity_mode must be "
+            "signed or global_invariant"
+        )
+    return value
+
+
 def validate_config_v2(config: dict[str, Any]) -> None:
     if not isinstance(config, dict):
         raise ValueError("第二版配置必须是映射")
@@ -260,6 +277,7 @@ def validate_config_v2(config: dict[str, Any]) -> None:
     moment_linear_skip_from_config(config)
     moment_head_dropout_from_config(config)
     magnitude_penalty_from_config(config)
+    synth_polarity_mode_from_config(config)
 
     for path in _FORBIDDEN_PATHS:
         exists, _ = _lookup(config, path)

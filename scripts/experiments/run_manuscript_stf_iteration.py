@@ -88,6 +88,7 @@ MOMENT_HEAD_DROPOUT_AXIS = "moment_head_dropout"
 LOSS_WEIGHT_PROFILE_AXIS = "loss_weight_profile"
 SHAPE_LOSS_WEIGHT_AXIS = "shape_loss_weight"
 LOSS_TERM_ABLATION_AXIS = "loss_term_ablation"
+SYNTH_POLARITY_MODE_AXIS = "synth_polarity_mode"
 STATION_UNIFORM_ESTIMATOR = "station_uniform"
 VARIANT_AXES = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: {
@@ -130,6 +131,10 @@ VARIANT_AXES = {
         "baseline": 0.1,
         "candidate": 0.0,
     },
+    SYNTH_POLARITY_MODE_AXIS: {
+        "baseline": "signed",
+        "candidate": "global_invariant",
+    },
 }
 VARIANT_AXIS_PATHS = {
     STF_OUTPUT_PARAMETERIZATION_AXIS: ("model", "stf_output_parameterization"),
@@ -149,6 +154,11 @@ VARIANT_AXIS_PATHS = {
         "training",
         "stf_rate_loss",
         "lambda_shape",
+    ),
+    SYNTH_POLARITY_MODE_AXIS: (
+        "training",
+        "stf_rate_loss",
+        "synth_polarity_mode",
     ),
 }
 LOSS_WEIGHT_KEYS = (
@@ -280,6 +290,42 @@ PHASE33_FULL_THREE_CHECKPOINT_SHA256_BY_SEED = {
     73: "3bd45d2edc93e6df9f99403f857c77762f13def89fe4a74cf0405bd17bfb3bdc",
 }
 PHASE33_FULL_THREE_SELECTED_SEED = 17
+PHASE34_NO_SYNTH_VALIDATION_BY_SEED = {
+    17: 0.12337238788604736,
+    42: 0.11511342525482178,
+    73: 0.16848401228586832,
+}
+PHASE34_NO_SYNTH_CHECKPOINT_SHA256_BY_SEED = {
+    17: "344c195c028d792b8221b97a27fd67d6814d5141ce79fae8464df9e48aae6113",
+    42: "8ed88c545e61906f11c832892cabacf67fda9ad765e3ded34969f06a027ff206",
+    73: "21021ff59413b60257c8bab49581effdec61ba919b025309c6f1d2dd6cc18fb0",
+}
+PHASE34_NO_SYNTH_SELECTED_SEED = 42
+PHASE34_SOURCE_GIT_COMMIT = "5c40a3d57ae0091e3426a2ce6e8676be9338e503"
+PHASE34_NO_SYNTH_TRAIN_SUMMARY_SHA256 = (
+    "31980c06ebd9796c3c679cf9f37357d365dba6e37d843f95a37f69c26a148e64"
+)
+_SHARED_REPOSITORY_ROOT = (
+    PROJECT_ROOT.parents[1]
+    if PROJECT_ROOT.parent.name == "worktrees"
+    else PROJECT_ROOT
+)
+PHASE34_NO_SYNTH_TRAIN_SUMMARY_PATH = (
+    _SHARED_REPOSITORY_ROOT
+    / "runs"
+    / "phase34-manuscript-stf-three-loss-ablation-20260726T023655Z-5c40a3d"
+    / "train"
+    / "summary.json"
+)
+PHASE38_PAIRED_DELTA_DEFINITION = (
+    "global-invariant candidate validation Event MAE minus comparator "
+    "validation Event MAE for the same seed"
+)
+PHASE38_PAIRED_SUPPORT_RULE = (
+    "at least two of three paired deltas, paired mean, and paired median are "
+    "strictly below numerical zero (-1e-12)"
+)
+PHASE38_PAIRED_ZERO_ABS_TOLERANCE = 1.0e-12
 FROZEN_PHASE27_INCUMBENT_AXES = frozenset(
     {
         EVENT_BALANCE_EXPONENT_AXIS,
@@ -395,6 +441,19 @@ def loss_weights_from_config(config: Mapping[str, Any]) -> dict[str, float]:
             )
         weights[name] = numeric
     return weights
+
+
+def synth_polarity_mode_from_config(config: Mapping[str, Any]) -> str:
+    try:
+        loss_config = config["training"]["stf_rate_loss"]
+    except (KeyError, TypeError) as error:
+        raise ValueError("formal config is missing training.stf_rate_loss") from error
+    if not isinstance(loss_config, Mapping):
+        raise ValueError("formal config is missing training.stf_rate_loss")
+    mode = loss_config.get("synth_polarity_mode", "signed")
+    if mode not in {"signed", "global_invariant"}:
+        raise ValueError(f"unsupported synth polarity mode: {mode!r}")
+    return str(mode)
 
 
 def loss_weight_profiles_from_config(
@@ -694,11 +753,19 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
     if not isinstance(loss_config, Mapping):
         raise ValueError("formal config is missing training.stf_rate_loss")
     magnitude_penalty_is_explicit = "magnitude_penalty" in loss_config
+    synth_polarity_mode_is_explicit = "synth_polarity_mode" in loss_config
     campaign = base_config.get("campaign", {})
     if not isinstance(campaign, Mapping):
         raise ValueError("formal config campaign marker must be a mapping")
     explicit_axis = campaign.get("variant_axis")
     if explicit_axis is not None:
+        if (
+            explicit_axis != SYNTH_POLARITY_MODE_AXIS
+            and synth_polarity_mode_is_explicit
+        ):
+            raise ValueError(
+                "explicit synth_polarity_mode is reserved for Phase38"
+            )
         if explicit_axis == EVENT_BALANCED_SAMPLING_AXIS:
             if (
                 parameterization != "moment_shape_factorized"
@@ -904,6 +971,30 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
                     "loss-term profile"
                 )
             return LOSS_TERM_ABLATION_AXIS
+        if explicit_axis == SYNTH_POLARITY_MODE_AXIS:
+            if (
+                parameterization != "moment_shape_factorized"
+                or scheduler_t0 != 15
+                or stem_is_explicit
+                or moment_skip_is_explicit
+                or moment_dropout_is_explicit
+                or training.get("event_balanced_sampling") is not True
+                or training.get("event_balance_estimator")
+                != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                or exponent_is_explicit
+                or magnitude_penalty_is_explicit
+                or loss_config.get("magnitude_penalty", "squared") != "squared"
+                or not synth_polarity_mode_is_explicit
+                or loss_config.get("synth_polarity_mode") != "signed"
+            ):
+                raise ValueError(
+                    "Phase38 synth-polarity baseline requires the frozen "
+                    "Phase33 Full-3 model with scheduler_T0=15, the original "
+                    "radial stem, inverse-count full-data event balancing, "
+                    "p=1, squared magnitude penalty, and explicit "
+                    "synth_polarity_mode='signed'"
+                )
+            return SYNTH_POLARITY_MODE_AXIS
         else:
             raise ValueError(f"unsupported formal campaign axis: {explicit_axis!r}")
     if (
@@ -942,7 +1033,8 @@ def variant_axis_from_config(base_config: Mapping[str, Any]) -> str:
         "penalty baseline or Phase29 event-balance exponent baseline or "
         "Phase30 moment-linear-skip baseline or Phase31 moment-head-dropout "
         "baseline or Phase32 loss-weight-profile baseline or Phase33 no-shape "
-        "baseline or Phase34 loss-term-ablation baseline"
+        "baseline or Phase34 loss-term-ablation baseline or Phase38 "
+        "synth-polarity baseline"
     )
 
 
@@ -1027,7 +1119,8 @@ def validate_formal_config(config: dict[str, Any]) -> None:
         raise ValueError("manuscript STF config must use a source-aligned STF")
     formal_loss_weights = (
         LOSS_TERM_ABLATION_PROFILES["baseline"]
-        if variant_axis == LOSS_TERM_ABLATION_AXIS
+        if variant_axis
+        in {LOSS_TERM_ABLATION_AXIS, SYNTH_POLARITY_MODE_AXIS}
         else LOSS_WEIGHT_PROFILES["baseline"]
     )
     required = {
@@ -1094,6 +1187,7 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             LOSS_WEIGHT_PROFILE_AXIS,
             SHAPE_LOSS_WEIGHT_AXIS,
             LOSS_TERM_ABLATION_AXIS,
+            SYNTH_POLARITY_MODE_AXIS,
         },
     )
     variants = build_variant_configs(config)
@@ -1219,6 +1313,29 @@ def validate_formal_config(config: dict[str, Any]) -> None:
             raise ValueError(
                 "Phase34 Full-3 baseline differs from the frozen Phase33 "
                 f"candidate: {sorted(differences)}"
+            )
+    if variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        phase33_config = _load_yaml(
+            PROJECT_ROOT
+            / "configs"
+            / "experiments"
+            / "manuscript_station_stf_usgs_no_shape.yaml"
+        )
+        phase33_candidate = build_variant_configs(phase33_config)["candidate"]
+        phase38_baseline = copy.deepcopy(variants["baseline"])
+        phase33_candidate.pop("campaign")
+        phase38_baseline.pop("campaign")
+        phase38_baseline["training"]["stf_rate_loss"].pop(
+            "synth_polarity_mode"
+        )
+        if phase38_baseline != phase33_candidate:
+            differences = _config_diff_paths(
+                phase33_candidate,
+                phase38_baseline,
+            )
+            raise ValueError(
+                "Phase38 signed baseline differs from the frozen Phase33 "
+                f"Full-3 candidate: {sorted(differences)}"
             )
 
 
@@ -1801,6 +1918,76 @@ def _smoke_one_device(
     return result
 
 
+def _validated_synth_polarity_smoke(
+    summary: Mapping[str, Any],
+    *,
+    config: Mapping[str, Any],
+) -> None:
+    expected_modes = VARIANT_AXES[SYNTH_POLARITY_MODE_AXIS]
+    if (
+        summary.get("stage") != "smoke"
+        or summary.get("status") != "complete"
+        or summary.get("variant_axis") != SYNTH_POLARITY_MODE_AXIS
+        or summary.get("test_evaluated") is not False
+        or summary.get("external_evaluated") is not False
+        or summary.get("synth_polarity_modes") != expected_modes
+    ):
+        raise ValueError("Phase38 smoke summary contract changed")
+    variants = build_variant_configs(config)
+    results = summary.get("results")
+    if not isinstance(results, Mapping) or set(results) != {
+        "baseline",
+        "candidate",
+    }:
+        raise ValueError("Phase38 smoke variants changed")
+    parameter_counts: set[int] = set()
+    for variant, expected_mode in expected_modes.items():
+        if synth_polarity_mode_from_config(variants[variant]) != expected_mode:
+            raise ValueError(f"Phase38 smoke config mode changed for {variant}")
+        device_results = results[variant]
+        if not isinstance(device_results, Mapping) or set(device_results) != {
+            "cpu",
+            "cuda",
+        }:
+            raise ValueError(f"Phase38 smoke devices changed for {variant}")
+        for device_name in ("cpu", "cuda"):
+            result = device_results[device_name]
+            try:
+                finite_values = [
+                    float(result["loss"]),
+                    *[float(value) for value in result["metrics"].values()],
+                ]
+                parameter_counts.add(int(result["parameter_count"]))
+            except (KeyError, TypeError, ValueError) as error:
+                raise ValueError(
+                    f"Phase38 smoke result changed for {variant}/{device_name}"
+                ) from error
+            if (
+                result.get("passed") is not True
+                or (
+                    result.get("device") != device_name
+                    and not str(result.get("device", "")).startswith(
+                        f"{device_name}:"
+                    )
+                )
+                or result.get("synth_polarity_mode") != expected_mode
+                or result.get("loss_weights")
+                != LOSS_TERM_ABLATION_PROFILES["baseline"]
+                or result.get("event_balance_estimator")
+                != INVERSE_COUNT_FULL_DATA_ESTIMATOR
+                or float(result.get("event_balance_exponent", float("nan")))
+                != 1.0
+                or result.get("sample_weights_exercised") is not True
+                or not all(math.isfinite(value) for value in finite_values)
+            ):
+                raise ValueError(
+                    f"Phase38 smoke provenance changed for "
+                    f"{variant}/{device_name}"
+                )
+    if len(parameter_counts) != 1:
+        raise ValueError("Phase38 polarity modes changed model parameter count")
+
+
 def _validated_loss_term_ablation_smoke(
     summary: Mapping[str, Any],
     *,
@@ -1885,8 +2072,18 @@ def run_smoke(
     if completed is not None:
         preflight = _require_stage(output_root, "preflight")
         completed_config, _ = _preflight_config(preflight)
-        if variant_axis_from_config(completed_config) == LOSS_TERM_ABLATION_AXIS:
+        completed_axis = variant_axis_from_config(completed_config)
+        if completed_axis == LOSS_TERM_ABLATION_AXIS:
             _validated_loss_term_ablation_smoke(
+                completed,
+                config=completed_config,
+            )
+        elif completed_axis == SYNTH_POLARITY_MODE_AXIS:
+            if completed.get("preflight_summary") != _artifact(
+                _stage_dir(output_root, "preflight") / "summary.json"
+            ):
+                raise ValueError("Phase38 smoke stage provenance changed")
+            _validated_synth_polarity_smoke(
                 completed,
                 config=completed_config,
             )
@@ -1939,6 +2136,10 @@ def run_smoke(
                         ),
                     }
                 )
+            elif variant_axis == SYNTH_POLARITY_MODE_AXIS:
+                result["synth_polarity_mode"] = (
+                    synth_polarity_mode_from_config(variant_config)
+                )
             if (
                 variant_axis == MOMENT_LINEAR_SKIP_AXIS
                 and int(result["parameter_count"])
@@ -1972,6 +2173,16 @@ def run_smoke(
             raise ValueError(
                 "Phase34 loss-term ablations changed the model parameter count"
             )
+    if variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        parameter_counts = {
+            int(device_result["parameter_count"])
+            for variant_result in results.values()
+            for device_result in variant_result.values()
+        }
+        if len(parameter_counts) != 1:
+            raise ValueError(
+                "Phase38 polarity modes changed the model parameter count"
+            )
     summary = {
         "stage": "smoke",
         "status": "complete",
@@ -2004,6 +2215,10 @@ def run_smoke(
                     LOSS_TERM_ABLATION_PROFILE_SHA256
                 ),
             }
+        )
+    if variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        summary["synth_polarity_modes"] = dict(
+            VARIANT_AXES[SYNTH_POLARITY_MODE_AXIS]
         )
     _finish_stage(stage_dir, summary, resume=resume)
     return summary
@@ -2143,6 +2358,286 @@ def phase33_full_three_reproduction(
         "expected_selected_seed": PHASE33_FULL_THREE_SELECTED_SEED,
         "selected_seed_matches": selected_seed_matches,
         "seeds": rows,
+    }
+
+
+def frozen_phase34_no_synth_provenance() -> dict[str, Any]:
+    source_path = Path(PHASE34_NO_SYNTH_TRAIN_SUMMARY_PATH).resolve()
+    if not source_path.is_file():
+        raise FileNotFoundError(
+            f"frozen Phase34 no-synth summary is missing: {source_path}"
+        )
+    source_sha256 = sha256_file(source_path)
+    if source_sha256 != PHASE34_NO_SYNTH_TRAIN_SUMMARY_SHA256:
+        raise ValueError(
+            "frozen Phase34 no-synth train summary hash changed: "
+            f"expected={PHASE34_NO_SYNTH_TRAIN_SUMMARY_SHA256}, "
+            f"actual={source_sha256}"
+        )
+    source = _load_json(source_path)
+    if (
+        source.get("stage") != "train"
+        or source.get("status") != "complete"
+        or source.get("variant_axis") != LOSS_TERM_ABLATION_AXIS
+        or source.get("git_commit") != PHASE34_SOURCE_GIT_COMMIT
+        or source.get("test_evaluated") is not False
+        or source.get("external_evaluated") is not False
+        or source.get("loss_term_ablation_profile_sha256")
+        != LOSS_TERM_ABLATION_PROFILE_SHA256
+    ):
+        raise ValueError("frozen Phase34 no-synth campaign identity changed")
+    variants = source.get("variants")
+    if not isinstance(variants, Mapping):
+        raise ValueError("frozen Phase34 variants are missing")
+    no_synth = variants.get("no_synth")
+    if not isinstance(no_synth, Mapping):
+        raise ValueError("frozen Phase34 no-synth variant is missing")
+    expected_weights = LOSS_TERM_ABLATION_PROFILES["no_synth"]
+    if (
+        no_synth.get("loss_term_ablation_profile") != "no_synth"
+        or no_synth.get("loss_term_ablation_profile_sha256")
+        != LOSS_TERM_ABLATION_PROFILE_SHA256
+        or no_synth.get("loss_weights") != expected_weights
+    ):
+        raise ValueError("frozen Phase34 no-synth profile changed")
+    raw_seeds = no_synth.get("seeds")
+    if not isinstance(raw_seeds, Mapping) or set(raw_seeds) != {
+        str(seed) for seed in SEEDS
+    }:
+        raise ValueError("frozen Phase34 no-synth seed set changed")
+
+    provenance_seeds: dict[str, Any] = {}
+    selection_rows: dict[int, Mapping[str, Any]] = {}
+    for seed in SEEDS:
+        row = raw_seeds[str(seed)]
+        if not isinstance(row, Mapping):
+            raise ValueError(f"frozen Phase34 no-synth seed {seed} changed")
+        expected_metric = PHASE34_NO_SYNTH_VALIDATION_BY_SEED[seed]
+        expected_checkpoint_sha256 = (
+            PHASE34_NO_SYNTH_CHECKPOINT_SHA256_BY_SEED[seed]
+        )
+        try:
+            actual_metric = float(row[VALIDATION_METRIC])
+            checkpoint_sha256 = str(row["checkpoint"]["sha256"])
+            for artifact_name in (
+                "checkpoint",
+                "config",
+                "split",
+                "training_log",
+                "run_manifest",
+                "sampling",
+                "last_checkpoint",
+            ):
+                _validate_artifact(
+                    row[artifact_name],
+                    label=f"frozen Phase34 no-synth {seed} {artifact_name}",
+                )
+            persisted_config = _load_yaml(Path(str(row["config"]["path"])))
+            persisted_split = _load_json(Path(str(row["split"]["path"])))
+            persisted_sampling = _load_json(Path(str(row["sampling"]["path"])))
+            persisted_run_manifest = _load_json(
+                Path(str(row["run_manifest"]["path"]))
+            )
+            checkpoint_selection = select_checkpoint_from_validation_log(
+                _read_csv(Path(str(row["training_log"]["path"]))),
+                minimum_delta=float(
+                    persisted_config["training"]["early_stop_min_delta"]
+                ),
+            )
+        except (KeyError, OSError, TypeError, ValueError, yaml.YAMLError) as error:
+            raise ValueError(
+                f"frozen Phase34 no-synth artifacts changed for seed {seed}"
+            ) from error
+        if (
+            row.get("variant") != "no_synth"
+            or row.get("seed") != seed
+            or row.get("loss_weights") != expected_weights
+            or row.get("loss_term_ablation_profile") != "no_synth"
+            or row.get("loss_term_ablation_profile_sha256")
+            != LOSS_TERM_ABLATION_PROFILE_SHA256
+            or not math.isclose(
+                actual_metric,
+                expected_metric,
+                rel_tol=0.0,
+                abs_tol=0.0,
+            )
+            or checkpoint_sha256 != expected_checkpoint_sha256
+            or float(checkpoint_selection[VALIDATION_METRIC]) != expected_metric
+            or checkpoint_selection.get("epoch") != row.get("epoch")
+            or row.get("split_assignment_sha256") != EXPECTED_SPLIT_SHA256[seed]
+            or row.get("git_commit") != PHASE34_SOURCE_GIT_COMMIT
+            or persisted_run_manifest.get("git_commit")
+            != PHASE34_SOURCE_GIT_COMMIT
+            or persisted_run_manifest.get("git_dirty") is not False
+            or loss_weights_from_config(persisted_config) != expected_weights
+            or synth_polarity_mode_from_config(persisted_config) != "signed"
+            or persisted_config["training"]["stf_rate_loss"].get(
+                "synth_polarity_mode"
+            )
+            is not None
+            or not _phase30_sampling_manifest_is_valid(
+                persisted_sampling,
+                seed=seed,
+            )
+        ):
+            raise ValueError(
+                f"frozen Phase34 no-synth provenance changed for seed {seed}"
+            )
+        _assert_split_manifest(persisted_split, seed=seed)
+        selection_rows[seed] = row
+        provenance_seeds[str(seed)] = {
+            VALIDATION_METRIC: expected_metric,
+            "checkpoint": dict(row["checkpoint"]),
+            "split_assignment_sha256": EXPECTED_SPLIT_SHA256[seed],
+        }
+
+    selected_seed = select_seed_by_validation(selection_rows)
+    expected_selection = {
+        "selected_seed": selected_seed,
+        "selection_metric": VALIDATION_METRIC,
+        "ensemble_used": False,
+        "candidates": {
+            str(seed): PHASE34_NO_SYNTH_VALIDATION_BY_SEED[seed]
+            for seed in SEEDS
+        },
+    }
+    selection = no_synth.get("selection")
+    if (
+        selected_seed != PHASE34_NO_SYNTH_SELECTED_SEED
+        or not isinstance(selection, Mapping)
+        or dict(selection) != expected_selection
+    ):
+        raise ValueError("frozen Phase34 no-synth seed selection changed")
+    selection_path = _validate_artifact(
+        no_synth["selection_artifact"],
+        label="frozen Phase34 no-synth seed selection",
+    )
+    if _load_json(selection_path) != expected_selection:
+        raise ValueError(
+            "frozen Phase34 no-synth seed selection artifact changed"
+        )
+    return {
+        "source_campaign": "Phase34 loss-term ablation",
+        "source_variant": "no_synth",
+        "source_train_summary": {
+            "path": str(source_path),
+            "sha256": source_sha256,
+        },
+        "source_git_commit": PHASE34_SOURCE_GIT_COMMIT,
+        "loss_weights": dict(expected_weights),
+        "effective_synth_polarity_mode": "signed",
+        "polarity_mode_is_objectively_inactive": True,
+        "not_retrained": True,
+        "selected_seed": selected_seed,
+        "selection_metric": VALIDATION_METRIC,
+        "ensemble_used": False,
+        "seeds": provenance_seeds,
+    }
+
+
+def _frozen_phase34_no_synth_seed_summary(seed: int) -> Mapping[str, Any]:
+    if seed not in SEEDS:
+        raise ValueError(f"invalid frozen Phase34 no-synth seed: {seed}")
+    frozen_phase34_no_synth_provenance()
+    source = _load_json(Path(PHASE34_NO_SYNTH_TRAIN_SUMMARY_PATH).resolve())
+    try:
+        row = source["variants"]["no_synth"]["seeds"][str(seed)]
+    except (KeyError, TypeError) as error:
+        raise ValueError(
+            f"frozen Phase34 no-synth seed {seed} is missing"
+        ) from error
+    if not isinstance(row, Mapping):
+        raise ValueError(f"frozen Phase34 no-synth seed {seed} changed")
+    return row
+
+
+def select_synth_polarity_validation_evidence(
+    variants: Mapping[str, Mapping[str, Any]],
+    frozen_no_synth: Mapping[str, Any],
+) -> dict[str, Any]:
+    if set(variants) != {"baseline", "candidate"}:
+        raise ValueError(
+            "synth-polarity comparison requires baseline and candidate"
+        )
+    expected_seed_keys = {str(seed) for seed in SEEDS}
+    variant_seeds: dict[str, Mapping[str, Any]] = {}
+    for variant in ("baseline", "candidate"):
+        rows = variants[variant].get("seeds")
+        if not isinstance(rows, Mapping) or set(rows) != expected_seed_keys:
+            raise ValueError(
+                f"synth-polarity {variant} seed summaries are missing"
+            )
+        variant_seeds[variant] = rows
+    frozen_seeds = frozen_no_synth.get("seeds")
+    if not isinstance(frozen_seeds, Mapping) or set(frozen_seeds) != (
+        expected_seed_keys
+    ):
+        raise ValueError("frozen Phase34 no-synth seed evidence is missing")
+
+    comparisons: dict[str, Any] = {}
+    comparator_rows = {
+        "signed": variant_seeds["baseline"],
+        "frozen_no_synth": frozen_seeds,
+    }
+    for comparator, rows in comparator_rows.items():
+        paired_deltas: dict[str, float] = {}
+        for seed in SEEDS:
+            candidate_metric = float(
+                variant_seeds["candidate"][str(seed)][VALIDATION_METRIC]
+            )
+            comparator_metric = float(rows[str(seed)][VALIDATION_METRIC])
+            if not math.isfinite(candidate_metric) or not math.isfinite(
+                comparator_metric
+            ):
+                raise ValueError(
+                    "synth-polarity paired validation metrics must be finite"
+                )
+            paired_deltas[str(seed)] = candidate_metric - comparator_metric
+        delta_values = [paired_deltas[str(seed)] for seed in SEEDS]
+        mean_delta = sum(delta_values) / len(delta_values)
+        median_delta = sorted(delta_values)[len(delta_values) // 2]
+        improved_seed_count = sum(
+            delta < -PHASE38_PAIRED_ZERO_ABS_TOLERANCE
+            for delta in delta_values
+        )
+        conditions = {
+            "improved_seed_majority": improved_seed_count >= 2,
+            "paired_mean_negative": (
+                mean_delta < -PHASE38_PAIRED_ZERO_ABS_TOLERANCE
+            ),
+            "paired_median_negative": (
+                median_delta < -PHASE38_PAIRED_ZERO_ABS_TOLERANCE
+            ),
+        }
+        comparisons[comparator] = {
+            "comparator": comparator,
+            "delta_definition": PHASE38_PAIRED_DELTA_DEFINITION,
+            "paired_deltas_by_seed": paired_deltas,
+            "paired_mean_delta": mean_delta,
+            "paired_median_delta": median_delta,
+            "improved_seed_count": improved_seed_count,
+            "conditions": conditions,
+            "passed": all(conditions.values()),
+        }
+
+    candidate_rows = {
+        seed: variant_seeds["candidate"][str(seed)] for seed in SEEDS
+    }
+    selected_candidate_seed = select_seed_by_validation(candidate_rows)
+    return {
+        "passed": all(row["passed"] for row in comparisons.values()),
+        "support_rule": PHASE38_PAIRED_SUPPORT_RULE,
+        "numerical_zero_abs_tolerance": PHASE38_PAIRED_ZERO_ABS_TOLERANCE,
+        "delta_definition": PHASE38_PAIRED_DELTA_DEFINITION,
+        "baseline_mode": "signed",
+        "candidate_mode": "global_invariant",
+        "comparisons": comparisons,
+        "selected_candidate_seed": selected_candidate_seed,
+        "selected_candidate_validation": float(
+            candidate_rows[selected_candidate_seed][VALIDATION_METRIC]
+        ),
+        "selection_uses_candidate_validation_only": True,
+        "ensemble_used": False,
     }
 
 
@@ -2546,6 +3041,7 @@ def _seed_summary_is_valid(
     expected_loss_weight_profile_sha256: str | None = None,
     expected_loss_term_ablation_profile: str | None = None,
     expected_loss_term_ablation_profile_sha256: str | None = None,
+    expected_synth_polarity_mode: str | None = None,
     expected_variant: str | None = None,
     expected_seed: int | None = None,
     expected_split_assignment_sha256: str | None = None,
@@ -2602,6 +3098,12 @@ def _seed_summary_is_valid(
             expected_loss_term_ablation_profile_sha256 is not None
             and summary.get("loss_term_ablation_profile_sha256")
             != expected_loss_term_ablation_profile_sha256
+        ):
+            return False
+        if (
+            expected_synth_polarity_mode is not None
+            and summary.get("synth_polarity_mode")
+            != expected_synth_polarity_mode
         ):
             return False
         if expected_event_balance_exponent is not None:
@@ -2723,6 +3225,7 @@ def _train_one_seed(
                 LOSS_WEIGHT_PROFILE_AXIS,
                 SHAPE_LOSS_WEIGHT_AXIS,
                 LOSS_TERM_ABLATION_AXIS,
+                SYNTH_POLARITY_MODE_AXIS,
             }
         )
         expected_magnitude_penalty = (
@@ -2755,6 +3258,7 @@ def _train_one_seed(
                 LOSS_WEIGHT_PROFILE_AXIS,
                 SHAPE_LOSS_WEIGHT_AXIS,
                 LOSS_TERM_ABLATION_AXIS,
+                SYNTH_POLARITY_MODE_AXIS,
             }
             else None
         )
@@ -2771,12 +3275,18 @@ def _train_one_seed(
             if campaign_axis == LOSS_TERM_ABLATION_AXIS
             else None
         )
+        expected_synth_polarity_mode = (
+            synth_polarity_mode_from_config(config)
+            if campaign_axis == SYNTH_POLARITY_MODE_AXIS
+            else None
+        )
         expected_git_commit = (
             current_git_commit(PROJECT_ROOT)
             if expected_event_balance_exponent is not None
             or expected_moment_linear_skip is not None
             or expected_moment_head_dropout is not None
             or expected_loss_weights is not None
+            or expected_synth_polarity_mode is not None
             else None
         )
         strict_resume = (
@@ -2785,6 +3295,7 @@ def _train_one_seed(
             or expected_moment_linear_skip is not None
             or expected_moment_head_dropout is not None
             or expected_loss_weights is not None
+            or expected_synth_polarity_mode is not None
         )
         expected_runtime_config = (
             _runtime_config(
@@ -2814,6 +3325,7 @@ def _train_one_seed(
             expected_loss_term_ablation_profile_sha256=(
                 expected_loss_term_ablation_profile_sha256
             ),
+            expected_synth_polarity_mode=expected_synth_polarity_mode,
             expected_variant=variant if strict_resume else None,
             expected_seed=seed if strict_resume else None,
             expected_split_assignment_sha256=(
@@ -2918,6 +3430,10 @@ def _train_one_seed(
                 ),
             }
         )
+    elif campaign_axis == SYNTH_POLARITY_MODE_AXIS:
+        summary["synth_polarity_mode"] = synth_polarity_mode_from_config(
+            config
+        )
     _atomic_json(seed_summary_path, summary, overwrite=resume)
     return summary
 
@@ -2960,6 +3476,30 @@ def run_train(
                 preflight=preflight,
                 stage_dir=stage_dir,
             )
+        if SYNTH_POLARITY_MODE_AXIS in {preflight_axis, completed_axis}:
+            if completed_axis != preflight_axis:
+                raise ValueError(
+                    "Phase38 completed train and preflight campaign axes differ"
+                )
+            completed_smoke = _require_stage(output_root, "smoke")
+            _validated_synth_polarity_smoke(
+                completed_smoke,
+                config=completed_config,
+            )
+            if (
+                completed.get("preflight_summary")
+                != _artifact(_stage_dir(output_root, "preflight") / "summary.json")
+                or completed.get("smoke_summary")
+                != _artifact(_stage_dir(output_root, "smoke") / "summary.json")
+            ):
+                raise ValueError("Phase38 train stage provenance changed")
+            _validated_completed_synth_polarity_campaign(
+                completed,
+                config=completed_config,
+                dataset_manifest=completed_dataset_manifest,
+                preflight=preflight,
+                stage_dir=stage_dir,
+            )
         return completed
     preflight = _require_stage(output_root, "preflight")
     smoke = _require_stage(output_root, "smoke")
@@ -2969,12 +3509,25 @@ def run_train(
     variant_axis = variant_axis_from_config(config)
     if variant_axis == LOSS_TERM_ABLATION_AXIS:
         _validated_loss_term_ablation_smoke(smoke, config=config)
+    elif variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        _validated_synth_polarity_smoke(smoke, config=config)
     variants = build_variant_configs(config)
     variant_summaries: dict[str, Any] = {}
     incumbent_reproduction: dict[str, Any] | None = None
     incumbent_reproduction_artifact: dict[str, str] | None = None
     full_three_reproduction: dict[str, Any] | None = None
     full_three_reproduction_artifact: dict[str, str] | None = None
+    frozen_no_synth_provenance: dict[str, Any] | None = None
+    frozen_no_synth_provenance_artifact: dict[str, str] | None = None
+    if variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        frozen_no_synth_provenance = frozen_phase34_no_synth_provenance()
+        provenance_path = stage_dir / "frozen_no_synth_provenance.json"
+        _atomic_json(
+            provenance_path,
+            frozen_no_synth_provenance,
+            overwrite=resume,
+        )
+        frozen_no_synth_provenance_artifact = _artifact(provenance_path)
     for variant, variant_config in variants.items():
         seed_summaries: dict[int, dict[str, Any]] = {}
         for seed in SEEDS:
@@ -3006,6 +3559,17 @@ def run_train(
                             f"{variant}/{seed}: {name}"
                         )
                     seed_summary[name] = expected
+            elif variant_axis == SYNTH_POLARITY_MODE_AXIS:
+                expected_mode = synth_polarity_mode_from_config(variant_config)
+                if (
+                    "synth_polarity_mode" in seed_summary
+                    and seed_summary["synth_polarity_mode"] != expected_mode
+                ):
+                    raise ValueError(
+                        f"Phase38 seed polarity mode changed for "
+                        f"{variant}/{seed}"
+                    )
+                seed_summary["synth_polarity_mode"] = expected_mode
             seed_summaries[seed] = seed_summary
         selected_seed = select_seed_by_validation(seed_summaries)
         if (
@@ -3044,6 +3608,25 @@ def run_train(
                     "Phase34 Full-3 baseline did not exactly reproduce the "
                     "frozen Phase33 candidate; refusing to train any loss-term "
                     "ablation"
+                )
+        if variant_axis == SYNTH_POLARITY_MODE_AXIS and variant == "baseline":
+            full_three_reproduction = phase33_full_three_reproduction(
+                seed_summaries
+            )
+            reproduction_path = (
+                stage_dir / variant / "full_three_reproduction.json"
+            )
+            _atomic_json(
+                reproduction_path,
+                full_three_reproduction,
+                overwrite=resume,
+            )
+            full_three_reproduction_artifact = _artifact(reproduction_path)
+            if not full_three_reproduction["passed"]:
+                raise ValueError(
+                    "Phase38 signed baseline did not exactly reproduce the "
+                    "frozen Phase33 Full-3 candidate; refusing to train the "
+                    "global-invariant candidate"
                 )
         selection = {
             "selected_seed": selected_seed,
@@ -3108,6 +3691,10 @@ def run_train(
                     ),
                 }
             )
+        elif variant_axis == SYNTH_POLARITY_MODE_AXIS:
+            variant_summaries[variant]["synth_polarity_mode"] = (
+                synth_polarity_mode_from_config(variant_config)
+            )
     profile_selection: dict[str, Any] | None = None
     profile_selection_artifact: dict[str, str] | None = None
     if variant_axis == LOSS_WEIGHT_PROFILE_AXIS:
@@ -3145,6 +3732,24 @@ def run_train(
             overwrite=resume,
         )
         loss_term_ablation_evidence_artifact = _artifact(evidence_path)
+    synth_polarity_validation_evidence: dict[str, Any] | None = None
+    synth_polarity_validation_evidence_artifact: dict[str, str] | None = None
+    if variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        if frozen_no_synth_provenance is None:
+            raise RuntimeError("Phase38 frozen no-synth provenance is missing")
+        synth_polarity_validation_evidence = (
+            select_synth_polarity_validation_evidence(
+                variant_summaries,
+                frozen_no_synth_provenance,
+            )
+        )
+        evidence_path = stage_dir / "synth_polarity_validation_evidence.json"
+        _atomic_json(
+            evidence_path,
+            synth_polarity_validation_evidence,
+            overwrite=resume,
+        )
+        synth_polarity_validation_evidence_artifact = _artifact(evidence_path)
     summary = {
         "stage": "train",
         "status": "complete",
@@ -3224,6 +3829,41 @@ def run_train(
                     "artifact": loss_term_ablation_evidence_artifact,
                 },
                 "winning_ablation_selected": False,
+                "ensemble_used": False,
+            }
+        )
+    if variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        if (
+            full_three_reproduction is None
+            or full_three_reproduction_artifact is None
+            or frozen_no_synth_provenance is None
+            or frozen_no_synth_provenance_artifact is None
+            or synth_polarity_validation_evidence is None
+            or synth_polarity_validation_evidence_artifact is None
+        ):
+            raise RuntimeError("Phase38 validation evidence was not evaluated")
+        summary.update(
+            {
+                "full_three_reproduction": {
+                    **full_three_reproduction,
+                    "artifact": full_three_reproduction_artifact,
+                },
+                "frozen_no_synth_provenance": {
+                    **frozen_no_synth_provenance,
+                    "artifact": frozen_no_synth_provenance_artifact,
+                },
+                "synth_polarity_modes": dict(
+                    VARIANT_AXES[SYNTH_POLARITY_MODE_AXIS]
+                ),
+                "synth_polarity_validation_evidence": {
+                    **synth_polarity_validation_evidence,
+                    "artifact": synth_polarity_validation_evidence_artifact,
+                },
+                "selected_candidate_seed": (
+                    synth_polarity_validation_evidence[
+                        "selected_candidate_seed"
+                    ]
+                ),
                 "ensemble_used": False,
             }
         )
@@ -3566,6 +4206,221 @@ def _validated_completed_loss_term_ablation_campaign(
     return evidence
 
 
+def _validated_frozen_no_synth_provenance(
+    train_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    recorded = train_summary.get("frozen_no_synth_provenance")
+    if not isinstance(recorded, Mapping):
+        raise ValueError("Phase38 frozen no-synth provenance is missing")
+    provenance_path = _validate_artifact(
+        recorded["artifact"],
+        label="Phase38 frozen no-synth provenance",
+    )
+    persisted = _load_json(provenance_path)
+    recorded_without_artifact = {
+        key: value for key, value in recorded.items() if key != "artifact"
+    }
+    if persisted != recorded_without_artifact:
+        raise ValueError("Phase38 frozen no-synth provenance artifact changed")
+    expected = frozen_phase34_no_synth_provenance()
+    if persisted != expected:
+        raise ValueError("Phase38 frozen no-synth provenance changed")
+    return expected
+
+
+def _validated_synth_polarity_campaign(
+    train_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    if (
+        train_summary.get("stage") != "train"
+        or train_summary.get("status") != "complete"
+        or train_summary.get("variant_axis") != SYNTH_POLARITY_MODE_AXIS
+        or train_summary.get("test_evaluated") is not False
+        or train_summary.get("external_evaluated") is not False
+        or train_summary.get("ensemble_used") is not False
+        or "selected_candidate_variant" in train_summary
+        or train_summary.get("git_commit") != current_git_commit(PROJECT_ROOT)
+        or train_summary.get("synth_polarity_modes")
+        != VARIANT_AXES[SYNTH_POLARITY_MODE_AXIS]
+    ):
+        raise ValueError("Phase38 train summary contract changed")
+    variants = train_summary.get("variants")
+    if not isinstance(variants, Mapping) or set(variants) != {
+        "baseline",
+        "candidate",
+    }:
+        raise ValueError("Phase38 train variants changed")
+    expected_seed_keys = {str(seed) for seed in SEEDS}
+    expected_modes = VARIANT_AXES[SYNTH_POLARITY_MODE_AXIS]
+    polarity_path = ".".join(VARIANT_AXIS_PATHS[SYNTH_POLARITY_MODE_AXIS])
+    expected_weights = LOSS_TERM_ABLATION_PROFILES["baseline"]
+    for variant, expected_mode in expected_modes.items():
+        variant_summary = variants[variant]
+        expected_diff = [] if variant == "baseline" else [polarity_path]
+        if (
+            variant_summary.get("synth_polarity_mode") != expected_mode
+            or variant_summary.get("loss_weights") != expected_weights
+            or variant_summary.get("scientific_diff_from_baseline")
+            != expected_diff
+        ):
+            raise ValueError(f"Phase38 train variant {variant} changed")
+        seeds = variant_summary.get("seeds")
+        if not isinstance(seeds, Mapping) or set(seeds) != expected_seed_keys:
+            raise ValueError(f"Phase38 seed set changed for {variant}")
+        seed_rows: dict[int, Mapping[str, Any]] = {}
+        for seed in SEEDS:
+            row = seeds[str(seed)]
+            if (
+                not isinstance(row, Mapping)
+                or row.get("variant") != variant
+                or row.get("seed") != seed
+                or row.get("loss_weights") != expected_weights
+                or row.get("synth_polarity_mode") != expected_mode
+                or row.get("split_assignment_sha256")
+                != EXPECTED_SPLIT_SHA256[seed]
+            ):
+                raise ValueError(
+                    f"Phase38 seed summary changed for {variant}/{seed}"
+                )
+            seed_rows[seed] = row
+        expected_selection = {
+            "selected_seed": select_seed_by_validation(seed_rows),
+            "selection_metric": VALIDATION_METRIC,
+            "ensemble_used": False,
+            "candidates": {
+                str(seed): float(seed_rows[seed][VALIDATION_METRIC])
+                for seed in SEEDS
+            },
+        }
+        selection = variant_summary.get("selection")
+        if not isinstance(selection, Mapping) or dict(selection) != (
+            expected_selection
+        ):
+            raise ValueError(f"Phase38 seed selection changed for {variant}")
+        selection_path = _validate_artifact(
+            variant_summary["selection_artifact"],
+            label=f"Phase38 seed selection {variant}",
+        )
+        if _load_json(selection_path) != expected_selection:
+            raise ValueError(
+                f"Phase38 seed selection artifact changed for {variant}"
+            )
+
+    _validated_phase33_full_three_reproduction(train_summary)
+    frozen_no_synth = _validated_frozen_no_synth_provenance(train_summary)
+    recorded = train_summary.get("synth_polarity_validation_evidence")
+    if not isinstance(recorded, Mapping):
+        raise ValueError("Phase38 paired validation evidence is missing")
+    evidence_path = _validate_artifact(
+        recorded["artifact"],
+        label="Phase38 paired validation evidence",
+    )
+    persisted = _load_json(evidence_path)
+    recorded_without_artifact = {
+        key: value for key, value in recorded.items() if key != "artifact"
+    }
+    if persisted != recorded_without_artifact:
+        raise ValueError("Phase38 paired validation evidence artifact changed")
+    expected = select_synth_polarity_validation_evidence(
+        variants,
+        frozen_no_synth,
+    )
+    if persisted != expected:
+        raise ValueError("Phase38 paired validation evidence is inconsistent")
+    if (
+        train_summary.get("selected_candidate_seed")
+        != expected["selected_candidate_seed"]
+        or train_summary["variants"]["candidate"]["selection"].get(
+            "selected_seed"
+        )
+        != expected["selected_candidate_seed"]
+    ):
+        raise ValueError("Phase38 selected candidate seed changed")
+    return expected
+
+
+def _validated_completed_synth_polarity_campaign(
+    train_summary: Mapping[str, Any],
+    *,
+    config: Mapping[str, Any],
+    dataset_manifest: Path,
+    preflight: Mapping[str, Any],
+    stage_dir: Path,
+) -> dict[str, Any]:
+    evidence = _validated_synth_polarity_campaign(train_summary)
+    variants = train_summary["variants"]
+    expected_configs = build_variant_configs(config)
+    expected_weights = LOSS_TERM_ABLATION_PROFILES["baseline"]
+    for variant, expected_mode in VARIANT_AXES[
+        SYNTH_POLARITY_MODE_AXIS
+    ].items():
+        for seed in SEEDS:
+            row = variants[variant]["seeds"][str(seed)]
+            try:
+                for artifact_name in (
+                    "checkpoint",
+                    "config",
+                    "split",
+                    "training_log",
+                    "run_manifest",
+                    "sampling",
+                    "last_checkpoint",
+                ):
+                    _validate_artifact(
+                        row[artifact_name],
+                        label=f"Phase38 {variant}/{seed} {artifact_name}",
+                    )
+                persisted_config = _load_yaml(Path(str(row["config"]["path"])))
+                persisted_split = _load_json(Path(str(row["split"]["path"])))
+                persisted_sampling = _load_json(
+                    Path(str(row["sampling"]["path"]))
+                )
+                persisted_run_manifest = _load_json(
+                    Path(str(row["run_manifest"]["path"]))
+                )
+                frozen_split = _load_json(
+                    _validate_artifact(
+                        preflight["splits"][str(seed)]["manifest"],
+                        label=f"Phase38 preflight split {seed}",
+                    )
+                )
+            except (KeyError, OSError, TypeError, ValueError, yaml.YAMLError) as error:
+                raise ValueError(
+                    f"Phase38 seed artifacts changed for {variant}/{seed}"
+                ) from error
+            expected_runtime_config = _runtime_config(
+                expected_configs[variant],
+                run_root=stage_dir / variant / f"seed_{seed}",
+                seed=seed,
+                dataset_manifest=dataset_manifest,
+            )
+            if (
+                persisted_config != expected_runtime_config
+                or persisted_config["training"].get("random_seed") != seed
+                or loss_weights_from_config(persisted_config)
+                != expected_weights
+                or synth_polarity_mode_from_config(persisted_config)
+                != expected_mode
+                or row.get("split_assignment_sha256")
+                != EXPECTED_SPLIT_SHA256[seed]
+                or row.get("git_commit") != train_summary.get("git_commit")
+                or persisted_run_manifest.get("git_commit")
+                != train_summary.get("git_commit")
+                or persisted_run_manifest.get("git_dirty") is not False
+                or not _phase30_sampling_manifest_is_valid(
+                    persisted_sampling,
+                    seed=seed,
+                )
+            ):
+                raise ValueError(
+                    f"Phase38 seed provenance changed for {variant}/{seed}"
+                )
+            _assert_split_manifest(frozen_split, seed=seed)
+            _assert_split_manifest(persisted_split, seed=seed)
+            _assert_same_split(persisted_split, frozen_split)
+    return evidence
+
+
 def _validated_loss_weight_profile_selection(
     train_summary: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -3677,6 +4532,9 @@ def candidate_validation_improves(train_summary: Mapping[str, Any]) -> bool:
         )
         compatibility = _validated_shape_loss_weight_campaign(train_summary)
         return bool(compatibility["passed"])
+    if variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        evidence = _validated_synth_polarity_campaign(train_summary)
+        return bool(evidence["passed"])
     baseline_selection = variants["baseline"]["selection"]
     candidate_selection = variants["candidate"]["selection"]
     baseline_seed = str(baseline_selection["selected_seed"])
@@ -3910,6 +4768,34 @@ def _phase33_validation_gate(
     }
 
 
+def _phase38_validation_gate(
+    train_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    evidence = _validated_synth_polarity_campaign(train_summary)
+    baseline_seed = _selected_seed_summary(train_summary, "baseline")
+    candidate_seed = _selected_seed_summary(train_summary, "candidate")
+    frozen = train_summary["frozen_no_synth_provenance"]
+    return {
+        "passed": bool(evidence["passed"]),
+        "signed_baseline_reproduction": float(
+            baseline_seed[VALIDATION_METRIC]
+        ),
+        "signed_baseline_seed": int(baseline_seed["seed"]),
+        "phase33_full_three_reproduction_verified": True,
+        "frozen_no_synth_selected_validation": float(
+            frozen["seeds"][str(frozen["selected_seed"])][VALIDATION_METRIC]
+        ),
+        "frozen_no_synth_selected_seed": int(frozen["selected_seed"]),
+        "frozen_no_synth_provenance_verified": True,
+        "candidate": float(candidate_seed[VALIDATION_METRIC]),
+        "candidate_seed": int(candidate_seed["seed"]),
+        "comparisons": evidence["comparisons"],
+        "metric": VALIDATION_METRIC,
+        "rule": evidence["support_rule"],
+        "selection_uses_candidate_validation_only": True,
+    }
+
+
 def _validate_phase33_evaluation_payload(
     result: Mapping[str, Any],
     *,
@@ -4115,6 +5001,224 @@ def _validate_completed_phase33_internal(
         raise ValueError("completed Phase33 internal gate evidence changed")
 
 
+def _validate_phase38_evaluation_payload(
+    result: Mapping[str, Any],
+    *,
+    expected_seed: int,
+    expected_variant: str,
+    expected_loss_weights: Mapping[str, float],
+    expected_synth_polarity_mode: str,
+    expected_frozen_source: Mapping[str, str] | None,
+    require_delayed_prefix: bool,
+) -> None:
+    expected_keys = {
+        "selected_seed",
+        "metrics",
+        "artifacts",
+        "source_variant",
+        "loss_weights",
+        "synth_polarity_mode",
+    }
+    if expected_frozen_source is not None:
+        expected_keys.add("frozen_source_train_summary")
+    if require_delayed_prefix:
+        expected_keys.add("delayed_prefix")
+    if (
+        set(result) != expected_keys
+        or result.get("synth_polarity_mode")
+        != expected_synth_polarity_mode
+        or (
+            expected_frozen_source is not None
+            and result.get("frozen_source_train_summary")
+            != dict(expected_frozen_source)
+        )
+    ):
+        raise ValueError("completed Phase38 internal evaluation identity changed")
+    phase33_view = {
+        key: value
+        for key, value in result.items()
+        if key not in {"synth_polarity_mode", "frozen_source_train_summary"}
+    }
+    try:
+        _validate_phase33_evaluation_payload(
+            phase33_view,
+            expected_seed=expected_seed,
+            expected_variant=expected_variant,
+            expected_loss_weights=expected_loss_weights,
+            require_delayed_prefix=require_delayed_prefix,
+        )
+    except ValueError as error:
+        raise ValueError(
+            "completed Phase38 internal evaluation changed"
+        ) from error
+
+
+def _phase38_internal_diagnostic(
+    evaluations: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    signed_event_mae = float(evaluations["baseline"]["metrics"]["event_mae"])
+    no_synth_event_mae = float(
+        evaluations["frozen_no_synth"]["metrics"]["event_mae"]
+    )
+    candidate_event_mae = float(
+        evaluations["candidate"]["metrics"]["event_mae"]
+    )
+    return {
+        "signed_event_mae": signed_event_mae,
+        "frozen_no_synth_event_mae": no_synth_event_mae,
+        "candidate_event_mae": candidate_event_mae,
+        "candidate_minus_signed": candidate_event_mae - signed_event_mae,
+        "candidate_improved_signed": candidate_event_mae < signed_event_mae,
+        "candidate_minus_frozen_no_synth": (
+            candidate_event_mae - no_synth_event_mae
+        ),
+        "candidate_improved_frozen_no_synth": (
+            candidate_event_mae < no_synth_event_mae
+        ),
+        "used_for_selection_or_gate": False,
+    }
+
+
+def _validate_completed_phase38_internal(
+    *,
+    output_root: Path,
+    stage_dir: Path,
+    completed: Mapping[str, Any],
+    train_summary: Mapping[str, Any],
+) -> None:
+    if train_summary.get("status") != "complete":
+        raise ValueError("completed Phase38 internal train stage changed")
+    validation_gate = _phase38_validation_gate(train_summary)
+    expected_train_artifact = _artifact(
+        _stage_dir(output_root, "train") / "summary.json"
+    )
+    common_valid = (
+        completed.get("stage") == "internal"
+        and isinstance(completed.get("created_at_utc"), str)
+        and bool(completed.get("created_at_utc"))
+        and completed.get("train_summary") == expected_train_artifact
+        and completed.get("validation_gate") == validation_gate
+        and completed.get("external_evaluated") is False
+    )
+    if not common_valid:
+        raise ValueError("completed Phase38 internal summary changed")
+    if not validation_gate["passed"]:
+        expected_keys = {
+            "stage",
+            "status",
+            "created_at_utc",
+            "train_summary",
+            "validation_gate",
+            "test_evaluated",
+            "external_evaluated",
+        }
+        if (
+            set(completed) != expected_keys
+            or completed.get("status") != "candidate_validation_gate_failed"
+            or completed.get("test_evaluated") is not False
+        ):
+            raise ValueError(
+                "completed Phase38 internal validation failure changed"
+            )
+        return
+
+    expected_keys = {
+        "stage",
+        "status",
+        "created_at_utc",
+        "train_summary",
+        "validation_gate",
+        "candidate_gate",
+        "frozen_test_diagnostic",
+        "test_evaluated",
+        "external_evaluated",
+        "variants",
+    }
+    variants = completed.get("variants")
+    if (
+        set(completed) != expected_keys
+        or completed.get("test_evaluated") is not True
+        or not isinstance(variants, Mapping)
+        or set(variants) != {"baseline", "candidate", "frozen_no_synth"}
+    ):
+        raise ValueError(
+            "completed Phase38 internal evaluation summary changed"
+        )
+    frozen_provenance = frozen_phase34_no_synth_provenance()
+    frozen_source = frozen_provenance["source_train_summary"]
+    source_rows = {
+        "baseline": _selected_seed_summary(train_summary, "baseline"),
+        "candidate": _selected_seed_summary(train_summary, "candidate"),
+        "frozen_no_synth": _frozen_phase34_no_synth_seed_summary(
+            int(frozen_provenance["selected_seed"])
+        ),
+    }
+    expected_metadata = {
+        "baseline": (
+            "baseline",
+            LOSS_TERM_ABLATION_PROFILES["baseline"],
+            "signed",
+            None,
+        ),
+        "candidate": (
+            "candidate",
+            LOSS_TERM_ABLATION_PROFILES["baseline"],
+            "global_invariant",
+            None,
+        ),
+        "frozen_no_synth": (
+            "frozen_no_synth",
+            LOSS_TERM_ABLATION_PROFILES["no_synth"],
+            "signed",
+            frozen_source,
+        ),
+    }
+    evaluations: dict[str, Mapping[str, Any]] = {}
+    for variant in ("baseline", "candidate", "frozen_no_synth"):
+        persisted = _load_completed_evaluation(
+            stage_dir / variant,
+            require_delayed_prefix=variant == "candidate",
+        )
+        if persisted is None or persisted != variants[variant]:
+            raise ValueError(
+                f"completed Phase38 internal {variant} evaluation changed"
+            )
+        source_variant, weights, mode, frozen_source_reference = (
+            expected_metadata[variant]
+        )
+        _validate_phase38_evaluation_payload(
+            persisted,
+            expected_seed=int(source_rows[variant]["seed"]),
+            expected_variant=source_variant,
+            expected_loss_weights=weights,
+            expected_synth_polarity_mode=mode,
+            expected_frozen_source=frozen_source_reference,
+            require_delayed_prefix=variant == "candidate",
+        )
+        evaluations[variant] = persisted
+    candidate_event_mae = float(
+        evaluations["candidate"]["metrics"]["event_mae"]
+    )
+    candidate_gate = {
+        "passed": candidate_event_mae < INTERNAL_EVENT_MAE_MAXIMUM,
+        "event_mae": candidate_event_mae,
+        "maximum_exclusive": INTERNAL_EVENT_MAE_MAXIMUM,
+        "comparators_used_for_selection_or_gate": False,
+    }
+    expected_status = (
+        "complete"
+        if candidate_gate["passed"]
+        else "candidate_internal_gate_failed"
+    )
+    if (
+        completed.get("status") != expected_status
+        or completed.get("candidate_gate") != candidate_gate
+        or completed.get("frozen_test_diagnostic")
+        != _phase38_internal_diagnostic(evaluations)
+    ):
+        raise ValueError("completed Phase38 internal gate evidence changed")
+
+
 def _available_formal_campaign_axis(output_root: Path) -> str | None:
     observed_axes: set[str] = set()
     preflight_dir = _stage_dir(output_root, "preflight")
@@ -4152,6 +5256,13 @@ def run_internal(
         train_summary = _require_stage(output_root, "train")
         if train_summary.get("variant_axis") == SHAPE_LOSS_WEIGHT_AXIS:
             _validate_completed_phase33_internal(
+                output_root=output_root,
+                stage_dir=stage_dir,
+                completed=completed,
+                train_summary=train_summary,
+            )
+        elif train_summary.get("variant_axis") == SYNTH_POLARITY_MODE_AXIS:
+            _validate_completed_phase38_internal(
                 output_root=output_root,
                 stage_dir=stage_dir,
                 completed=completed,
@@ -4208,6 +5319,10 @@ def run_internal(
         validation_gate = _phase33_validation_gate(train_summary)
         if validation_gate["passed"] is not validation_passed:
             raise ValueError("Phase33 validation gate evidence is inconsistent")
+    elif variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        validation_gate = _phase38_validation_gate(train_summary)
+        if validation_gate["passed"] is not validation_passed:
+            raise ValueError("Phase38 validation gate evidence is inconsistent")
     elif variant_axis in FROZEN_PHASE27_INCUMBENT_AXES:
         validation_gate = {
             "passed": validation_passed,
@@ -4242,11 +5357,24 @@ def run_internal(
         _finish_stage(stage_dir, summary, resume=resume)
         return summary
 
-    evaluations: dict[str, Any] = {}
-    for variant, source_variant, seed_summary in (
+    evaluation_specs: list[tuple[str, str, Mapping[str, Any]]] = [
         ("baseline", "baseline", baseline_seed),
         ("candidate", candidate_variant, candidate_seed),
-    ):
+    ]
+    frozen_no_synth_provenance: Mapping[str, Any] | None = None
+    if variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        frozen_no_synth_provenance = frozen_phase34_no_synth_provenance()
+        evaluation_specs.append(
+            (
+                "frozen_no_synth",
+                "frozen_no_synth",
+                _frozen_phase34_no_synth_seed_summary(
+                    int(frozen_no_synth_provenance["selected_seed"])
+                ),
+            )
+        )
+    evaluations: dict[str, Any] = {}
+    for variant, source_variant, seed_summary in evaluation_specs:
         variant_dir = stage_dir / variant
         include_delayed_prefix = variant == "candidate"
         result = (
@@ -4284,6 +5412,33 @@ def run_internal(
                         ]["loss_weights"],
                     }
                 )
+            elif variant_axis == SYNTH_POLARITY_MODE_AXIS:
+                is_frozen = variant == "frozen_no_synth"
+                result.update(
+                    {
+                        "source_variant": source_variant,
+                        "loss_weights": (
+                            LOSS_TERM_ABLATION_PROFILES["no_synth"]
+                            if is_frozen
+                            else LOSS_TERM_ABLATION_PROFILES["baseline"]
+                        ),
+                        "synth_polarity_mode": (
+                            "signed"
+                            if is_frozen
+                            else train_summary["variants"][source_variant][
+                                "synth_polarity_mode"
+                            ]
+                        ),
+                    }
+                )
+                if is_frozen:
+                    if frozen_no_synth_provenance is None:
+                        raise RuntimeError(
+                            "Phase38 frozen no-synth provenance is missing"
+                        )
+                    result["frozen_source_train_summary"] = dict(
+                        frozen_no_synth_provenance["source_train_summary"]
+                    )
             _atomic_json(variant_dir / "summary.json", result, overwrite=resume)
         elif variant_axis == LOSS_WEIGHT_PROFILE_AXIS and (
             int(result.get("selected_seed", -1)) != int(seed_summary["seed"])
@@ -4301,6 +5456,36 @@ def run_internal(
             != train_summary["variants"][source_variant]["loss_weights"]
         ):
             raise ValueError("resumed Phase33 internal evaluation changed")
+        elif variant_axis == SYNTH_POLARITY_MODE_AXIS:
+            is_frozen = variant == "frozen_no_synth"
+            expected_weights = (
+                LOSS_TERM_ABLATION_PROFILES["no_synth"]
+                if is_frozen
+                else LOSS_TERM_ABLATION_PROFILES["baseline"]
+            )
+            expected_mode = (
+                "signed"
+                if is_frozen
+                else train_summary["variants"][source_variant][
+                    "synth_polarity_mode"
+                ]
+            )
+            if (
+                int(result.get("selected_seed", -1))
+                != int(seed_summary["seed"])
+                or result.get("source_variant") != source_variant
+                or result.get("loss_weights") != expected_weights
+                or result.get("synth_polarity_mode") != expected_mode
+                or (
+                    is_frozen
+                    and (
+                        frozen_no_synth_provenance is None
+                        or result.get("frozen_source_train_summary")
+                        != frozen_no_synth_provenance["source_train_summary"]
+                    )
+                )
+            ):
+                raise ValueError("resumed Phase38 internal evaluation changed")
         evaluations[variant] = result
     baseline_event_mae = float(evaluations["baseline"]["metrics"]["event_mae"])
     candidate_event_mae = float(evaluations["candidate"]["metrics"]["event_mae"])
@@ -4319,6 +5504,13 @@ def run_internal(
                 "candidate Event MAE < frozen Phase27 Event MAE and < 0.15"
             ),
         }
+    elif variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        candidate_gate = {
+            "passed": candidate_event_mae < INTERNAL_EVENT_MAE_MAXIMUM,
+            "event_mae": candidate_event_mae,
+            "maximum_exclusive": INTERNAL_EVENT_MAE_MAXIMUM,
+            "comparators_used_for_selection_or_gate": False,
+        }
     else:
         candidate_gate = {
             "passed": candidate_event_mae < INTERNAL_EVENT_MAE_MAXIMUM,
@@ -4332,6 +5524,8 @@ def run_internal(
         "candidate_improved": candidate_event_mae < baseline_event_mae,
         "used_for_selection_or_gate": False,
     }
+    if variant_axis == SYNTH_POLARITY_MODE_AXIS:
+        frozen_test_diagnostic = _phase38_internal_diagnostic(evaluations)
     if variant_axis == SHAPE_LOSS_WEIGHT_AXIS:
         frozen_test_diagnostic.update(
             {
@@ -4605,7 +5799,13 @@ def run_external(
     event_root: Path,
     resume: bool,
 ) -> dict[str, Any]:
-    if _available_formal_campaign_axis(output_root) == LOSS_TERM_ABLATION_AXIS:
+    available_axis = _available_formal_campaign_axis(output_root)
+    if available_axis == SYNTH_POLARITY_MODE_AXIS:
+        raise RuntimeError(
+            "Phase38 external evaluation is preregistered closed; report only "
+            "the dual-comparator validation evidence and frozen internal test"
+        )
+    if available_axis == LOSS_TERM_ABLATION_AXIS:
         raise RuntimeError(
             "Phase34 loss-term ablation is validation-only; external evaluation "
             "is closed"

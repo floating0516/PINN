@@ -14,6 +14,7 @@ from src.physics.travel_time import (
 from src.training.time_sampling import sample_source_history
 from src.utils.config_v2 import (
     magnitude_penalty_from_config,
+    synth_polarity_mode_from_config,
     stf_m_ref_from_config,
     validate_config_v2,
 )
@@ -305,6 +306,8 @@ def masked_normalized_waveform_mse(
     u_hat: torch.Tensor,
     u_obs: torch.Tensor,
     valid_mask: torch.Tensor,
+    *,
+    synth_polarity_mode: str = "signed",
 ) -> torch.Tensor:
     if u_hat.shape != u_obs.shape or valid_mask.shape != u_obs.shape:
         raise ValueError("waveform prediction, observation, and mask must match")
@@ -316,14 +319,28 @@ def masked_normalized_waveform_mse(
         torch.zeros_like(u_obs),
     )
     scale = observed_abs.amax(dim=1, keepdim=True).clamp_min(1.0e-12)
-    squared = ((u_hat - u_obs) / scale).pow(2) * mask
-    return squared.sum() / mask.sum().clamp_min(1.0)
+    signed_squared = ((u_hat - u_obs) / scale).pow(2) * mask
+    if synth_polarity_mode == "signed":
+        # Preserve the legacy reduction order for checkpoint reproducibility.
+        return signed_squared.sum() / mask.sum().clamp_min(1.0)
+    if synth_polarity_mode != "global_invariant":
+        raise ValueError(
+            "synth_polarity_mode must be signed or global_invariant"
+        )
+    flipped_squared = ((-u_hat - u_obs) / scale).pow(2) * mask
+    selected_sum = torch.minimum(
+        signed_squared.sum(dim=1),
+        flipped_squared.sum(dim=1),
+    )
+    return selected_sum.sum() / mask.sum().clamp_min(1.0)
 
 
 def _per_sample_masked_normalized_waveform_mse(
     u_hat: torch.Tensor,
     u_obs: torch.Tensor,
     valid_mask: torch.Tensor,
+    *,
+    synth_polarity_mode: str = "signed",
 ) -> torch.Tensor:
     if u_hat.shape != u_obs.shape or valid_mask.shape != u_obs.shape:
         raise ValueError("waveform prediction, observation, and mask must match")
@@ -335,8 +352,17 @@ def _per_sample_masked_normalized_waveform_mse(
         torch.zeros_like(u_obs),
     )
     scale = observed_abs.amax(dim=1, keepdim=True).clamp_min(1.0e-12)
-    squared = ((u_hat - u_obs) / scale).pow(2) * mask
-    return squared.sum(dim=1) / mask.sum(dim=1).clamp_min(1.0)
+    signed_sum = (((u_hat - u_obs) / scale).pow(2) * mask).sum(dim=1)
+    if synth_polarity_mode == "signed":
+        selected_sum = signed_sum
+    elif synth_polarity_mode == "global_invariant":
+        flipped_sum = (((-u_hat - u_obs) / scale).pow(2) * mask).sum(dim=1)
+        selected_sum = torch.minimum(signed_sum, flipped_sum)
+    else:
+        raise ValueError(
+            "synth_polarity_mode must be signed or global_invariant"
+        )
+    return selected_sum / mask.sum(dim=1).clamp_min(1.0)
 
 
 def _shape_loss(predicted: torch.Tensor, reference: torch.Tensor) -> torch.Tensor:
@@ -398,6 +424,7 @@ def pinn_loss_stf_rate_v2(
     origin_aligned: bool = False,
     sample_weights: torch.Tensor | None = None,
     magnitude_penalty: str = "squared",
+    synth_polarity_mode: str = "signed",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     batch_size = rate_hat.shape[0]
     if pred_rate_encoded.shape != rate_hat.shape:
@@ -461,12 +488,14 @@ def pinn_loss_stf_rate_v2(
             u_hat,
             u_obs,
             waveform_valid_mask,
+            synth_polarity_mode=synth_polarity_mode,
         )
     else:
         synth_per_sample = _per_sample_masked_normalized_waveform_mse(
             u_hat,
             u_obs,
             waveform_valid_mask,
+            synth_polarity_mode=synth_polarity_mode,
         )
         # Do not self-normalize a minibatch of globally normalized weights.
         L_synth = (weights * synth_per_sample).mean()
@@ -595,6 +624,7 @@ def causal_event_stf_rate_loss_v2(
     include_intermediate_P: bool,
     include_intermediate_S: bool,
     magnitude_penalty: str = "squared",
+    synth_polarity_mode: str = "signed",
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Apply the original four losses to a shared origin-aligned event STF."""
     if magnitude_penalty not in {"squared", "absolute"}:
@@ -674,6 +704,7 @@ def causal_event_stf_rate_loss_v2(
         u_hat,
         selected_observed,
         selected_valid,
+        synth_polarity_mode=synth_polarity_mode,
     )
     if magnitude_penalty == "squared":
         L_mag = F.mse_loss(
@@ -716,6 +747,7 @@ class CausalEventSTFRateWaveformLossV2(nn.Module):
         self.lambda_mag = float(loss_config["lambda_mag"])
         self.lambda_shape = float(loss_config["lambda_shape"])
         self.magnitude_penalty = magnitude_penalty_from_config(config)
+        self.synth_polarity_mode = synth_polarity_mode_from_config(config)
         self.rate_representation = str(
             config["training"]["rate_representation"]
         ).lower()
@@ -804,6 +836,7 @@ class CausalEventSTFRateWaveformLossV2(nn.Module):
             include_intermediate_P=self.include_intermediate_P,
             include_intermediate_S=self.include_intermediate_S,
             magnitude_penalty=self.magnitude_penalty,
+            synth_polarity_mode=self.synth_polarity_mode,
         )
 
 
@@ -823,6 +856,7 @@ class STFRateWaveformLossV2(nn.Module):
         self.magnitude_penalty = magnitude_penalty_from_config(
             config
         )
+        self.synth_polarity_mode = synth_polarity_mode_from_config(config)
         self.rate_representation = str(
             config["training"]["rate_representation"]
         ).lower()
@@ -936,4 +970,5 @@ class STFRateWaveformLossV2(nn.Module):
             origin_aligned=self.origin_aligned,
             sample_weights=sample_weights,
             magnitude_penalty=self.magnitude_penalty,
+            synth_polarity_mode=self.synth_polarity_mode,
         )

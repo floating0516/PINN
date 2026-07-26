@@ -12,6 +12,7 @@ from src.utils.config_v2 import (
     moment_linear_skip_from_config,
     stf_m_ref_from_config,
     stf_output_steps_from_config,
+    synth_polarity_mode_from_config,
     validate_config_on_startup,
     validate_config_v2,
     waveform_input_components_from_config,
@@ -124,6 +125,21 @@ def test_magnitude_penalty_defaults_and_validates() -> None:
     for value in ("mae", "SQUARED", True, 1):
         config["training"]["stf_rate_loss"]["magnitude_penalty"] = value
         with pytest.raises(ValueError, match="magnitude_penalty"):
+            validate_config_v2(config)
+
+
+def test_synth_polarity_mode_defaults_and_validates() -> None:
+    config = _minimal_v2()
+    assert synth_polarity_mode_from_config(config) == "signed"
+
+    for value in ("signed", "global_invariant"):
+        config["training"]["stf_rate_loss"]["synth_polarity_mode"] = value
+        validate_config_v2(config)
+        assert synth_polarity_mode_from_config(config) == value
+
+    for value in ("absolute", "GLOBAL_INVARIANT", True, 1, None):
+        config["training"]["stf_rate_loss"]["synth_polarity_mode"] = value
+        with pytest.raises(ValueError, match="synth_polarity_mode"):
             validate_config_v2(config)
 
 
