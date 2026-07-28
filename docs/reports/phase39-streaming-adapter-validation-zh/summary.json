@@ -1,0 +1,65 @@
+{
+  "adapter_parameter_count": 489,
+  "closest_validation_checkpoint": {
+    "audit_only": true,
+    "epoch": 27,
+    "phase": "Phase45",
+    "seed": 42,
+    "selection_score": 1.0171009413740808
+  },
+  "cohort_role": "within_event_validation_streaming_diagnostic",
+  "external_data_loaded": false,
+  "formal_candidate_selected": false,
+  "full_regression": "786 passed, 1 skipped in 45.87s",
+  "grouped_test_loaded": false,
+  "internal_test_iterated": false,
+  "phase39_weights_trained": false,
+  "phase45_metrics": {
+    "confirmed_history_improvement_pct": 18.631924690073532,
+    "endpoint_event_delta": 0.0009252690263907709,
+    "endpoint_event_mae": 0.11525878737254149,
+    "endpoint_station_delta": 0.00014412411414266302,
+    "endpoint_station_mae": 0.13184400820679562,
+    "epoch": 27,
+    "event_step_improvement_pct": 22.700820182767746,
+    "formal_gate_passed": false,
+    "late_confirmed_cumulative_log10_l1_p95": 0.05566625269524173,
+    "late_event_abs_step_p95_mw": 0.019702564087850503,
+    "late_station_abs_step_p95_mw": 0.043099494795563915,
+    "phase": "Phase45",
+    "role": "closest_validation_checkpoint_only",
+    "seed": 42,
+    "selection_score": 1.0171009413740808,
+    "stability_weight": 2.0,
+    "station_step_improvement_pct": 16.01856820491393
+  },
+  "retained_model": "Phase39 Glehman scalar + global invariant, seed42",
+  "source_artifacts": {
+    "Phase43": {
+      "protocol_sha256": "d3e1cb6cd433ee043b973b63a869c8559dd8beceb1200ca6322e3fb11dbd2abe",
+      "provenance_sha256": "e7c4f19b55e809e106eda7a93b25a71ea6d146f070f341a9e2f8fad0b517d128",
+      "run_root": "/home/lihe/PINN_Mag/runs/phase43-streaming-adapter-20260728T121138Z-7bc63eb",
+      "summary_sha256": "a6d0d5d41010f03dca662641e76054ee9b4deb993c21b9c18cc39bc70658379a"
+    },
+    "Phase44": {
+      "protocol_sha256": "42b487aaab4df3c28af99fc1e194bc75477050e26e02c56d75f3ba3cfbf46f0f",
+      "provenance_sha256": "dd346a684868454aef1ff3ac643f003341640325c5900a0a009c14aabd9b3f96",
+      "run_root": "/home/lihe/PINN_Mag/runs/phase44-streaming-adapter-20260728T122020Z-7bc63eb",
+      "summary_sha256": "a707eef8c263cf85c91081b1f58481c417b734afb26e213d6e7799832721de99"
+    },
+    "Phase45": {
+      "protocol_sha256": "38722640e2751f635f92f6162c38771097bf1d442f783904dad6185670da9fb2",
+      "provenance_sha256": "2fd9d1ed2e48ad49bcb8a2b8bd5df247f91c59fa639e429d81c828b9845f907e",
+      "run_root": "/home/lihe/PINN_Mag/runs/phase45-streaming-adapter-20260728T122754Z-7bc63eb",
+      "summary_sha256": "c3e9b3db562cc1e8cff1fa148a8eb0af2d8164e0d5e9877f79b4b978d33d1ce0"
+    }
+  },
+  "status": "validation_gate_failed",
+  "validation_gates": {
+    "endpoint_event_mae_max": 0.11933351834615072,
+    "endpoint_station_mae_max": 0.13669988409265296,
+    "late_confirmed_cumulative_log10_l1_p95_max": 0.054730312824249144,
+    "late_event_abs_step_p95_mw_max": 0.0203909683227539,
+    "late_station_abs_step_p95_mw_max": 0.05132026672363278
+  }
+}

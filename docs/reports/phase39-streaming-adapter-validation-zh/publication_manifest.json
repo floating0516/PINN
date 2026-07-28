@@ -1,0 +1,82 @@
+{
+  "files": [
+    {
+      "bytes": 4646,
+      "path": "docs/reports/phase39-streaming-adapter-validation-zh/README.md",
+      "sha256": "adb18dcc9dd37bb46e089b4c2d2829c01c873da92632058310b6b76f7e2ff7b4"
+    },
+    {
+      "bytes": 30662,
+      "path": "docs/reports/phase39-streaming-adapter-validation-zh/figures/01_stability_progression.pdf",
+      "sha256": "9bcfca1020ee6227fdcb07ebbc20d955ceb4cac8be714d02e2134d7f534de50e"
+    },
+    {
+      "bytes": 178400,
+      "path": "docs/reports/phase39-streaming-adapter-validation-zh/figures/01_stability_progression.png",
+      "sha256": "6cb083c65eb343a50ca2fd596ec00be2e1d1f6097d2bee21c34711a878ecce1a"
+    },
+    {
+      "bytes": 24612,
+      "path": "docs/reports/phase39-streaming-adapter-validation-zh/figures/02_endpoint_tradeoff.pdf",
+      "sha256": "1f1696377e52920c1c841a65fda8c5b10e0b2430f32af8636767df034b2d8f9e"
+    },
+    {
+      "bytes": 110672,
+      "path": "docs/reports/phase39-streaming-adapter-validation-zh/figures/02_endpoint_tradeoff.png",
+      "sha256": "3c485c6ef17c6ad24c4f06ed25f220323b2bbeb3a0d95f5cccd0b962b9ae5198"
+    },
+    {
+      "bytes": 29774,
+      "path": "docs/reports/phase39-streaming-adapter-validation-zh/figures/03_training_curves.pdf",
+      "sha256": "9b20dd14bbc52b74d34c70faa88e439c452c2d67706f7529d71c1b6f33d7486d"
+    },
+    {
+      "bytes": 184636,
+      "path": "docs/reports/phase39-streaming-adapter-validation-zh/figures/03_training_curves.png",
+      "sha256": "a3ee60fd27a61ab177445a65a6fb8e37774d373a84b88b0cb26a66f7218dec0b"
+    },
+    {
+      "bytes": 1609,
+      "path": "docs/reports/phase39-streaming-adapter-validation-zh/seed_metrics.csv",
+      "sha256": "8b8e7b18b68ae65a1cd609202fc79706d563e422ce88284cef77f8807ca423a9"
+    },
+    {
+      "bytes": 2950,
+      "path": "docs/reports/phase39-streaming-adapter-validation-zh/summary.json",
+      "sha256": "bcd43de2bc780460ba77e0ed6c25733425176a4573864020c38a884e330ac6ea"
+    },
+    {
+      "bytes": 1347,
+      "path": "docs/reports/phase39-streaming-adapter-validation-zh/validation_metrics.csv",
+      "sha256": "96de424421ba01a21c7c126e422ab0d0528c8ec7430feab8aee635ce9553b238"
+    }
+  ],
+  "formal_candidate_selected": false,
+  "generated_at_utc": "2026-07-28T12:43:54.205826+00:00",
+  "generator": {
+    "path": "scripts/plotting/plot_phase39_streaming_adapter_validation_zh.py",
+    "sha256": "7d823fc02e39313cdd6bba3dc4dd29453e4edb821d4590282e878977e0cbb599"
+  },
+  "report_role": "within_event_validation_streaming_diagnostic",
+  "source_artifacts": {
+    "Phase43": {
+      "protocol_sha256": "d3e1cb6cd433ee043b973b63a869c8559dd8beceb1200ca6322e3fb11dbd2abe",
+      "provenance_sha256": "e7c4f19b55e809e106eda7a93b25a71ea6d146f070f341a9e2f8fad0b517d128",
+      "run_root": "/home/lihe/PINN_Mag/runs/phase43-streaming-adapter-20260728T121138Z-7bc63eb",
+      "summary_sha256": "a6d0d5d41010f03dca662641e76054ee9b4deb993c21b9c18cc39bc70658379a"
+    },
+    "Phase44": {
+      "protocol_sha256": "42b487aaab4df3c28af99fc1e194bc75477050e26e02c56d75f3ba3cfbf46f0f",
+      "provenance_sha256": "dd346a684868454aef1ff3ac643f003341640325c5900a0a009c14aabd9b3f96",
+      "run_root": "/home/lihe/PINN_Mag/runs/phase44-streaming-adapter-20260728T122020Z-7bc63eb",
+      "summary_sha256": "a707eef8c263cf85c91081b1f58481c417b734afb26e213d6e7799832721de99"
+    },
+    "Phase45": {
+      "protocol_sha256": "38722640e2751f635f92f6162c38771097bf1d442f783904dad6185670da9fb2",
+      "provenance_sha256": "2fd9d1ed2e48ad49bcb8a2b8bd5df247f91c59fa639e429d81c828b9845f907e",
+      "run_root": "/home/lihe/PINN_Mag/runs/phase45-streaming-adapter-20260728T122754Z-7bc63eb",
+      "summary_sha256": "c3e9b3db562cc1e8cff1fa148a8eb0af2d8164e0d5e9877f79b4b978d33d1ce0"
+    }
+  },
+  "source_phase39_commit": "7bc63eb25b90048d94d6478503e85b77790b9e80"
+}
