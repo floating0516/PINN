@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "report_status": "fixed_checkpoint_development_validation_prefix_diagnostic",
+  "git_base_commit": "846e666278dbe18af2004cbc9d438546bbaa1e84",
+  "source_run": "/home/lihe/PINN_Mag/runs/phase39-second-by-second-convergence-final-20260728T043504Z-846e666",
+  "analysis_contract": {
+    "model": "Phase39 Glehman scalar + global invariant",
+    "selected_seed": 42,
+    "training_started": false,
+    "model_selection_performed": false,
+    "prediction_ensemble": false,
+    "external_role": "development_validation",
+    "event_count": 8,
+    "station_count": 158,
+    "observation_horizons_sec": "1..200",
+    "release_time_rule": "observation_horizon_sec + 5 s",
+    "target_error_mw": 0.15,
+    "convergence_rule": "first horizon whose complete suffix through 200 s remains within target",
+    "strict_causal_model_claim": false,
+    "frozen_grouped_test_opened": false
+  },
+  "verified_metrics": {
+    "stable_overall_event_mae_observation_sec": 188,
+    "stable_overall_event_mae_release_sec": 193,
+    "event_mae_at_200_sec": 0.14773725867271437,
+    "events_within_target_at_200_sec": "5/8",
+    "suffix_stable_individual_events": "5/8",
+    "endpoint_max_station_abs_diff_mw": 2.86102294921875e-06,
+    "endpoint_max_event_median_abs_diff_mw": 0.0,
+    "full_repository_tests": "752 passed, 1 skipped"
+  },
+  "generator": {
+    "path": "scripts/evaluation/evaluate_phase39_second_by_second.py",
+    "sha256": "7274563f8b021c9dd7205170c8087fd7fc385162a097507c08be117b86aebb66"
+  },
+  "tests": {
+    "path": "tests/test_phase39_second_by_second.py",
+    "sha256": "f4aad2722ef80b6563232a7c62428e4b4bbbf125767052a1a8d7a2efca034c87"
+  },
+  "outputs": {
+    "README.md": "ee8d82b7b204adfaf61274c41f32a830ddd58acbabf04bf8d19dbfa0300b407f",
+    "cohort_contract.json": "11c797bbb8f153212e37e245f36b2242199c1072a71ff5a10012114ecf32da30",
+    "event_convergence.csv": "cbbed881bb4c6a035fc556ad6715f1f49aa81d2955414208fc65f871295b727a",
+    "event_predictions.csv": "e2373994965472e71715eb8ba448aab58ecbb31e158290fc05ca5c086d44ab7a",
+    "figures/01_overall_metrics.pdf": "2e0b1a69ee0bf6e03394c31f653e64d7597836a4586fa82dbe91496d2f58760c",
+    "figures/01_overall_metrics.png": "2b445e00dc322df4e239c8f6d3850ed18a675d6bdb94130f725e3afcd0583763",
+    "figures/02_event_trajectories.pdf": "da9f4119bfa153385c3ee4d79766b8f3e17dc6fdb77516e9b3a37b8c8593f365",
+    "figures/02_event_trajectories.png": "4c875ef370f2bf3e3986a8693ef01cb7aa9eeab081f69347cef52d1ecee50108",
+    "figures/03_convergence_times.pdf": "73a7139cde71ac1b882ff4c876f2b3f50b5d976170790d7a85f79f391d151b63",
+    "figures/03_convergence_times.png": "80d7400cec083e0d2f51715a2213cffb13a89de7f694531dd08194d2d83869c8",
+    "horizon_metrics.csv": "b504ef9b88a60e300c3a3b5f59b577daf3c8c46a7d4f4304caac1da11c414e54",
+    "horizon_metrics.json": "f730096540e3439333837d01ea0bc26840085e0c92c796e3dd2828d1b9528d43",
+    "provenance.json": "efc2277a89908d1496958b891c3a7ac1c8f67ac3adacd807f835c82ec5623098",
+    "station_predictions.csv": "f4a4f79a8ba16ec128793095d2872e69232b76ca0de5b8758ffcdac344c8c756",
+    "summary.json": "2464620f9ca3b33479e95022684686bc554341f6792e2238ddd32940f1ce0c1f",
+    "unavailable_stations.csv": "5a979a4c215a14ddce4fea0d611de48865ffe205103351be02b73158807dc1c2"
+  }
+}
