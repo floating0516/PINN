@@ -55,7 +55,7 @@ COLORS = {
     "ink": "#20262E",
     "gray": "#67717E",
 }
-FULL_REGRESSION = "809 passed, 1 skipped in 50.71s"
+FULL_REGRESSION = "811 passed, 1 skipped in 51.10s"
 
 
 def _read_json(path: Path) -> Any:
