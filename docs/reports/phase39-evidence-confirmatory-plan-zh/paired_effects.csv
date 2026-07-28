@@ -1,0 +1,2 @@
+comparison,evaluation_role,seed,event_count,improved_event_count,mean_abs_error_delta,audit_bootstrap_10k_95_low,audit_bootstrap_10k_95_high,exact_bootstrap_distribution_95_low,exact_bootstrap_distribution_95_high,exact_sign_flip_p,interpretation
+Phase39 Glehman+GI minus matched no-synth,development_validation,42,8,6,-0.058377528190612704,-0.103548,-0.015489,-0.10354798436164847,-0.01494756937026942,0.046875,supportive post-hoc evidence; not final confirmation

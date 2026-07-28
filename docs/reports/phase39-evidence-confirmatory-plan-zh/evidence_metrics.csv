@@ -1,0 +1,12 @@
+model,phase,evaluation_role,split_protocol,seed,event_mae,station_mae,event_count,station_count,formal_status,source_key
+Phase22 causal event model,22,locked_internal_test,event_model_station_random,73,0.22277125081708354,,31,,locked,phase22_seed_metrics
+Phase22 causal event model,22,development_validation,external_8_event_dynamic_top5,73,0.12386403083801278,,8,159,development_only,phase22_external_events
+Phase27 station-wise STF,27,validation,within_event_station,17,0.11135358810424804,,30,385,formal,phase27_selection
+Phase27 station-wise STF,27,locked_internal_test,within_event_station,17,0.1372873624165853,0.10736585344587053,30,385,locked,phase27_internal
+Phase33 no-shape,33,validation,within_event_station,17,0.10100007057189941,,30,385,formal,phase33_selection
+Phase33 no-shape,33,locked_internal_test,within_event_station,17,0.13653383255004883,0.1026051546072031,30,385,locked,phase33_internal
+Phase33 signed checkpoint,33,development_validation,external_8_event_cm0,17,0.24948920607566838,0.28242675081084045,8,158,post_hoc_exploratory,fable_external_eval
+Matched no-synth,34,development_validation,external_8_event_cm0,42,0.20611478686332707,0.2607091982153398,8,158,post_hoc_exploratory,fable_external_eval
+Phase38 global invariant,38,development_validation,external_8_event_cm0,42,0.1935169875621796,0.25682701943795894,8,158,post_hoc_exploratory,fable_external_eval
+Phase39 Glehman+GI,39,validation,within_event_station,42,0.11433351834615071,,30,385,formal_gate_failed,phase39_selection
+Phase39 Glehman+GI,39,development_validation,external_8_event_cm0,42,0.14773725867271437,0.26082386366928684,8,158,post_hoc_exploratory,fable_external_eval

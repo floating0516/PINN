@@ -1,0 +1,60 @@
+{
+  "arms": {
+    "matched_no_synth": {
+      "lambda_synth": 0.0,
+      "radiation_coefficient": "glehman_scalar",
+      "synthetic_polarity_mode": "global_invariant"
+    },
+    "only_scientific_difference": "lambda_synth",
+    "phase39": {
+      "lambda_synth": 0.5,
+      "radiation_coefficient": "glehman_scalar",
+      "synthetic_polarity_mode": "global_invariant"
+    }
+  },
+  "frozen_data_boundaries": {
+    "existing_grouped_6_test_events": "do_not_open_before_protocol_freeze",
+    "external_8_events": "development_validation_only",
+    "final_claim": "requires new external cohort or untouched preregistered outer test"
+  },
+  "inner_selection": {
+    "checkpoint_metric": "inner_validation_event_mae_catalog",
+    "uses_outer_events": false
+  },
+  "objective": "paired unseen-event comparison of Phase39 Glehman+GI versus matched no-synth",
+  "outer_protocol": {
+    "event_count": 31,
+    "fold_count": 5,
+    "folds_shared_across_arms_and_seeds": true,
+    "held_out_prediction": "one_time_out_of_fold",
+    "stratification": [
+      "catalog_magnitude_band",
+      "usable_station_count"
+    ],
+    "type": "five_fold_grouped_event_cv"
+  },
+  "primary_estimand": "mean_event_absolute_error_phase39_minus_no_synth",
+  "primary_inference": [
+    "event_level_paired_bootstrap",
+    "exact_or_monte_carlo_paired_permutation"
+  ],
+  "schema_version": 1,
+  "secondary_metrics": [
+    "event_bias",
+    "event_rmse",
+    "station_mae",
+    "within_event_station_mae"
+  ],
+  "seed_policy": {
+    "final_single_model_seed": "select_by_frozen_validation_only after model-family decision",
+    "paired_by_same_seed": true,
+    "prediction_ensemble": false,
+    "report_seed_specific_oof_results": true
+  },
+  "seeds": [
+    17,
+    42,
+    73
+  ],
+  "status": "draft_for_review_not_preregistered"
+}

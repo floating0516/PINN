@@ -1,0 +1,111 @@
+{
+  "analysis_contract": {
+    "external_8_event_role": "development_validation",
+    "frozen_grouped_test_opened": false,
+    "phase39_formal_internal_external_opened": false,
+    "prediction_ensemble": false,
+    "recommended_next_action": "freeze paired grouped-event protocol",
+    "training_started": false
+  },
+  "dataset_sha256": "2e1fa4c12fc1eb03ffc8bf9235491f0886d4b0d360ebcb3486baca4d948cfd6a",
+  "font": {
+    "family": "Noto Sans CJK SC",
+    "path": "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "sha256": "b76b0433203017ca80401b2ee0dd69350349871c4b19d504c34dbdd80541690a"
+  },
+  "generated_for": "GitHub Chinese report preview",
+  "generator": {
+    "path": "/home/lihe/PINN_Mag/worktrees/dev/scripts/plotting/plot_phase39_evidence_confirmatory_report_zh.py",
+    "sha256": "dcfe60fb0bafb69deb35071f6ae8ccfd2a2d872abb006395d7545f14baa628d3"
+  },
+  "git_commit": "7fbb7a7bbe3d747cc031449eb0df54a85840541b",
+  "outputs": {
+    "README.md": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/reports/phase39-evidence-confirmatory-plan-zh/README.md",
+      "sha256": "15a73b6156313581eba092de3ec803a33a6f9eb0c8a14e224dc0602e8b978daf"
+    },
+    "evidence_metrics.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/reports/phase39-evidence-confirmatory-plan-zh/evidence_metrics.csv",
+      "sha256": "5ebf31cc9ff694fa230e7cd1dfaf408d461e9ab02dbddf82264a4e72e30ccb11"
+    },
+    "figures/01_method_family_boundary.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/reports/phase39-evidence-confirmatory-plan-zh/figures/01_method_family_boundary.pdf",
+      "sha256": "aa04c36a8a7d3f28f35badc8378c7f2e4851608bb0ddea84f8e29d404166867c"
+    },
+    "figures/01_method_family_boundary.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/reports/phase39-evidence-confirmatory-plan-zh/figures/01_method_family_boundary.png",
+      "sha256": "0052e812924de345b2b7392d3f5aaaa60fe01272081d2e9fd2366ebcbf98f39f"
+    },
+    "figures/02_evidence_landscape.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/reports/phase39-evidence-confirmatory-plan-zh/figures/02_evidence_landscape.pdf",
+      "sha256": "17b81d7a32390aae917202736f61644c49bf3b012637494b62a227e97f5dc444"
+    },
+    "figures/02_evidence_landscape.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/reports/phase39-evidence-confirmatory-plan-zh/figures/02_evidence_landscape.png",
+      "sha256": "c5e011f53f0a4b959b1cadf4c77ed1b6e5a8159791e5f514e6300c73b98555e4"
+    },
+    "figures/03_confirmatory_protocol.pdf": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/reports/phase39-evidence-confirmatory-plan-zh/figures/03_confirmatory_protocol.pdf",
+      "sha256": "095983d0c935ee608b65c723f4151fc9df2ef28e812a91998b5b8886b6af205d"
+    },
+    "figures/03_confirmatory_protocol.png": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/reports/phase39-evidence-confirmatory-plan-zh/figures/03_confirmatory_protocol.png",
+      "sha256": "f2472a4c652c3a00bc2ad122b562843096716870e83a31feb96e2008e3a8416d"
+    },
+    "paired_effects.csv": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/reports/phase39-evidence-confirmatory-plan-zh/paired_effects.csv",
+      "sha256": "1481caba96b771d6c4b824c5e1de36b212c349a643394533e297c502defc1976"
+    },
+    "proposed_protocol.json": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/reports/phase39-evidence-confirmatory-plan-zh/proposed_protocol.json",
+      "sha256": "774d1cbf05c3c7e8f5c8179c0a1ed339ff266e64418e8caade994bc79da897e2"
+    }
+  },
+  "report_status": "development_evidence_and_protocol_draft",
+  "schema_version": 1,
+  "sources": {
+    "fable_external_eval": {
+      "path": "/home/lihe/PINN_Mag/runs/fable-eval-20260726T125507Z/external_eval.json",
+      "sha256": "c903a75e85503d864bb44ad243ac6c476a9e4d9069c211f3dee3ae36b4204abf"
+    },
+    "phase22_external_events": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase22-causal-forward-guided-station-subset/external_final_event_comparison.csv",
+      "sha256": "4d364fb58f620987651b0cf2191938e80234b12227b7879c42af539c3277497f"
+    },
+    "phase22_seed_metrics": {
+      "path": "/home/lihe/PINN_Mag/worktrees/dev/docs/results/phase22-causal-forward-guided-station-subset/seed_metrics.csv",
+      "sha256": "94385a74126eccfa60f593c0c9764d2060cae630e93d7117119804736e9f292e"
+    },
+    "phase27_internal": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/internal/summary.json",
+      "sha256": "6c86e7596272639f6a007783083febb4bc4262c93a25b8e479efb6136f2ec198"
+    },
+    "phase27_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase27-manuscript-stf-event-loss-weighted-20260724T221820Z-e02aeca/train/candidate/selection.json",
+      "sha256": "a95a307f7a7ade41a06425292f95c887db9eb58a35db3e50f82daa81b676411b"
+    },
+    "phase33_internal": {
+      "path": "/home/lihe/PINN_Mag/runs/phase33-manuscript-stf-no-shape-20260726T013031Z-31b4fb8/internal/candidate/summary.json",
+      "sha256": "610447a3366e491bc405c855235a8b0ead36b0c27a4e65d46220c79af5b2492f"
+    },
+    "phase33_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase33-manuscript-stf-no-shape-20260726T013031Z-31b4fb8/train/candidate/selection.json",
+      "sha256": "e34ca9c285ba7d02af49b135046d424ecb73615c60ffbaada50f32d1c974bb2b"
+    },
+    "phase38_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase39-manuscript-stf-glehman-scalar-20260726T111256Z-7fbb7a7/train/baseline/selection.json",
+      "sha256": "99a8893b0691fdbb13d8729ba17a90f56955e9b0b756d92a7f36a900f353ea3d"
+    },
+    "phase39_selection": {
+      "path": "/home/lihe/PINN_Mag/runs/phase39-manuscript-stf-glehman-scalar-20260726T111256Z-7fbb7a7/train/candidate/selection.json",
+      "sha256": "e4e45cbba46d56bff119d0a3843721ca2cbdc58f4193c514fe5fe7f64864b01f"
+    }
+  },
+  "verified_metrics": {
+    "phase33_locked_internal_event_mae": 0.13653383255004883,
+    "phase39_development_event_mae": 0.14773725867271437,
+    "phase39_formal_validation_event_mae": 0.11433351834615071,
+    "phase39_minus_no_synth_event_mae": -0.058377528190612704,
+    "phase39_vs_no_synth_improved_events": "6/8"
+  }
+}
