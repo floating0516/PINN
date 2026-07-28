@@ -1,0 +1,29 @@
+{
+  "hidden_data": {
+    "external_eight_events_loaded": false,
+    "grouped_test_loaded": false,
+    "internal_test_iterated": false
+  },
+  "phase47": {
+    "run_root": "/home/lihe/PINN_Mag/runs/phase47-direct-phase39-streaming-20260728T141807Z-31a3271",
+    "selected_seed": null,
+    "status": "validation_gate_failed"
+  },
+  "phase48": {
+    "run_root": "/home/lihe/PINN_Mag/runs/phase48-joint-phase39-streaming-20260728T143620Z-3ff2449",
+    "selected_seed": null,
+    "status": "validation_gate_failed"
+  },
+  "phase48_seed73_closest_epoch": {
+    "endpoint_event_gate": 0.17561189810434977,
+    "endpoint_event_mae": 0.17783047358194987,
+    "endpoint_station_gate": 0.1242587035042899,
+    "endpoint_station_mae": 0.1257748962996842,
+    "epoch": 188,
+    "late_confirmed_cumulative_log10_l1_p95": 0.01681492850184437,
+    "late_event_abs_step_p95_mw": 0.010547971725463859,
+    "late_station_abs_step_p95_mw": 0.012340354919433593,
+    "selection_score": 1.0126334007066071,
+    "streaming_event_mae_mean": 0.2416070008277893
+  }
+}

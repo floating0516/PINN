@@ -139,3 +139,22 @@ def test_script_help_states_no_adapter_contract() -> None:
     assert "--smoke" in result.stdout
     assert "--joint-from-scratch" in result.stdout
     assert "no adapter" in result.stdout.lower()
+
+
+def test_validation_report_plotter_help_runs() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/plotting/plot_phase47_phase48_direct_streaming_validation_zh.py",
+            "--help",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "--phase47-run" in result.stdout
+    assert "--phase48-run" in result.stdout
+    assert "--output-dir" in result.stdout

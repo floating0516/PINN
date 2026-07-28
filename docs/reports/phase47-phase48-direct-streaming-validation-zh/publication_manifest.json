@@ -1,0 +1,60 @@
+{
+  "files": {
+    "README.md": {
+      "bytes": 5290,
+      "sha256": "af3bf039a33370874815dcda23317ba2822165e92c7bcccff7896cf2a56b7698"
+    },
+    "baseline_metrics.csv": {
+      "bytes": 957,
+      "sha256": "05bd64087a6f2298e1c33d921fb6b4c8b2803c3b7c3fc4af97b46dd0135fbf58"
+    },
+    "closest_candidates.csv": {
+      "bytes": 1169,
+      "sha256": "d8c37cf282509c5afb4471649c436c56b6f9831935e58a7127178d00744dad67"
+    },
+    "figures/01_endpoint_streaming_tradeoff.pdf": {
+      "bytes": 43540,
+      "sha256": "0316b9388e9740cf31dde72880f56b695828b90d9e4804ffca55d63802ec84cd"
+    },
+    "figures/01_endpoint_streaming_tradeoff.png": {
+      "bytes": 222340,
+      "sha256": "6a77d0c6c6d0df32903d7cd999df2f06264444e3e5e2f7bd62aad878bf8c98d2"
+    },
+    "figures/02_seed73_gate_ratios.pdf": {
+      "bytes": 42047,
+      "sha256": "99b1385974d5185854dbb3d6a9d82aefe4d74a9417b4ff7df79f69f9d9de9a03"
+    },
+    "figures/02_seed73_gate_ratios.png": {
+      "bytes": 498940,
+      "sha256": "754a7cd48ef728bc9f85f553cb23ea515f16a05848ff25b42293d87405ae7684"
+    },
+    "figures/03_phase48_training_curves.pdf": {
+      "bytes": 57085,
+      "sha256": "2c1b1861d67c1977f68f1116839e1d6870443df227fec0aca5a1c76e36ad1eed"
+    },
+    "figures/03_phase48_training_curves.png": {
+      "bytes": 697828,
+      "sha256": "dfdb15747c4e1d65a0ecccec0fb9f6c3daae17049e3ee3ae2f6d06b49518e4e4"
+    },
+    "phase47_campaign_summary.json": {
+      "bytes": 3723,
+      "sha256": "288f65155b0079c27e27e23cea7640556a7659721a549bf1295d4f7130fc5684"
+    },
+    "phase47_epoch_metrics.csv": {
+      "bytes": 31757,
+      "sha256": "67e0c2d430dc42ce02a23d65124ad4576fc0eb66d1a5c8dff70bfe4a012f7084"
+    },
+    "phase48_campaign_summary.json": {
+      "bytes": 4022,
+      "sha256": "09ce7685a966558344380282fc15ec2c8d3b3db18a80430888b1c785cd71d9d9"
+    },
+    "phase48_epoch_metrics.csv": {
+      "bytes": 325635,
+      "sha256": "a5c706dbe03987e7f06322c87c83643d1a28470c592cb9edd0ac7c8e023b9734"
+    },
+    "summary.json": {
+      "bytes": 1041,
+      "sha256": "70518fe9b67e315c5780ff0375d78c6a1f82aa95c56f9b5aedf3b94ae22eff57"
+    }
+  }
+}

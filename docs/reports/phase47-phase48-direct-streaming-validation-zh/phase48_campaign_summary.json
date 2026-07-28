@@ -1,0 +1,144 @@
+{
+  "status": "validation_gate_failed",
+  "passed": false,
+  "smoke": false,
+  "phase": "Phase48",
+  "initialization": "deterministic_random",
+  "selected_seed": null,
+  "selected_checkpoint": null,
+  "seed_summaries": {
+    "17": {
+      "status": "validation_gate_failed",
+      "passed": false,
+      "selected_epoch": 0,
+      "selection_score": 1.25,
+      "endpoint_event_mae": 0.12392580509185791,
+      "streaming_event_mae_mean": 0.41443919738133744,
+      "late_event_abs_step_p95_mw": 0.0272463321685791,
+      "checkpoint": {
+        "path": "/home/lihe/PINN_Mag/runs/phase48-joint-phase39-streaming-20260728T143620Z-3ff2449/seed_17/best_model.pth",
+        "sha256": "85f2450418a44062301f5b95a670f12c55220e54b6692db80f1d3d5d12c99d91"
+      }
+    },
+    "42": {
+      "status": "validation_gate_failed",
+      "passed": false,
+      "selected_epoch": 0,
+      "selection_score": 1.2499999999999998,
+      "endpoint_event_mae": 0.11433351834615071,
+      "streaming_event_mae_mean": 0.5228367845217388,
+      "late_event_abs_step_p95_mw": 0.02548871040344237,
+      "checkpoint": {
+        "path": "/home/lihe/PINN_Mag/runs/phase48-joint-phase39-streaming-20260728T143620Z-3ff2449/seed_42/best_model.pth",
+        "sha256": "e6739b47792b5f45e3b194fa29fd97a1e39705cfabb3bb12728d6adf723876bd"
+      }
+    },
+    "73": {
+      "status": "validation_gate_failed",
+      "passed": false,
+      "selected_epoch": 0,
+      "selection_score": 1.25,
+      "endpoint_event_mae": 0.17061189810434976,
+      "streaming_event_mae_mean": 0.37408616224924723,
+      "late_event_abs_step_p95_mw": 0.026526808738708493,
+      "checkpoint": {
+        "path": "/home/lihe/PINN_Mag/runs/phase48-joint-phase39-streaming-20260728T143620Z-3ff2449/seed_73/best_model.pth",
+        "sha256": "e51f8b001c088b45c870706d3efc08d39d664bced3b7eba2dec5bd63b79c26c6"
+      }
+    }
+  },
+  "protocol": {
+    "phase": "Phase48",
+    "source_model": "Phase39 Glehman scalar + global invariant",
+    "seeds": [
+      17,
+      42,
+      73
+    ],
+    "architecture_changed": false,
+    "adapter_used": false,
+    "expected_parameter_count": 1010850,
+    "trainable_scope": "all existing Phase39 parameters",
+    "initialization": "deterministic_random",
+    "epochs": 200,
+    "optimizer": "AdamW",
+    "learning_rate": 0.0001,
+    "weight_decay": 1e-05,
+    "grad_clip_norm": 1.0,
+    "scheduler": "CosineAnnealingWarmRestarts",
+    "scheduler_T0": 15,
+    "scheduler_T_mult": 2,
+    "scheduler_eta_min": 1e-06,
+    "scheduler_delay_epochs": 5,
+    "full_science_weight": 0.5,
+    "prefix_science_weight": 0.5,
+    "prefix_contract": "true variable-length B x 1 x h radial input",
+    "minimum_prefix_horizon": 20,
+    "maximum_prefix_horizon": 200,
+    "horizon_cycle_multiplier": 73,
+    "previous_prefix_teacher": "same model, eval mode, stop-gradient",
+    "mw_step_weight": 0.2,
+    "mw_step_huber_beta": 0.02,
+    "confirmed_history_weight": 0.05,
+    "confirmed_history_huber_beta": 0.05,
+    "consistency_start_horizon": 60,
+    "consistency_time_weight": "quadratic from 0 at 60 s to 1 at 200 s",
+    "validation_horizons": [
+      20,
+      40,
+      60,
+      80,
+      100,
+      120,
+      140,
+      160,
+      179,
+      180,
+      181,
+      182,
+      183,
+      184,
+      185,
+      186,
+      187,
+      188,
+      189,
+      190,
+      191,
+      192,
+      193,
+      194,
+      195,
+      196,
+      197,
+      198,
+      199,
+      200
+    ],
+    "accuracy_horizons": [
+      20,
+      40,
+      60,
+      80,
+      100,
+      120,
+      140,
+      160,
+      180,
+      200
+    ],
+    "gates": {
+      "endpoint_margin_mw": 0.005,
+      "streaming_accuracy_ratio": 0.95,
+      "late_event_step_ratio": 0.8,
+      "late_station_step_ratio": 1.0,
+      "late_history_step_ratio": 0.8
+    },
+    "hidden_data": "internal test, external development events, and grouped test are not iterated"
+  },
+  "hidden_data": {
+    "internal_test_iterated": false,
+    "external_data_loaded": false,
+    "grouped_test_loaded": false
+  }
+}
