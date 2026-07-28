@@ -1,0 +1,112 @@
+{
+  "files": [
+    {
+      "bytes": 5214,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/README.md",
+      "sha256": "d4f692c8faf40931ada4f7214c5a864bc320c60d4bdfc184ce73f52b0db9d856"
+    },
+    {
+      "bytes": 27406,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/external_endpoint_station_predictions.csv",
+      "sha256": "edf05ecd67a4dc2cf53981f318a5645c19973b854b1fd6e807271f49378dc937"
+    },
+    {
+      "bytes": 1231,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/external_event_convergence.csv",
+      "sha256": "5949da5aa220c626379683844e1b664756c102ef9abf4c924eb8b5d4d1b1e97a"
+    },
+    {
+      "bytes": 293204,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/external_event_predictions.csv",
+      "sha256": "b524c65fa9fd9f987f780a68a7b13a481aae9ce4626311b3fe7eea43d0de1c53"
+    },
+    {
+      "bytes": 60031,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/external_horizon_metrics.csv",
+      "sha256": "7d4d4dbdc597c355ebb89e0acd0d934def82aa83a20f56fd4a7811d5ae332f4d"
+    },
+    {
+      "bytes": 4858657,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/external_station_predictions.csv",
+      "sha256": "b366f98128c2ec74c0d60147015cfba630201592ae57b1410bdc3a8181f6dcdc"
+    },
+    {
+      "bytes": 35815,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/figures/01_training_loss.pdf",
+      "sha256": "5b51a08c64e4a46b251c43955626379bf542689bb7fdbd995d0e36d5c1253297"
+    },
+    {
+      "bytes": 219819,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/figures/01_training_loss.png",
+      "sha256": "e58066e95b75a8eb4e6876c63813ad0069f5e72cb5516862d6fa3031ec99d1da"
+    },
+    {
+      "bytes": 29805,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/figures/02_internal_test.pdf",
+      "sha256": "c52eb3b52c54eb93d55db4ef8b46f3dc50fb49a92557a886f5cb3b5ad8019dfe"
+    },
+    {
+      "bytes": 151525,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/figures/02_internal_test.png",
+      "sha256": "30ea1aa26d75a7ba8c127ea63ad79e47e4370b9ff36ea08cfcebac725a33c330"
+    },
+    {
+      "bytes": 33272,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/figures/03_external_overall.pdf",
+      "sha256": "d98bf753805cebc89b141f000d778670fb8110ea3020637c3d550283820182af"
+    },
+    {
+      "bytes": 218010,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/figures/03_external_overall.png",
+      "sha256": "5433617d6c633686f9efc39a3d97595e22db6caebc5e02934eecdcece23947cd"
+    },
+    {
+      "bytes": 65546,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/figures/04_external_event_trajectories.pdf",
+      "sha256": "5b41d6744d7fe119e3faad9f4e1e01e533d2d3150de72c0c8dad4433a6dc15ad"
+    },
+    {
+      "bytes": 580652,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/figures/04_external_event_trajectories.png",
+      "sha256": "894da8b57cb6d79d1575c918bf69e527de145c2c9bb7fe2365390212619de025"
+    },
+    {
+      "bytes": 62658,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/internal_endpoint_station_predictions.csv",
+      "sha256": "60ce7f363b979cbbd6161e3bb47f01b3d11e8815f67ad80bb1e94318dcda06ae"
+    },
+    {
+      "bytes": 3833,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/internal_event_convergence.csv",
+      "sha256": "fc92a89613165ed7471bfffed9aa602dfe3e98cca6e69026d0f8051c9451af7b"
+    },
+    {
+      "bytes": 1070150,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/internal_event_predictions.csv",
+      "sha256": "ff2bd16dd0df54aab07cdae5a90aface06b5eb78213f9d1151ca33a93dee82d3"
+    },
+    {
+      "bytes": 59867,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/internal_horizon_metrics.csv",
+      "sha256": "eb5aae1805174ac0a92e9600f7bc13824057566b60aff384694b3f95419fb7e8"
+    },
+    {
+      "bytes": 16395,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/summary.json",
+      "sha256": "faad4d49ecbc5aa9d46c85ac65bb3a9e92301c497e96f8df8588d355ccee0271"
+    },
+    {
+      "bytes": 10765,
+      "path": "docs/reports/phase45-posthoc-train-test-external-zh/training_loss_by_epoch.csv",
+      "sha256": "929f7042015d870dae45562a44c35a050680eae77fd71ad369ea4bc593d796f4"
+    }
+  ],
+  "generated_at_utc": "2026-07-28T13:28:26.435193+00:00",
+  "generator": {
+    "path": "scripts/plotting/plot_phase45_posthoc_report_zh.py",
+    "sha256": "a5d1173ab092a636dbe10bf8db69a7003d456c1c3fbb8014435725f5cebee7c5"
+  },
+  "implementation_commit": "20d35a985623e4976543b63f951c3265f62af335",
+  "report_role": "posthoc_internal_test_and_development_validation",
+  "run_root": "/home/lihe/PINN_Mag/runs/phase46-phase45-posthoc-20260728T131632Z-20d35a9"
+}
