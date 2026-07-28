@@ -1,0 +1,85 @@
+{
+  "files": {
+    "README.md": {
+      "bytes": 6125,
+      "sha256": "ca8579131ef6fb9bf44c7fa2301bbd11e4b5c539092a77d7420cf5f88f91ff55"
+    },
+    "checkpoint_recovery.csv": {
+      "bytes": 574,
+      "sha256": "4740244e7ee92169e5f042f60d7b0d8e4982f4794e29b35f11aa3a517ab28348"
+    },
+    "endpoint_event_comparison.csv": {
+      "bytes": 1709,
+      "sha256": "637e422cbbbd5700a3f0e5d60f57ce180a9d79119674dd915daf7f18447becbc"
+    },
+    "endpoint_station_predictions.csv": {
+      "bytes": 66603,
+      "sha256": "8bef2ebc54170e8420680a1e1c75721b6595a819c6d1fca68a061c4da87fc1f0"
+    },
+    "evaluation_summary.json": {
+      "bytes": 16715,
+      "sha256": "f22da7e07fdd64835fcb6932d154f4bf07fa32301b3d4058a28bd55351d3ecae"
+    },
+    "event_convergence.csv": {
+      "bytes": 2175,
+      "sha256": "a67ea35893811442a722be8f71e6edb951d9bf2cfd35bba220e41c2b7132bed1"
+    },
+    "event_predictions.csv": {
+      "bytes": 572502,
+      "sha256": "898f9e863026c5353fa33fd4bf9c8da54e12fa3f4214f21eb8731e602473c4e6"
+    },
+    "figures/01_accuracy_stability_tradeoff.pdf": {
+      "bytes": 32358,
+      "sha256": "417d849738a551b5e0d78ba1622e25214a25fb8e9e3b0e6fc05bd2e814c9da1a"
+    },
+    "figures/01_accuracy_stability_tradeoff.png": {
+      "bytes": 164786,
+      "sha256": "31e91ecd48dc575138cbfca4d8efa81f2faebde892ac30f334446f058691598a"
+    },
+    "figures/02_event_trajectories.pdf": {
+      "bytes": 61099,
+      "sha256": "a10a05d24148185d0017406d2bbaa8f9ff96a5feabdbcc6ee0ea157027a2d1d0"
+    },
+    "figures/02_event_trajectories.png": {
+      "bytes": 912904,
+      "sha256": "2d9882fdfde3175cda194742629742084abdb09c3ea77a77577741f8f73e644c"
+    },
+    "figures/03_revision_diagnostics.pdf": {
+      "bytes": 30223,
+      "sha256": "d50ecfce97949001a625412b756587e11e294b94cb4c565e0c18570a36a56756"
+    },
+    "figures/03_revision_diagnostics.png": {
+      "bytes": 167604,
+      "sha256": "9f28bc49798e7cc3387099def17a91f14d8b273e7f0660731c4c7cd911455a7f"
+    },
+    "horizon_metrics.csv": {
+      "bytes": 97719,
+      "sha256": "8d9c0e05257ee2f818cf41c8b52d9432a2d00d37eba881b0dd07ac73894ccf5e"
+    },
+    "overall_metrics.csv": {
+      "bytes": 662,
+      "sha256": "ed1042eda900c4f2511b708f7de36717a54700c58bded20167c3db566638a53c"
+    },
+    "station_predictions.csv.gz": {
+      "bytes": 3060662,
+      "sha256": "1a41158cc8861c47771e7f973f18519dbb4c6516cd7d3b34fe58db9387558295"
+    },
+    "summary.json": {
+      "bytes": 34469,
+      "sha256": "f24c813dc4e32f82c7a7834c070701d2a12c4d9e112ea441b955cad474e49e9d"
+    },
+    "trajectory_diagnostics.csv": {
+      "bytes": 7451,
+      "sha256": "75241698f50f17ff8abe54b73d2395b38b8c53c574d57e72ee558b307b244ca4"
+    }
+  },
+  "generated_at_utc": "2026-07-28T17:23:55.362455+00:00",
+  "generator": {
+    "path": "scripts/plotting/plot_phase49_posthoc_direct_streaming_zh.py",
+    "sha256": "a84eff3cda192771d18fc718fa9a6fd9d6cdf790b0e12b48ee0ab48232eff1b4"
+  },
+  "implementation_commit": "4321776bb600fc45aab6aceb5fbc75a50e556c95",
+  "publication_commit": "41176fef513fd6dc10d531136831a3971cadb9c8",
+  "report_role": "development_validation_posthoc",
+  "run_root": "/home/lihe/PINN_Mag/runs/phase49-posthoc-direct-streaming-20260728T171040Z-4321776"
+}
