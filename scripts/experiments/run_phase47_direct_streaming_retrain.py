@@ -120,6 +120,13 @@ LATE_EVENT_STEP_RATIO = 0.80
 LATE_STATION_STEP_RATIO = 1.00
 LATE_HISTORY_STEP_RATIO = 0.80
 
+JOINT_EPOCHS = 200
+JOINT_LEARNING_RATE = 1.0e-4
+JOINT_SCHEDULER_T0 = 15
+JOINT_SCHEDULER_T_MULT = 2
+JOINT_SCHEDULER_ETA_MIN = 1.0e-6
+JOINT_SCHEDULER_DELAY_EPOCHS = 5
+
 
 def _source_paths(seed: int) -> dict[str, Path]:
     if seed not in SOURCE_TIMESTAMPS:
@@ -245,6 +252,32 @@ def late_consistency_weight(horizon: int) -> float:
     span = MAX_PREFIX_HORIZON - CONSISTENCY_START_HORIZON
     progress = (horizon - CONSISTENCY_START_HORIZON) / span
     return float(progress * progress)
+
+
+def training_schedule(*, joint_from_scratch: bool) -> dict[str, Any]:
+    if joint_from_scratch:
+        return {
+            "phase": "Phase48",
+            "initialization": "deterministic_random",
+            "epochs": JOINT_EPOCHS,
+            "learning_rate": JOINT_LEARNING_RATE,
+            "scheduler": "CosineAnnealingWarmRestarts",
+            "scheduler_T0": JOINT_SCHEDULER_T0,
+            "scheduler_T_mult": JOINT_SCHEDULER_T_MULT,
+            "scheduler_eta_min": JOINT_SCHEDULER_ETA_MIN,
+            "scheduler_delay_epochs": JOINT_SCHEDULER_DELAY_EPOCHS,
+        }
+    return {
+        "phase": "Phase47",
+        "initialization": "phase39_seed_checkpoint",
+        "epochs": EPOCHS,
+        "learning_rate": LEARNING_RATE,
+        "scheduler": "constant",
+        "scheduler_T0": None,
+        "scheduler_T_mult": None,
+        "scheduler_eta_min": None,
+        "scheduler_delay_epochs": None,
+    }
 
 
 def mw_step_consistency(
@@ -541,19 +574,27 @@ def validation_gate(
     }
 
 
-def _protocol_payload() -> dict[str, Any]:
+def _protocol_payload(*, joint_from_scratch: bool = False) -> dict[str, Any]:
+    schedule = training_schedule(joint_from_scratch=joint_from_scratch)
     return {
+        "phase": schedule["phase"],
         "source_model": "Phase39 Glehman scalar + global invariant",
         "seeds": list(SEEDS),
         "architecture_changed": False,
         "adapter_used": False,
         "expected_parameter_count": EXPECTED_PARAMETER_COUNT,
         "trainable_scope": "all existing Phase39 parameters",
-        "epochs": EPOCHS,
+        "initialization": schedule["initialization"],
+        "epochs": schedule["epochs"],
         "optimizer": "AdamW",
-        "learning_rate": LEARNING_RATE,
+        "learning_rate": schedule["learning_rate"],
         "weight_decay": WEIGHT_DECAY,
         "grad_clip_norm": GRAD_CLIP_NORM,
+        "scheduler": schedule["scheduler"],
+        "scheduler_T0": schedule["scheduler_T0"],
+        "scheduler_T_mult": schedule["scheduler_T_mult"],
+        "scheduler_eta_min": schedule["scheduler_eta_min"],
+        "scheduler_delay_epochs": schedule["scheduler_delay_epochs"],
         "full_science_weight": FULL_SCIENCE_WEIGHT,
         "prefix_science_weight": PREFIX_SCIENCE_WEIGHT,
         "prefix_contract": "true variable-length B x 1 x h radial input",
@@ -723,6 +764,7 @@ def run_seed(
     output_root: Path,
     smoke: bool,
     device: torch.device,
+    joint_from_scratch: bool = False,
 ) -> dict[str, Any]:
     output_root.mkdir(parents=True, exist_ok=False)
     source_hashes = validate_source_artifacts(seed)
@@ -743,6 +785,7 @@ def run_seed(
         raise ValueError(f"Phase39 seed{seed} record counts changed: {counts}")
     del test_loader
 
+    schedule = training_schedule(joint_from_scratch=joint_from_scratch)
     model = PINNModel(config).to(device)
     parameter_count = sum(parameter.numel() for parameter in model.parameters())
     if parameter_count != EXPECTED_PARAMETER_COUNT:
@@ -755,21 +798,41 @@ def run_seed(
         map_location=device,
         weights_only=True,
     )
-    model.load_state_dict(source_state, strict=True)
+    if joint_from_scratch:
+        initial_state_path = output_root / "initial_model.pth"
+        atomic_torch_save(dict(model.state_dict()), initial_state_path)
+    else:
+        initial_state_path = None
+        model.load_state_dict(source_state, strict=True)
     for parameter in model.parameters():
         parameter.requires_grad_(True)
     optimizer = torch.optim.AdamW(
         model.parameters(),
-        lr=LEARNING_RATE,
+        lr=float(schedule["learning_rate"]),
         weight_decay=WEIGHT_DECAY,
+    )
+    scheduler = (
+        torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+            optimizer,
+            T_0=int(schedule["scheduler_T0"]),
+            T_mult=int(schedule["scheduler_T_mult"]),
+            eta_min=float(schedule["scheduler_eta_min"]),
+        )
+        if joint_from_scratch
+        else None
     )
     criterion = _build_stf_rate_criterion(config, device)
     event_weights = _training_event_balance_weights(config, train_loader)
 
-    protocol = _protocol_payload()
+    protocol = _protocol_payload(joint_from_scratch=joint_from_scratch)
     _write_json(output_root / "protocol.json", protocol)
     config_snapshot = copy.deepcopy(config)
-    config_snapshot["phase47_direct_streaming_retrain"] = protocol
+    protocol_key = (
+        "phase48_joint_streaming_from_scratch"
+        if joint_from_scratch
+        else "phase47_direct_streaming_retrain"
+    )
+    config_snapshot[protocol_key] = protocol
     with (output_root / "config.yaml").open("w", encoding="utf-8") as handle:
         yaml.safe_dump(
             config_snapshot,
@@ -779,13 +842,18 @@ def run_seed(
         )
     _write_json(output_root / "split.json", split_manifest)
 
+    baseline_model = model if not joint_from_scratch else copy.deepcopy(model)
+    if joint_from_scratch:
+        baseline_model.load_state_dict(source_state, strict=True)
     baseline_metrics = evaluate_validation_streaming(
-        model,
+        baseline_model,
         config,
         validation_loader,
         criterion,
         max_batches=2 if smoke else None,
     )
+    if joint_from_scratch:
+        del baseline_model
     if not smoke and not math.isclose(
         float(baseline_metrics["endpoint_event_mae"]),
         SOURCE_VALIDATION_EVENT_MAE[seed],
@@ -806,9 +874,12 @@ def run_seed(
     best_gate = dict(baseline_gate)
     best_score = float(baseline_gate["selection_score"])
     best_epoch = 0
-    atomic_torch_save(dict(model.state_dict()), output_root / "best_model.pth")
+    atomic_torch_save(
+        dict(source_state) if joint_from_scratch else dict(model.state_dict()),
+        output_root / "best_model.pth",
+    )
 
-    epochs = 1 if smoke else EPOCHS
+    epochs = 1 if smoke else int(schedule["epochs"])
     max_train_batches = 2 if smoke else None
     rows: list[dict[str, Any]] = []
     global_step = 0
@@ -936,9 +1007,11 @@ def run_seed(
             max_batches=2 if smoke else None,
         )
         gate = validation_gate(validation_metrics, baseline_metrics)
+        current_lr = float(optimizer.param_groups[0]["lr"])
         row = {
             "epoch": epoch,
             "global_step": global_step,
+            "learning_rate": current_lr,
             "train_online_total_loss": sums["total"] / train_seen,
             "train_online_full_science_loss": sums["full"] / train_seen,
             "train_online_prefix_science_loss": sums["prefix"] / train_seen,
@@ -987,6 +1060,7 @@ def run_seed(
         )
         print(
             f"seed={seed} epoch={epoch}/{epochs} "
+            f"lr={current_lr:.2e} "
             f"full={row['train_online_full_science_loss']:.6f} "
             f"prefix={row['train_online_prefix_science_loss']:.6f} "
             f"val_event={row['endpoint_event_mae']:.6f} "
@@ -995,6 +1069,11 @@ def run_seed(
             f"score={row['selection_score']:.6f}",
             flush=True,
         )
+        if (
+            scheduler is not None
+            and epoch > int(schedule["scheduler_delay_epochs"])
+        ):
+            scheduler.step()
 
     if smoke:
         atomic_torch_save(dict(model.state_dict()), output_root / "best_model.pth")
@@ -1030,8 +1109,23 @@ def run_seed(
         "git_commit": current_git_commit(PROJECT_ROOT),
         "git_dirty": git_is_dirty(PROJECT_ROOT),
         "device": str(device),
+        "phase": schedule["phase"],
+        "initialization": schedule["initialization"],
+        "initial_model": (
+            None
+            if initial_state_path is None
+            else {
+                "path": str(initial_state_path),
+                "sha256": sha256_file(initial_state_path),
+            }
+        ),
         "source_artifact_sha256": source_hashes,
         "source_checkpoint": str(_source_paths(seed)["checkpoint"]),
+        "source_checkpoint_role": (
+            "validation baseline only"
+            if joint_from_scratch
+            else "training initialization and validation baseline"
+        ),
         "source_split_assignment_sha256": split_manifest["assignment_sha256"],
         "architecture_changed": False,
         "adapter_used": False,
@@ -1045,6 +1139,8 @@ def run_seed(
         "passed": passed,
         "smoke": smoke,
         "seed": seed,
+        "phase": schedule["phase"],
+        "initialization": schedule["initialization"],
         "source_model": "Phase39 Glehman scalar + global invariant",
         "parameter_count": parameter_count,
         "selected_epoch": best_epoch,
@@ -1068,10 +1164,11 @@ def run_campaign(
     output_root: Path,
     smoke: bool,
     device: torch.device,
+    joint_from_scratch: bool = False,
 ) -> dict[str, Any]:
     _validate_output_root(output_root, smoke=smoke)
     output_root.mkdir(parents=True, exist_ok=True)
-    protocol = _protocol_payload()
+    protocol = _protocol_payload(joint_from_scratch=joint_from_scratch)
     _write_json(output_root / "protocol.json", protocol)
     selected_seeds = (42,) if smoke else SEEDS
     summaries = [
@@ -1080,6 +1177,7 @@ def run_campaign(
             output_root=output_root / f"seed_{seed}",
             smoke=smoke,
             device=device,
+            joint_from_scratch=joint_from_scratch,
         )
         for seed in selected_seeds
     ]
@@ -1107,6 +1205,8 @@ def run_campaign(
         "status": status,
         "passed": bool(selected is not None),
         "smoke": smoke,
+        "phase": protocol["phase"],
+        "initialization": protocol["initialization"],
         "selected_seed": None if selected is None else int(selected["seed"]),
         "selected_checkpoint": (
             None if selected is None else selected["best_checkpoint"]
@@ -1164,6 +1264,14 @@ def build_arg_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Run seed42 for one epoch with two train/validation batches.",
     )
+    parser.add_argument(
+        "--joint-from-scratch",
+        action="store_true",
+        help=(
+            "Use the Phase48 random initialization and original 200-epoch "
+            "Phase39 optimizer/scheduler contract."
+        ),
+    )
     return parser
 
 
@@ -1176,6 +1284,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         output_root=output_root,
         smoke=bool(args.smoke),
         device=torch.device(args.device),
+        joint_from_scratch=bool(args.joint_from_scratch),
     )
     print(
         json.dumps(
@@ -1184,6 +1293,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "status": summary["status"],
                 "passed": summary["passed"],
                 "selected_seed": summary["selected_seed"],
+                "phase": summary["phase"],
             },
             ensure_ascii=False,
         ),

@@ -9,12 +9,16 @@ import torch
 
 from scripts.experiments.run_phase47_direct_streaming_retrain import (
     EXPECTED_PARAMETER_COUNT,
+    JOINT_EPOCHS,
+    JOINT_LEARNING_RATE,
+    JOINT_SCHEDULER_T0,
     MAX_PREFIX_HORIZON,
     MIN_PREFIX_HORIZON,
     SEEDS,
     horizon_for_step,
     late_consistency_weight,
     mw_step_consistency,
+    training_schedule,
     validation_gate,
 )
 
@@ -96,6 +100,27 @@ def test_phase47_keeps_phase39_parameter_count() -> None:
     assert EXPECTED_PARAMETER_COUNT == 1_010_850
 
 
+def test_joint_from_scratch_restores_original_phase39_schedule() -> None:
+    schedule = training_schedule(joint_from_scratch=True)
+
+    assert schedule["phase"] == "Phase48"
+    assert schedule["initialization"] == "deterministic_random"
+    assert schedule["epochs"] == JOINT_EPOCHS == 200
+    assert schedule["learning_rate"] == JOINT_LEARNING_RATE == 1.0e-4
+    assert schedule["scheduler"] == "CosineAnnealingWarmRestarts"
+    assert schedule["scheduler_T0"] == JOINT_SCHEDULER_T0 == 15
+
+
+def test_default_schedule_still_reproduces_phase47() -> None:
+    schedule = training_schedule(joint_from_scratch=False)
+
+    assert schedule["phase"] == "Phase47"
+    assert schedule["initialization"] == "phase39_seed_checkpoint"
+    assert schedule["epochs"] == 20
+    assert schedule["learning_rate"] == 1.0e-5
+    assert schedule["scheduler"] == "constant"
+
+
 def test_script_help_states_no_adapter_contract() -> None:
     result = subprocess.run(
         [
@@ -112,4 +137,5 @@ def test_script_help_states_no_adapter_contract() -> None:
     assert result.returncode == 0, result.stderr
     assert "--output-root" in result.stdout
     assert "--smoke" in result.stdout
+    assert "--joint-from-scratch" in result.stdout
     assert "no adapter" in result.stdout.lower()
