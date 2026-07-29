@@ -56,7 +56,7 @@ DEFAULT_CACHE_ROOT = Path(
 )
 SEEDS = (17, 42, 73)
 EXPECTED_BASE_PARAMETER_COUNT = 1_010_850
-EXPECTED_TRANSITION_PARAMETER_COUNT = 546
+EXPECTED_TRANSITION_PARAMETER_COUNT = 963
 EXPECTED_TOTAL_PARAMETER_COUNT = (
     EXPECTED_BASE_PARAMETER_COUNT + EXPECTED_TRANSITION_PARAMETER_COUNT
 )
@@ -756,6 +756,11 @@ def _protocol(
         "proposal_correction": {
             "coordinate": "per_source_bin_log10",
             "max_absolute_log10": MAX_PROPOSAL_CORRECTION_LOG10,
+            "initialization": "identity",
+        },
+        "stateful_total_moment": {
+            "coordinate": "log10_moment_residual",
+            "hidden_size": 8,
             "initialization": "identity",
         },
         "batch_size": BATCH_SIZE,

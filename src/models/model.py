@@ -25,6 +25,8 @@ class PINNStreamingState:
     released_rate: torch.Tensor
     proposal_rate: torch.Tensor
     hidden: torch.Tensor
+    moment_hidden: torch.Tensor
+    released_log10_moment: torch.Tensor
     horizon_sec: int
 
 
@@ -121,6 +123,14 @@ class ReleasedSTFTransition(nn.Module):
         self.candidate_correction_head = nn.Linear(self.hidden_size, 1)
         nn.init.zeros_(self.candidate_correction_head.weight)
         nn.init.zeros_(self.candidate_correction_head.bias)
+        self.moment_feature_count = 7
+        self.moment_cell = nn.GRUCell(
+            input_size=self.moment_feature_count,
+            hidden_size=self.hidden_size,
+        )
+        self.moment_correction_head = nn.Linear(self.hidden_size, 1)
+        nn.init.zeros_(self.moment_correction_head.weight)
+        nn.init.zeros_(self.moment_correction_head.bias)
 
     def encode_rate(self, rate: torch.Tensor) -> torch.Tensor:
         return torch.log10(1.0 + rate.clamp_min(0.0) / self.stf_m_ref)
@@ -212,12 +222,23 @@ class ReleasedSTFTransition(nn.Module):
                 raise ValueError("state proposal_rate shape changed")
             if state.hidden.shape != expected_hidden_shape:
                 raise ValueError("state hidden shape changed")
+            if state.moment_hidden.shape != (
+                raw_rate.shape[0],
+                self.hidden_size,
+            ):
+                raise ValueError("state moment_hidden shape changed")
+            if state.released_log10_moment.shape != (raw_rate.shape[0],):
+                raise ValueError("state released_log10_moment shape changed")
 
         support, support_age = self.support_fraction(
             horizon_sec=horizon_sec,
             source_distance_m=source_distance_m,
             beta_m_per_s=beta_m_per_s,
             reference=raw_rate,
+        )
+        distance = source_distance_m.reshape(-1).to(
+            device=raw_rate.device,
+            dtype=raw_rate.dtype,
         )
         proposal = raw_rate * support
         encoded_proposal = self.encode_rate(proposal)
@@ -230,10 +251,20 @@ class ReleasedSTFTransition(nn.Module):
                 self.source_steps,
                 self.hidden_size,
             )
+            previous_moment_hidden = raw_rate.new_zeros(
+                batch_size,
+                self.hidden_size,
+            )
+            previous_released_log10_moment = raw_rate.new_full(
+                (batch_size,),
+                10.0,
+            )
         else:
             previous_released = state.released_rate
             previous_proposal = state.proposal_rate
             previous_hidden = state.hidden
+            previous_moment_hidden = state.moment_hidden
+            previous_released_log10_moment = state.released_log10_moment
         encoded_previous_proposal = self.encode_rate(previous_proposal)
         encoded_previous_released = self.encode_rate(previous_released)
         local = F.gelu(self.local_context(encoded_proposal.unsqueeze(1)))
@@ -274,17 +305,92 @@ class ReleasedSTFTransition(nn.Module):
         candidate = proposal * torch.exp(correction_log10 * math.log(10.0))
         retention = torch.sigmoid(self.gate_head(hidden).squeeze(-1)) * support
         if state is None:
-            released = candidate
+            preliminary_released = candidate
             retention = torch.zeros_like(retention)
         else:
-            released = (
+            preliminary_released = (
                 retention * previous_released
                 + (1.0 - retention) * candidate
             )
+        candidate_log10_moment = torch.log10(
+            torch.sum(candidate * source_dt.reshape(-1, 1), dim=1).clamp_min(
+                1.0e10
+            )
+        )
+        previous_proposal_log10_moment = torch.log10(
+            torch.sum(
+                previous_proposal * source_dt.reshape(-1, 1),
+                dim=1,
+            ).clamp_min(1.0e10)
+        )
+        preliminary_log10_moment = torch.log10(
+            torch.sum(
+                preliminary_released * source_dt.reshape(-1, 1),
+                dim=1,
+            ).clamp_min(1.0e10)
+        )
+        moment_features = torch.stack(
+            (
+                torch.clamp(
+                    (candidate_log10_moment - 20.0) / 3.0,
+                    min=-2.0,
+                    max=2.0,
+                ),
+                torch.clamp(
+                    candidate_log10_moment - previous_proposal_log10_moment,
+                    min=-2.0,
+                    max=2.0,
+                ),
+                torch.clamp(
+                    (previous_released_log10_moment - 20.0) / 3.0,
+                    min=-2.0,
+                    max=2.0,
+                ),
+                torch.clamp(
+                    candidate_log10_moment
+                    - previous_released_log10_moment,
+                    min=-2.0,
+                    max=2.0,
+                ),
+                raw_rate.new_full(
+                    (batch_size,),
+                    float(horizon_sec) / float(max(self.source_steps, 1)),
+                ),
+                support.mean(dim=1),
+                torch.clamp(
+                    distance
+                    / float(beta_m_per_s)
+                    / float(max(self.source_steps, 1)),
+                    min=0.0,
+                    max=2.0,
+                ),
+            ),
+            dim=1,
+        )
+        moment_hidden = self.moment_cell(
+            moment_features,
+            previous_moment_hidden,
+        )
+        moment_correction_log10 = (
+            self.max_proposal_correction_log10
+            * torch.tanh(
+                self.moment_correction_head(moment_hidden).squeeze(-1)
+            )
+        )
+        released = preliminary_released * torch.exp(
+            moment_correction_log10.unsqueeze(1) * math.log(10.0)
+        )
+        released_log10_moment = torch.log10(
+            torch.sum(released * source_dt.reshape(-1, 1), dim=1).clamp_min(
+                1.0e10
+            )
+        )
         next_state = PINNStreamingState(
             released_rate=released,
             proposal_rate=proposal,
             hidden=hidden,
+            moment_hidden=moment_hidden,
+            released_log10_moment=released_log10_moment,
             horizon_sec=int(horizon_sec),
         )
         return released, retention, support, next_state

@@ -135,7 +135,7 @@ def test_phase39_checkpoint_loads_with_only_transition_keys_missing() -> None:
         for name, parameter in stateful.named_parameters()
         if name.startswith("released_stf_transition.")
     )
-    assert transition_parameters == 546
+    assert transition_parameters == 963
 
 
 def test_stream_sequence_carries_state_and_matches_manual_steps() -> None:
@@ -177,6 +177,16 @@ def test_stream_sequence_carries_state_and_matches_manual_steps() -> None:
     assert torch.all(released >= 0.0)
     assert torch.all((gates >= 0.0) & (gates <= 1.0))
     assert state is not None and state.horizon_sec == 22
+    assert state.moment_hidden.shape == (2, 8)
+    assert state.released_log10_moment.shape == (2,)
+    torch.testing.assert_close(
+        state.released_log10_moment,
+        torch.log10(
+            torch.sum(state.released_rate * source_dt[:, None], dim=1).clamp_min(
+                1.0e10
+            )
+        ),
+    )
 
 
 def test_first_stream_step_is_causally_supported_proposal() -> None:
@@ -256,7 +266,7 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
     config = _stateful_config()
     model = PINNModel(config).train()
     trainable = freeze_transition_scope(model)
-    assert sum(parameter.numel() for parameter in trainable) == 546
+    assert sum(parameter.numel() for parameter in trainable) == 963
     assert all(
         parameter.requires_grad == name.startswith("released_stf_transition.")
         for name, parameter in model.named_parameters()
@@ -296,6 +306,29 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
     assert torch.sum(boosted) > torch.sum(reduced)
     assert boosted[0, 0] > raw[0, 0]
     assert reduced[0, 0] < raw[0, 0]
+
+    moment_head = model.released_stf_transition.moment_correction_head
+    with torch.no_grad():
+        moment_head.bias.fill_(1.0)
+        moment_boosted = model.stream_step_from_rate(
+            raw,
+            state=None,
+            horizon_sec=20,
+            source_distance_m=torch.zeros(1),
+            source_dt_sec=torch.ones(1),
+            beta_m_per_s=4_533.0,
+        ).released_rate
+        moment_head.bias.fill_(-1.0)
+        moment_reduced = model.stream_step_from_rate(
+            raw,
+            state=None,
+            horizon_sec=20,
+            source_distance_m=torch.zeros(1),
+            source_dt_sec=torch.ones(1),
+            beta_m_per_s=4_533.0,
+        ).released_rate
+        moment_head.bias.zero_()
+    assert torch.sum(moment_boosted) > torch.sum(moment_reduced)
 
     frozen_source = {
         name: value.detach().cpu().clone()
