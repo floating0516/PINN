@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import math
 from pathlib import Path
 
 import numpy as np
@@ -56,6 +57,10 @@ def _stateful_config() -> dict:
         "support_ramp_sec": 6.0,
         "initial_gate_logit": -4.0,
         "max_proposal_correction_log10": 1.0,
+        "max_moment_down_fraction_per_step": 0.003,
+        "early_moment_down_fraction_per_step": 0.1,
+        "moment_stability_start_sec": 60,
+        "max_moment_proposal_correction_log10": 3.0,
     }
     return config
 
@@ -84,6 +89,41 @@ def test_stateful_config_defaults_to_disabled() -> None:
             {
                 "mode": "released_stf_gru",
                 "max_proposal_correction_log10": 0.0,
+            },
+            "positive",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "max_moment_down_fraction_per_step": 0.0,
+            },
+            "between zero and one",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "max_moment_down_fraction_per_step": 1.0,
+            },
+            "between zero and one",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "early_moment_down_fraction_per_step": 0.001,
+            },
+            "at least",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "moment_stability_start_sec": 0,
+            },
+            "positive integer",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "max_moment_proposal_correction_log10": 0.0,
             },
             "positive",
         ),
@@ -135,7 +175,7 @@ def test_phase39_checkpoint_loads_with_only_transition_keys_missing() -> None:
         for name, parameter in stateful.named_parameters()
         if name.startswith("released_stf_transition.")
     )
-    assert transition_parameters == 963
+    assert transition_parameters == 981
 
 
 def test_stream_sequence_carries_state_and_matches_manual_steps() -> None:
@@ -261,12 +301,149 @@ def test_stateful_transition_receives_finite_gradients() -> None:
     )
 
 
+def test_asymmetric_moment_update_limits_downward_revision() -> None:
+    model = PINNModel(_stateful_config()).eval()
+    transition = model.released_stf_transition
+    assert transition is not None
+    raw = torch.full((1, 200), 2.0e18)
+    source_distance = torch.zeros(1)
+    source_dt = torch.ones(1)
+
+    first = model.stream_step_from_rate(
+        raw,
+        state=None,
+        horizon_sec=59,
+        source_distance_m=source_distance,
+        source_dt_sec=source_dt,
+        beta_m_per_s=4_533.0,
+    )
+    with torch.no_grad():
+        transition.moment_update_head.weight.zero_()
+        transition.moment_update_head.bias.copy_(
+            torch.tensor([0.0, 4.0, 10.0])
+        )
+    second = model.stream_step_from_rate(
+        raw * 0.01,
+        state=first.state,
+        horizon_sec=60,
+        source_distance_m=source_distance,
+        source_dt_sec=source_dt,
+        beta_m_per_s=4_533.0,
+    )
+
+    first_moment = torch.sum(first.released_rate * source_dt[:, None], dim=1)
+    second_moment = torch.sum(second.released_rate * source_dt[:, None], dim=1)
+    lower_bound = (
+        1.0 - transition.max_moment_down_fraction_per_step
+    ) * first_moment
+    assert torch.all(second_moment >= lower_bound)
+    assert torch.all(second_moment < first_moment)
+
+    early_first = model.stream_step_from_rate(
+        raw,
+        state=None,
+        horizon_sec=20,
+        source_distance_m=source_distance,
+        source_dt_sec=source_dt,
+        beta_m_per_s=4_533.0,
+    )
+    early_second = model.stream_step_from_rate(
+        raw * 0.01,
+        state=early_first.state,
+        horizon_sec=21,
+        source_distance_m=source_distance,
+        source_dt_sec=source_dt,
+        beta_m_per_s=4_533.0,
+    )
+    early_ratio = torch.sum(early_second.released_rate) / torch.sum(
+        early_first.released_rate
+    )
+    late_ratio = torch.sum(second.released_rate) / torch.sum(first.released_rate)
+    assert early_ratio < late_ratio
+
+
+def test_moment_proposal_correction_calibrates_first_state() -> None:
+    model = PINNModel(_stateful_config()).eval()
+    transition = model.released_stf_transition
+    assert transition is not None
+    raw = torch.full((1, 200), 2.0e18)
+
+    with torch.no_grad():
+        transition.moment_update_head.weight.zero_()
+        transition.moment_update_head.bias.copy_(
+            torch.tensor([-10.0, 4.0, 0.0])
+        )
+        reduced = model.stream_step_from_rate(
+            raw,
+            state=None,
+            horizon_sec=20,
+            source_distance_m=torch.zeros(1),
+            source_dt_sec=torch.ones(1),
+            beta_m_per_s=4_533.0,
+        ).released_rate
+        transition.moment_update_head.bias.copy_(
+            torch.tensor([10.0, 4.0, 0.0])
+        )
+        boosted = model.stream_step_from_rate(
+            raw,
+            state=None,
+            horizon_sec=20,
+            source_distance_m=torch.zeros(1),
+            source_dt_sec=torch.ones(1),
+            beta_m_per_s=4_533.0,
+        ).released_rate
+    assert torch.sum(boosted) > torch.sum(reduced)
+
+
+def test_late_moment_bound_caps_post_60_peak_to_final() -> None:
+    model = PINNModel(_stateful_config()).eval()
+    transition = model.released_stf_transition
+    assert transition is not None
+    source_distance = torch.zeros(1)
+    source_dt = torch.ones(1)
+    with torch.no_grad():
+        transition.moment_update_head.weight.zero_()
+        transition.moment_update_head.bias.copy_(
+            torch.tensor([0.0, 4.0, 10.0])
+        )
+        output = model.stream_step_from_rate(
+            torch.full((1, 200), 2.0e18),
+            state=None,
+            horizon_sec=60,
+            source_distance_m=source_distance,
+            source_dt_sec=source_dt,
+            beta_m_per_s=4_533.0,
+        )
+        moments = [torch.sum(output.released_rate)]
+        for horizon in range(61, 201):
+            output = model.stream_step_from_rate(
+                torch.zeros(1, 200),
+                state=output.state,
+                horizon_sec=horizon,
+                source_distance_m=source_distance,
+                source_dt_sec=source_dt,
+                beta_m_per_s=4_533.0,
+            )
+            moments.append(torch.sum(output.released_rate))
+
+    magnitude = (2.0 / 3.0) * (
+        torch.log10(torch.stack(moments).clamp_min(1.0e10)) - 9.1
+    )
+    peak_to_final = torch.max(magnitude) - magnitude[-1]
+    theoretical_bound = (
+        (2.0 / 3.0)
+        * -140.0
+        * math.log10(1.0 - transition.max_moment_down_fraction_per_step)
+    )
+    assert float(peak_to_final) <= theoretical_bound + 1.0e-5
+
+
 def test_phase50_training_runner_contracts_are_enforced_together() -> None:
     torch.manual_seed(50)
     config = _stateful_config()
     model = PINNModel(config).train()
     trainable = freeze_transition_scope(model)
-    assert sum(parameter.numel() for parameter in trainable) == 963
+    assert sum(parameter.numel() for parameter in trainable) == 981
     assert all(
         parameter.requires_grad == name.startswith("released_stf_transition.")
         for name, parameter in model.named_parameters()
@@ -306,29 +483,6 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
     assert torch.sum(boosted) > torch.sum(reduced)
     assert boosted[0, 0] > raw[0, 0]
     assert reduced[0, 0] < raw[0, 0]
-
-    moment_head = model.released_stf_transition.moment_correction_head
-    with torch.no_grad():
-        moment_head.bias.fill_(1.0)
-        moment_boosted = model.stream_step_from_rate(
-            raw,
-            state=None,
-            horizon_sec=20,
-            source_distance_m=torch.zeros(1),
-            source_dt_sec=torch.ones(1),
-            beta_m_per_s=4_533.0,
-        ).released_rate
-        moment_head.bias.fill_(-1.0)
-        moment_reduced = model.stream_step_from_rate(
-            raw,
-            state=None,
-            horizon_sec=20,
-            source_distance_m=torch.zeros(1),
-            source_dt_sec=torch.ones(1),
-            beta_m_per_s=4_533.0,
-        ).released_rate
-        moment_head.bias.zero_()
-    assert torch.sum(moment_boosted) > torch.sum(moment_reduced)
 
     frozen_source = {
         name: value.detach().cpu().clone()

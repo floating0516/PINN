@@ -97,6 +97,10 @@ class ReleasedSTFTransition(nn.Module):
         support_ramp_sec: float,
         initial_gate_logit: float,
         max_proposal_correction_log10: float,
+        max_moment_down_fraction_per_step: float,
+        early_moment_down_fraction_per_step: float,
+        moment_stability_start_sec: int,
+        max_moment_proposal_correction_log10: float,
     ) -> None:
         super().__init__()
         self.source_steps = int(source_steps)
@@ -105,6 +109,16 @@ class ReleasedSTFTransition(nn.Module):
         self.support_ramp_sec = float(support_ramp_sec)
         self.max_proposal_correction_log10 = float(
             max_proposal_correction_log10
+        )
+        self.max_moment_down_fraction_per_step = float(
+            max_moment_down_fraction_per_step
+        )
+        self.early_moment_down_fraction_per_step = float(
+            early_moment_down_fraction_per_step
+        )
+        self.moment_stability_start_sec = int(moment_stability_start_sec)
+        self.max_moment_proposal_correction_log10 = float(
+            max_moment_proposal_correction_log10
         )
         self.local_context = nn.Conv1d(
             1,
@@ -128,9 +142,15 @@ class ReleasedSTFTransition(nn.Module):
             input_size=self.moment_feature_count,
             hidden_size=self.hidden_size,
         )
-        self.moment_correction_head = nn.Linear(self.hidden_size, 1)
-        nn.init.zeros_(self.moment_correction_head.weight)
-        nn.init.zeros_(self.moment_correction_head.bias)
+        self.moment_update_head = nn.Linear(self.hidden_size, 3)
+        nn.init.zeros_(self.moment_update_head.weight)
+        with torch.no_grad():
+            self.moment_update_head.bias.copy_(
+                torch.tensor(
+                    [0.0, 4.0, 0.0],
+                    dtype=self.moment_update_head.bias.dtype,
+                )
+            )
 
     def encode_rate(self, rate: torch.Tensor) -> torch.Tensor:
         return torch.log10(1.0 + rate.clamp_min(0.0) / self.stf_m_ref)
@@ -332,23 +352,23 @@ class ReleasedSTFTransition(nn.Module):
         moment_features = torch.stack(
             (
                 torch.clamp(
+                    (preliminary_log10_moment - 20.0) / 3.0,
+                    min=-2.0,
+                    max=2.0,
+                ),
+                torch.clamp(
+                    preliminary_log10_moment
+                    - previous_released_log10_moment,
+                    min=-2.0,
+                    max=2.0,
+                ),
+                torch.clamp(
                     (candidate_log10_moment - 20.0) / 3.0,
                     min=-2.0,
                     max=2.0,
                 ),
                 torch.clamp(
                     candidate_log10_moment - previous_proposal_log10_moment,
-                    min=-2.0,
-                    max=2.0,
-                ),
-                torch.clamp(
-                    (previous_released_log10_moment - 20.0) / 3.0,
-                    min=-2.0,
-                    max=2.0,
-                ),
-                torch.clamp(
-                    candidate_log10_moment
-                    - previous_released_log10_moment,
                     min=-2.0,
                     max=2.0,
                 ),
@@ -371,15 +391,57 @@ class ReleasedSTFTransition(nn.Module):
             moment_features,
             previous_moment_hidden,
         )
-        moment_correction_log10 = (
-            self.max_proposal_correction_log10
-            * torch.tanh(
-                self.moment_correction_head(moment_hidden).squeeze(-1)
+        moment_logits = self.moment_update_head(moment_hidden)
+        proposal_correction_log10 = (
+            self.max_moment_proposal_correction_log10
+            * torch.tanh(moment_logits[:, 0])
+        )
+        calibrated_preliminary = preliminary_released * torch.exp(
+            proposal_correction_log10.unsqueeze(1) * math.log(10.0)
+        )
+        if state is None:
+            released = calibrated_preliminary
+        else:
+            upward_fraction = torch.sigmoid(moment_logits[:, 1])
+            max_downward_fraction = (
+                self.early_moment_down_fraction_per_step
+                if horizon_sec < self.moment_stability_start_sec
+                else self.max_moment_down_fraction_per_step
             )
-        )
-        released = preliminary_released * torch.exp(
-            moment_correction_log10.unsqueeze(1) * math.log(10.0)
-        )
+            downward_fraction = max_downward_fraction * torch.sigmoid(
+                moment_logits[:, 2]
+            )
+            previous_moment = torch.exp(
+                previous_released_log10_moment * math.log(10.0)
+            )
+            preliminary_moment = torch.sum(
+                calibrated_preliminary * source_dt.reshape(-1, 1),
+                dim=1,
+            ).clamp_min(1.0e10)
+            upward_evidence = torch.relu(
+                preliminary_moment - previous_moment
+            )
+            downward_evidence = torch.relu(
+                previous_moment - preliminary_moment
+            )
+            updated_moment = (
+                previous_moment
+                + upward_fraction * upward_evidence
+                - downward_fraction * downward_evidence
+            )
+            usable_preliminary = preliminary_moment > 1.0e10
+            shape_rate = torch.where(
+                usable_preliminary.unsqueeze(1),
+                calibrated_preliminary,
+                previous_released,
+            )
+            shape_moment = torch.sum(
+                shape_rate * source_dt.reshape(-1, 1),
+                dim=1,
+            ).clamp_min(1.0e10)
+            released = shape_rate * (
+                updated_moment / shape_moment
+            ).unsqueeze(1)
         released_log10_moment = torch.log10(
             torch.sum(released * source_dt.reshape(-1, 1), dim=1).clamp_min(
                 1.0e10
@@ -668,6 +730,24 @@ class PINNModel(nn.Module):
                 max_proposal_correction_log10=float(
                     self.stateful_streaming[
                         "max_proposal_correction_log10"
+                    ]
+                ),
+                max_moment_down_fraction_per_step=float(
+                    self.stateful_streaming[
+                        "max_moment_down_fraction_per_step"
+                    ]
+                ),
+                early_moment_down_fraction_per_step=float(
+                    self.stateful_streaming[
+                        "early_moment_down_fraction_per_step"
+                    ]
+                ),
+                moment_stability_start_sec=int(
+                    self.stateful_streaming["moment_stability_start_sec"]
+                ),
+                max_moment_proposal_correction_log10=float(
+                    self.stateful_streaming[
+                        "max_moment_proposal_correction_log10"
                     ]
                 ),
             )

@@ -275,6 +275,10 @@ def stateful_streaming_config_from_config(
         "support_ramp_sec",
         "initial_gate_logit",
         "max_proposal_correction_log10",
+        "max_moment_down_fraction_per_step",
+        "early_moment_down_fraction_per_step",
+        "moment_stability_start_sec",
+        "max_moment_proposal_correction_log10",
     }
     extra = set(raw) - allowed
     if extra:
@@ -323,6 +327,41 @@ def stateful_streaming_config_from_config(
             "model.stateful_streaming.max_proposal_correction_log10 "
             "must be positive"
         )
+    max_moment_down_fraction_per_step = finite_float(
+        "max_moment_down_fraction_per_step",
+        0.003,
+    )
+    if not 0.0 < max_moment_down_fraction_per_step < 1.0:
+        raise ValueError(
+            "model.stateful_streaming.max_moment_down_fraction_per_step "
+            "must be between zero and one"
+        )
+    early_moment_down_fraction_per_step = finite_float(
+        "early_moment_down_fraction_per_step",
+        0.1,
+    )
+    if not 0.0 < early_moment_down_fraction_per_step < 1.0:
+        raise ValueError(
+            "model.stateful_streaming.early_moment_down_fraction_per_step "
+            "must be between zero and one"
+        )
+    if (
+        early_moment_down_fraction_per_step
+        < max_moment_down_fraction_per_step
+    ):
+        raise ValueError(
+            "model.stateful_streaming.early_moment_down_fraction_per_step "
+            "must be at least max_moment_down_fraction_per_step"
+        )
+    max_moment_proposal_correction_log10 = finite_float(
+        "max_moment_proposal_correction_log10",
+        3.0,
+    )
+    if max_moment_proposal_correction_log10 <= 0.0:
+        raise ValueError(
+            "model.stateful_streaming.max_moment_proposal_correction_log10 "
+            "must be positive"
+        )
     return {
         "mode": mode,
         "local_channels": positive_int("local_channels", 4),
@@ -330,6 +369,19 @@ def stateful_streaming_config_from_config(
         "support_ramp_sec": support_ramp_sec,
         "initial_gate_logit": finite_float("initial_gate_logit", -4.0),
         "max_proposal_correction_log10": max_proposal_correction_log10,
+        "max_moment_down_fraction_per_step": (
+            max_moment_down_fraction_per_step
+        ),
+        "early_moment_down_fraction_per_step": (
+            early_moment_down_fraction_per_step
+        ),
+        "moment_stability_start_sec": positive_int(
+            "moment_stability_start_sec",
+            60,
+        ),
+        "max_moment_proposal_correction_log10": (
+            max_moment_proposal_correction_log10
+        ),
     }
 
 

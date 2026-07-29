@@ -56,7 +56,7 @@ DEFAULT_CACHE_ROOT = Path(
 )
 SEEDS = (17, 42, 73)
 EXPECTED_BASE_PARAMETER_COUNT = 1_010_850
-EXPECTED_TRANSITION_PARAMETER_COUNT = 963
+EXPECTED_TRANSITION_PARAMETER_COUNT = 981
 EXPECTED_TOTAL_PARAMETER_COUNT = (
     EXPECTED_BASE_PARAMETER_COUNT + EXPECTED_TRANSITION_PARAMETER_COUNT
 )
@@ -70,6 +70,10 @@ WEIGHT_DECAY = 1.0e-5
 GRAD_CLIP_NORM = 1.0
 SUPPORT_RAMP_SEC = 6.0
 MAX_PROPOSAL_CORRECTION_LOG10 = 1.0
+MAX_MOMENT_DOWN_FRACTION_PER_STEP = 0.003
+EARLY_MOMENT_DOWN_FRACTION_PER_STEP = 0.1
+MOMENT_STABILITY_START_SEC = 60
+MAX_MOMENT_PROPOSAL_CORRECTION_LOG10 = 3.0
 STEP_HUBER_BETA_MW = 0.01
 HISTORY_HUBER_BETA_LOG10 = 0.05
 MULTISCALE_OFFSETS = (5, 20, 60)
@@ -142,6 +146,16 @@ def phase50_config() -> dict[str, Any]:
         "support_ramp_sec": SUPPORT_RAMP_SEC,
         "initial_gate_logit": -4.0,
         "max_proposal_correction_log10": MAX_PROPOSAL_CORRECTION_LOG10,
+        "max_moment_down_fraction_per_step": (
+            MAX_MOMENT_DOWN_FRACTION_PER_STEP
+        ),
+        "early_moment_down_fraction_per_step": (
+            EARLY_MOMENT_DOWN_FRACTION_PER_STEP
+        ),
+        "moment_stability_start_sec": MOMENT_STABILITY_START_SEC,
+        "max_moment_proposal_correction_log10": (
+            MAX_MOMENT_PROPOSAL_CORRECTION_LOG10
+        ),
     }
     return config
 
@@ -759,9 +773,30 @@ def _protocol(
             "initialization": "identity",
         },
         "stateful_total_moment": {
-            "coordinate": "log10_moment_residual",
+            "coordinate": "asymmetric_linear_moment_evidence",
             "hidden_size": 8,
-            "initialization": "identity",
+            "max_proposal_correction_log10": (
+                MAX_MOMENT_PROPOSAL_CORRECTION_LOG10
+            ),
+            "initial_upward_fraction": 1.0 / (1.0 + math.exp(-4.0)),
+            "initial_early_downward_fraction": (
+                0.5 * EARLY_MOMENT_DOWN_FRACTION_PER_STEP
+            ),
+            "initial_late_downward_fraction": (
+                0.5 * MAX_MOMENT_DOWN_FRACTION_PER_STEP
+            ),
+            "early_max_downward_fraction_per_step": (
+                EARLY_MOMENT_DOWN_FRACTION_PER_STEP
+            ),
+            "max_downward_fraction_per_step": (
+                MAX_MOMENT_DOWN_FRACTION_PER_STEP
+            ),
+            "stability_start_sec": MOMENT_STABILITY_START_SEC,
+            "theoretical_post_60_peak_to_final_bound_mw": (
+                (2.0 / 3.0)
+                * -float(HORIZONS[-1] - MOMENT_STABILITY_START_SEC)
+                * math.log10(1.0 - MAX_MOMENT_DOWN_FRACTION_PER_STEP)
+            ),
         },
         "batch_size": BATCH_SIZE,
         "epochs": EPOCHS,
