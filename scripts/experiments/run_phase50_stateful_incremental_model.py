@@ -56,7 +56,7 @@ DEFAULT_CACHE_ROOT = Path(
 )
 SEEDS = (17, 42, 73)
 EXPECTED_BASE_PARAMETER_COUNT = 1_010_850
-EXPECTED_TRANSITION_PARAMETER_COUNT = 537
+EXPECTED_TRANSITION_PARAMETER_COUNT = 546
 EXPECTED_TOTAL_PARAMETER_COUNT = (
     EXPECTED_BASE_PARAMETER_COUNT + EXPECTED_TRANSITION_PARAMETER_COUNT
 )
@@ -69,6 +69,7 @@ LEARNING_RATE = 1.0e-3
 WEIGHT_DECAY = 1.0e-5
 GRAD_CLIP_NORM = 1.0
 SUPPORT_RAMP_SEC = 6.0
+MAX_PROPOSAL_CORRECTION_LOG10 = 1.0
 STEP_HUBER_BETA_MW = 0.01
 HISTORY_HUBER_BETA_LOG10 = 0.05
 MULTISCALE_OFFSETS = (5, 20, 60)
@@ -140,6 +141,7 @@ def phase50_config() -> dict[str, Any]:
         "hidden_size": 8,
         "support_ramp_sec": SUPPORT_RAMP_SEC,
         "initial_gate_logit": -4.0,
+        "max_proposal_correction_log10": MAX_PROPOSAL_CORRECTION_LOG10,
     }
     return config
 
@@ -751,6 +753,11 @@ def _protocol(
         "trainable_parameters": "released_stf_transition.* only",
         "horizons": list(HORIZONS),
         "support_ramp_sec": SUPPORT_RAMP_SEC,
+        "proposal_correction": {
+            "coordinate": "per_source_bin_log10",
+            "max_absolute_log10": MAX_PROPOSAL_CORRECTION_LOG10,
+            "initialization": "identity",
+        },
         "batch_size": BATCH_SIZE,
         "epochs": EPOCHS,
         "optimizer": "AdamW",

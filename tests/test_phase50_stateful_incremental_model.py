@@ -55,6 +55,7 @@ def _stateful_config() -> dict:
         "hidden_size": 8,
         "support_ramp_sec": 6.0,
         "initial_gate_logit": -4.0,
+        "max_proposal_correction_log10": 1.0,
     }
     return config
 
@@ -77,6 +78,13 @@ def test_stateful_config_defaults_to_disabled() -> None:
         ),
         (
             {"mode": "released_stf_gru", "support_ramp_sec": 0.0},
+            "positive",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "max_proposal_correction_log10": 0.0,
+            },
             "positive",
         ),
     ],
@@ -127,7 +135,7 @@ def test_phase39_checkpoint_loads_with_only_transition_keys_missing() -> None:
         for name, parameter in stateful.named_parameters()
         if name.startswith("released_stf_transition.")
     )
-    assert transition_parameters == 537
+    assert transition_parameters == 546
 
 
 def test_stream_sequence_carries_state_and_matches_manual_steps() -> None:
@@ -248,7 +256,7 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
     config = _stateful_config()
     model = PINNModel(config).train()
     trainable = freeze_transition_scope(model)
-    assert sum(parameter.numel() for parameter in trainable) == 537
+    assert sum(parameter.numel() for parameter in trainable) == 546
     assert all(
         parameter.requires_grad == name.startswith("released_stf_transition.")
         for name, parameter in model.named_parameters()
@@ -262,6 +270,32 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
         normalizer_training_indices(training_indices),
     )
     assert not np.array_equal(audit_indices, training_indices[:256])
+
+    raw = torch.full((1, 200), 2.0e18)
+    correction_head = model.released_stf_transition.candidate_correction_head
+    with torch.no_grad():
+        correction_head.bias.fill_(1.0)
+        boosted = model.stream_step_from_rate(
+            raw,
+            state=None,
+            horizon_sec=20,
+            source_distance_m=torch.zeros(1),
+            source_dt_sec=torch.ones(1),
+            beta_m_per_s=4_533.0,
+        ).released_rate
+        correction_head.bias.fill_(-1.0)
+        reduced = model.stream_step_from_rate(
+            raw,
+            state=None,
+            horizon_sec=20,
+            source_distance_m=torch.zeros(1),
+            source_dt_sec=torch.ones(1),
+            beta_m_per_s=4_533.0,
+        ).released_rate
+        correction_head.bias.zero_()
+    assert torch.sum(boosted) > torch.sum(reduced)
+    assert boosted[0, 0] > raw[0, 0]
+    assert reduced[0, 0] < raw[0, 0]
 
     frozen_source = {
         name: value.detach().cpu().clone()

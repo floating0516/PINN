@@ -94,12 +94,16 @@ class ReleasedSTFTransition(nn.Module):
         hidden_size: int,
         support_ramp_sec: float,
         initial_gate_logit: float,
+        max_proposal_correction_log10: float,
     ) -> None:
         super().__init__()
         self.source_steps = int(source_steps)
         self.stf_m_ref = float(stf_m_ref)
         self.hidden_size = int(hidden_size)
         self.support_ramp_sec = float(support_ramp_sec)
+        self.max_proposal_correction_log10 = float(
+            max_proposal_correction_log10
+        )
         self.local_context = nn.Conv1d(
             1,
             int(local_channels),
@@ -114,6 +118,9 @@ class ReleasedSTFTransition(nn.Module):
         self.gate_head = nn.Linear(self.hidden_size, 1)
         nn.init.normal_(self.gate_head.weight, mean=0.0, std=0.01)
         nn.init.constant_(self.gate_head.bias, float(initial_gate_logit))
+        self.candidate_correction_head = nn.Linear(self.hidden_size, 1)
+        nn.init.zeros_(self.candidate_correction_head.weight)
+        nn.init.zeros_(self.candidate_correction_head.bias)
 
     def encode_rate(self, rate: torch.Tensor) -> torch.Tensor:
         return torch.log10(1.0 + rate.clamp_min(0.0) / self.stf_m_ref)
@@ -261,14 +268,18 @@ class ReleasedSTFTransition(nn.Module):
             features.reshape(batch_size * self.source_steps, -1),
             previous_hidden.reshape(batch_size * self.source_steps, -1),
         ).reshape(batch_size, self.source_steps, self.hidden_size)
+        correction_log10 = self.max_proposal_correction_log10 * torch.tanh(
+            self.candidate_correction_head(hidden).squeeze(-1)
+        )
+        candidate = proposal * torch.exp(correction_log10 * math.log(10.0))
         retention = torch.sigmoid(self.gate_head(hidden).squeeze(-1)) * support
         if state is None:
-            released = proposal
+            released = candidate
             retention = torch.zeros_like(retention)
         else:
             released = (
                 retention * previous_released
-                + (1.0 - retention) * proposal
+                + (1.0 - retention) * candidate
             )
         next_state = PINNStreamingState(
             released_rate=released,
@@ -547,6 +558,11 @@ class PINNModel(nn.Module):
                 ),
                 initial_gate_logit=float(
                     self.stateful_streaming["initial_gate_logit"]
+                ),
+                max_proposal_correction_log10=float(
+                    self.stateful_streaming[
+                        "max_proposal_correction_log10"
+                    ]
                 ),
             )
         else:

@@ -274,6 +274,7 @@ def stateful_streaming_config_from_config(
         "hidden_size",
         "support_ramp_sec",
         "initial_gate_logit",
+        "max_proposal_correction_log10",
     }
     extra = set(raw) - allowed
     if extra:
@@ -313,12 +314,22 @@ def stateful_streaming_config_from_config(
         raise ValueError(
             "model.stateful_streaming.support_ramp_sec must be positive"
         )
+    max_proposal_correction_log10 = finite_float(
+        "max_proposal_correction_log10",
+        1.0,
+    )
+    if max_proposal_correction_log10 <= 0.0:
+        raise ValueError(
+            "model.stateful_streaming.max_proposal_correction_log10 "
+            "must be positive"
+        )
     return {
         "mode": mode,
         "local_channels": positive_int("local_channels", 4),
         "hidden_size": positive_int("hidden_size", 8),
         "support_ramp_sec": support_ramp_sec,
         "initial_gate_logit": finite_float("initial_gate_logit", -4.0),
+        "max_proposal_correction_log10": max_proposal_correction_log10,
     }
 
 
