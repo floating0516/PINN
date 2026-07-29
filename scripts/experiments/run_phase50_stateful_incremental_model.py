@@ -73,6 +73,7 @@ STEP_HUBER_BETA_MW = 0.01
 HISTORY_HUBER_BETA_LOG10 = 0.05
 MULTISCALE_OFFSETS = (5, 20, 60)
 NORMALIZER_BATCHES = 8
+NORMALIZER_SEED = 42
 LOSS_WEIGHTS = {
     "endpoint_science": 2.0,
     "released_sequence": 1.0,
@@ -249,6 +250,18 @@ def _weighted_mean(
     if per_sample.ndim != 1 or per_sample.shape != sample_weights.shape:
         raise ValueError("weighted values must have shape (batch,)")
     return torch.mean(per_sample * sample_weights)
+
+
+def normalizer_training_indices(train_indices: np.ndarray) -> np.ndarray:
+    sample_count = NORMALIZER_BATCHES * BATCH_SIZE
+    if train_indices.ndim != 1 or len(train_indices) < sample_count:
+        raise ValueError("Phase50 has insufficient training records for audit")
+    generator = np.random.default_rng(NORMALIZER_SEED)
+    return generator.choice(
+        train_indices,
+        size=sample_count,
+        replace=False,
+    )
 
 
 def stateful_loss_components(
@@ -438,13 +451,12 @@ def audit_loss_scales(
     train_indices = np.flatnonzero(cache.arrays["split_code"] == 0)
     if len(train_indices) != EXPECTED_TRAIN_COUNT:
         raise ValueError("Phase50 training count changed")
+    audit_indices = normalizer_training_indices(train_indices)
     component_sums = {name: 0.0 for name in LOSS_WEIGHTS}
     sample_count = 0
     first_batch: dict[str, torch.Tensor] | None = None
-    for batch_index, start in enumerate(range(0, len(train_indices), BATCH_SIZE)):
-        if batch_index >= NORMALIZER_BATCHES:
-            break
-        indices = train_indices[start : start + BATCH_SIZE]
+    for start in range(0, len(audit_indices), BATCH_SIZE):
+        indices = audit_indices[start : start + BATCH_SIZE]
         batch = _tensor_batch(cache, indices, device=device)
         if first_batch is None:
             first_batch = batch
@@ -495,6 +507,16 @@ def audit_loss_scales(
         "cache_arrays_sha256": cache.manifest["arrays_sha256"],
         "normalizer_batches": NORMALIZER_BATCHES,
         "normalizer_sample_count": sample_count,
+        "normalizer_sampling": {
+            "method": "seeded_without_replacement",
+            "seed": NORMALIZER_SEED,
+            "event_count": len(
+                {
+                    str(cache.records[int(index)]["event"])
+                    for index in audit_indices
+                }
+            ),
+        },
         "normalizers": normalizers,
         "loss_weights": dict(LOSS_WEIGHTS),
         "normalized_gradient_norms_first_batch": gradient_norms,
@@ -527,6 +549,11 @@ def load_normalizers(
         raise ValueError("Phase50 normalizers use different cache arrays")
     if payload["loss_weights"] != LOSS_WEIGHTS:
         raise ValueError("Phase50 normalizer loss weights changed")
+    sampling = payload.get("normalizer_sampling", {})
+    if not isinstance(sampling, dict) or sampling.get("method") != (
+        "seeded_without_replacement"
+    ) or sampling.get("seed") != NORMALIZER_SEED:
+        raise ValueError("Phase50 normalizers use the biased audit sampling")
     normalizers = {
         name: float(payload["normalizers"][name]) for name in LOSS_WEIGHTS
     }

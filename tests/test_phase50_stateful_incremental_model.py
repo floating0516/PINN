@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
 import yaml
@@ -14,6 +15,7 @@ from scripts.experiments.run_phase50_stateful_incremental_model import (
     _assert_backbone_unchanged,
     build_arg_parser,
     freeze_transition_scope,
+    normalizer_training_indices,
     normalized_loss,
     stateful_loss_components,
     validation_gate,
@@ -251,6 +253,15 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
         parameter.requires_grad == name.startswith("released_stf_transition.")
         for name, parameter in model.named_parameters()
     )
+    training_indices = np.arange(1_788, dtype=np.int64)
+    audit_indices = normalizer_training_indices(training_indices)
+    assert len(audit_indices) == 256
+    assert len(np.unique(audit_indices)) == len(audit_indices)
+    assert np.array_equal(
+        audit_indices,
+        normalizer_training_indices(training_indices),
+    )
+    assert not np.array_equal(audit_indices, training_indices[:256])
 
     frozen_source = {
         name: value.detach().cpu().clone()
