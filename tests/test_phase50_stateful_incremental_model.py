@@ -11,6 +11,7 @@ import yaml
 
 from scripts.experiments.run_phase43_streaming_adapter import HORIZONS
 from scripts.experiments.run_phase50_stateful_incremental_model import (
+    EPOCHS,
     LOSS_WEIGHTS,
     VALIDATION_GATES,
     _assert_backbone_unchanged,
@@ -802,3 +803,4 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
     assert "--stage" in help_text
     assert "--normalizer-path" in help_text
     assert "no external adapter" in help_text
+    assert EPOCHS == 60
