@@ -101,6 +101,8 @@ class ReleasedSTFTransition(nn.Module):
         early_moment_down_fraction_per_step: float,
         moment_stability_start_sec: int,
         max_moment_proposal_correction_log10: float,
+        use_moment_rebase_window: bool,
+        moment_rebase_start_sec: int,
     ) -> None:
         super().__init__()
         self.source_steps = int(source_steps)
@@ -120,6 +122,8 @@ class ReleasedSTFTransition(nn.Module):
         self.max_moment_proposal_correction_log10 = float(
             max_moment_proposal_correction_log10
         )
+        self.use_moment_rebase_window = bool(use_moment_rebase_window)
+        self.moment_rebase_start_sec = int(moment_rebase_start_sec)
         self.local_context = nn.Conv1d(
             1,
             int(local_channels),
@@ -396,16 +400,30 @@ class ReleasedSTFTransition(nn.Module):
             self.max_moment_proposal_correction_log10
             * torch.tanh(moment_logits[:, 0])
         )
-        calibrated_preliminary = preliminary_released * torch.exp(
+        proposal_scale = torch.exp(
             proposal_correction_log10.unsqueeze(1) * math.log(10.0)
         )
+        calibrated_preliminary = preliminary_released * proposal_scale
+        calibrated_candidate = candidate * proposal_scale
         if state is None:
             released = calibrated_preliminary
         else:
+            in_rebase_window = (
+                self.use_moment_rebase_window
+                and self.moment_rebase_start_sec
+                <= horizon_sec
+                <= self.moment_stability_start_sec
+            )
+            evidence_rate = (
+                calibrated_candidate
+                if in_rebase_window
+                else calibrated_preliminary
+            )
             upward_fraction = torch.sigmoid(moment_logits[:, 1])
             max_downward_fraction = (
                 self.early_moment_down_fraction_per_step
                 if horizon_sec < self.moment_stability_start_sec
+                or in_rebase_window
                 else self.max_moment_down_fraction_per_step
             )
             downward_fraction = max_downward_fraction * torch.sigmoid(
@@ -414,25 +432,25 @@ class ReleasedSTFTransition(nn.Module):
             previous_moment = torch.exp(
                 previous_released_log10_moment * math.log(10.0)
             )
-            preliminary_moment = torch.sum(
-                calibrated_preliminary * source_dt.reshape(-1, 1),
+            evidence_moment = torch.sum(
+                evidence_rate * source_dt.reshape(-1, 1),
                 dim=1,
             ).clamp_min(1.0e10)
             upward_evidence = torch.relu(
-                preliminary_moment - previous_moment
+                evidence_moment - previous_moment
             )
             downward_evidence = torch.relu(
-                previous_moment - preliminary_moment
+                previous_moment - evidence_moment
             )
             updated_moment = (
                 previous_moment
                 + upward_fraction * upward_evidence
                 - downward_fraction * downward_evidence
             )
-            usable_preliminary = preliminary_moment > 1.0e10
+            usable_evidence = evidence_moment > 1.0e10
             shape_rate = torch.where(
-                usable_preliminary.unsqueeze(1),
-                calibrated_preliminary,
+                usable_evidence.unsqueeze(1),
+                evidence_rate,
                 previous_released,
             )
             shape_moment = torch.sum(
@@ -749,6 +767,14 @@ class PINNModel(nn.Module):
                     self.stateful_streaming[
                         "max_moment_proposal_correction_log10"
                     ]
+                ),
+                use_moment_rebase_window=bool(
+                    self.stateful_streaming[
+                        "use_moment_rebase_window"
+                    ]
+                ),
+                moment_rebase_start_sec=int(
+                    self.stateful_streaming["moment_rebase_start_sec"]
                 ),
             )
         else:

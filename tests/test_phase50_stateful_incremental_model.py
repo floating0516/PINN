@@ -61,6 +61,8 @@ def _stateful_config() -> dict:
         "early_moment_down_fraction_per_step": 0.1,
         "moment_stability_start_sec": 60,
         "max_moment_proposal_correction_log10": 3.0,
+        "use_moment_rebase_window": True,
+        "moment_rebase_start_sec": 40,
     }
     return config
 
@@ -126,6 +128,20 @@ def test_stateful_config_defaults_to_disabled() -> None:
                 "max_moment_proposal_correction_log10": 0.0,
             },
             "positive",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "use_moment_rebase_window": 1,
+            },
+            "boolean",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "moment_rebase_start_sec": 61,
+            },
+            "must not exceed",
         ),
     ],
 )
@@ -312,7 +328,7 @@ def test_asymmetric_moment_update_limits_downward_revision() -> None:
     first = model.stream_step_from_rate(
         raw,
         state=None,
-        horizon_sec=59,
+        horizon_sec=60,
         source_distance_m=source_distance,
         source_dt_sec=source_dt,
         beta_m_per_s=4_533.0,
@@ -325,7 +341,7 @@ def test_asymmetric_moment_update_limits_downward_revision() -> None:
     second = model.stream_step_from_rate(
         raw * 0.01,
         state=first.state,
-        horizon_sec=60,
+        horizon_sec=61,
         source_distance_m=source_distance,
         source_dt_sec=source_dt,
         beta_m_per_s=4_533.0,
@@ -360,6 +376,86 @@ def test_asymmetric_moment_update_limits_downward_revision() -> None:
     )
     late_ratio = torch.sum(second.released_rate) / torch.sum(first.released_rate)
     assert early_ratio < late_ratio
+
+
+def test_rebase_window_uses_bounded_candidate_evidence() -> None:
+    model = PINNModel(_stateful_config()).eval()
+    transition = model.released_stf_transition
+    assert transition is not None
+    raw = torch.full((1, 200), 2.0e18)
+    source_distance = torch.zeros(1)
+    source_dt = torch.ones(1)
+    with torch.no_grad():
+        transition.moment_update_head.weight.zero_()
+        transition.moment_update_head.bias.copy_(
+            torch.tensor([0.0, 4.0, 10.0])
+        )
+    first = model.stream_step_from_rate(
+        raw,
+        state=None,
+        horizon_sec=39,
+        source_distance_m=source_distance,
+        source_dt_sec=source_dt,
+        beta_m_per_s=4_533.0,
+    )
+    second = model.stream_step_from_rate(
+        raw * 0.01,
+        state=first.state,
+        horizon_sec=40,
+        source_distance_m=source_distance,
+        source_dt_sec=source_dt,
+        beta_m_per_s=4_533.0,
+    )
+
+    first_moment = torch.sum(first.released_rate)
+    second_moment = torch.sum(second.released_rate)
+    candidate_moment = torch.sum(raw * 0.01 * second.support_fraction)
+    lower_bound = (
+        1.0 - transition.early_moment_down_fraction_per_step
+    ) * first_moment
+    assert second_moment >= lower_bound
+    assert candidate_moment < second_moment < first_moment
+
+
+def test_rebase_window_caps_each_downward_step() -> None:
+    model = PINNModel(_stateful_config()).eval()
+    transition = model.released_stf_transition
+    assert transition is not None
+    source_distance = torch.zeros(1)
+    source_dt = torch.ones(1)
+    with torch.no_grad():
+        transition.moment_update_head.weight.zero_()
+        transition.moment_update_head.bias.copy_(
+            torch.tensor([0.0, 4.0, 10.0])
+        )
+        output = model.stream_step_from_rate(
+            torch.full((1, 200), 2.0e18),
+            state=None,
+            horizon_sec=39,
+            source_distance_m=source_distance,
+            source_dt_sec=source_dt,
+            beta_m_per_s=4_533.0,
+        )
+        moments = [torch.sum(output.released_rate)]
+        for horizon in range(40, 61):
+            output = model.stream_step_from_rate(
+                torch.zeros(1, 200),
+                state=output.state,
+                horizon_sec=horizon,
+                source_distance_m=source_distance,
+                source_dt_sec=source_dt,
+                beta_m_per_s=4_533.0,
+            )
+            moments.append(torch.sum(output.released_rate))
+
+    magnitude = (2.0 / 3.0) * (
+        torch.log10(torch.stack(moments).clamp_min(1.0e10)) - 9.1
+    )
+    max_drop = torch.max(magnitude[:-1] - magnitude[1:])
+    theoretical_bound = (2.0 / 3.0) * -math.log10(
+        1.0 - transition.early_moment_down_fraction_per_step
+    )
+    assert float(max_drop) <= theoretical_bound + 1.0e-5
 
 
 def test_moment_proposal_correction_calibrates_first_state() -> None:
@@ -557,6 +653,9 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
         "event_downward_step_p95_mw": (
             VALIDATION_GATES["event_downward_step_p95_mw_max"] * 0.9
         ),
+        "event_downward_step_max_mw": (
+            VALIDATION_GATES["event_downward_step_max_mw_max"] * 0.9
+        ),
         "event_peak_to_final_p95_mw": (
             VALIDATION_GATES["event_peak_to_final_p95_mw_max"] * 0.9
         ),
@@ -571,6 +670,7 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
             "late_confirmed_cumulative_log10_l1_p95_max"
         ),
         "event_downward_step_p95_mw": "event_downward_step_p95_mw_max",
+        "event_downward_step_max_mw": "event_downward_step_max_mw_max",
         "event_peak_to_final_p95_mw": "event_peak_to_final_p95_mw_max",
     }
     for metric, gate_name in metric_to_gate.items():

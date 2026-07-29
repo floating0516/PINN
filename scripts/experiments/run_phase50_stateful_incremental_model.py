@@ -73,6 +73,7 @@ MAX_PROPOSAL_CORRECTION_LOG10 = 1.0
 MAX_MOMENT_DOWN_FRACTION_PER_STEP = 0.003
 EARLY_MOMENT_DOWN_FRACTION_PER_STEP = 0.1
 MOMENT_STABILITY_START_SEC = 60
+MOMENT_REBASE_START_SEC = 40
 MAX_MOMENT_PROPOSAL_CORRECTION_LOG10 = 3.0
 STEP_HUBER_BETA_MW = 0.01
 HISTORY_HUBER_BETA_LOG10 = 0.05
@@ -98,6 +99,7 @@ NORMALIZER_FLOORS = {
 VALIDATION_GATES = {
     **PHASE40_GATES,
     "event_downward_step_p95_mw_max": 0.010,
+    "event_downward_step_max_mw_max": 0.050,
     "event_peak_to_final_p95_mw_max": 0.150,
 }
 
@@ -156,6 +158,8 @@ def phase50_config() -> dict[str, Any]:
         "max_moment_proposal_correction_log10": (
             MAX_MOMENT_PROPOSAL_CORRECTION_LOG10
         ),
+        "use_moment_rebase_window": True,
+        "moment_rebase_start_sec": MOMENT_REBASE_START_SEC,
     }
     return config
 
@@ -681,6 +685,7 @@ def evaluate_model(
             "event_downward_step_p95_mw": float(
                 np.percentile(event_downward, 95)
             ),
+            "event_downward_step_max_mw": float(np.max(event_downward)),
             "event_downward_fraction": float(np.mean(event_steps < 0.0)),
             "event_peak_to_final_p95_mw": float(
                 np.percentile(peak_to_final, 95)
@@ -725,6 +730,10 @@ def validation_gate(metrics: Mapping[str, Any]) -> dict[str, Any]:
         "event_downward_step_ratio": (
             float(metrics["event_downward_step_p95_mw"])
             / VALIDATION_GATES["event_downward_step_p95_mw_max"]
+        ),
+        "event_downward_step_max_ratio": (
+            float(metrics["event_downward_step_max_mw"])
+            / VALIDATION_GATES["event_downward_step_max_mw_max"]
         ),
         "event_peak_to_final_ratio": (
             float(metrics["event_peak_to_final_p95_mw"])
@@ -792,6 +801,10 @@ def _protocol(
                 MAX_MOMENT_DOWN_FRACTION_PER_STEP
             ),
             "stability_start_sec": MOMENT_STABILITY_START_SEC,
+            "candidate_rebase_window_sec": [
+                MOMENT_REBASE_START_SEC,
+                MOMENT_STABILITY_START_SEC,
+            ],
             "theoretical_post_60_peak_to_final_bound_mw": (
                 (2.0 / 3.0)
                 * -float(HORIZONS[-1] - MOMENT_STABILITY_START_SEC)
@@ -985,6 +998,7 @@ def train_seed(
             f"event={row['endpoint_event_mae']:.6f} "
             f"late={row['late_event_abs_step_p95_mw']:.6f} "
             f"down={row['event_downward_step_p95_mw']:.6f} "
+            f"downmax={row['event_downward_step_max_mw']:.6f} "
             f"drift={row['event_peak_to_final_p95_mw']:.6f} "
             f"score={row['selection_score']}",
             flush=True,

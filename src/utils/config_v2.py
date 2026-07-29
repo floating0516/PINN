@@ -279,6 +279,8 @@ def stateful_streaming_config_from_config(
         "early_moment_down_fraction_per_step",
         "moment_stability_start_sec",
         "max_moment_proposal_correction_log10",
+        "use_moment_rebase_window",
+        "moment_rebase_start_sec",
     }
     extra = set(raw) - allowed
     if extra:
@@ -362,6 +364,28 @@ def stateful_streaming_config_from_config(
             "model.stateful_streaming.max_moment_proposal_correction_log10 "
             "must be positive"
         )
+    use_moment_rebase_window = raw.get(
+        "use_moment_rebase_window",
+        False,
+    )
+    if not isinstance(use_moment_rebase_window, bool):
+        raise ValueError(
+            "model.stateful_streaming.use_moment_rebase_window "
+            "must be boolean"
+        )
+    moment_stability_start_sec = positive_int(
+        "moment_stability_start_sec",
+        60,
+    )
+    moment_rebase_start_sec = positive_int(
+        "moment_rebase_start_sec",
+        40,
+    )
+    if moment_rebase_start_sec > moment_stability_start_sec:
+        raise ValueError(
+            "model.stateful_streaming.moment_rebase_start_sec must not "
+            "exceed moment_stability_start_sec"
+        )
     return {
         "mode": mode,
         "local_channels": positive_int("local_channels", 4),
@@ -375,13 +399,12 @@ def stateful_streaming_config_from_config(
         "early_moment_down_fraction_per_step": (
             early_moment_down_fraction_per_step
         ),
-        "moment_stability_start_sec": positive_int(
-            "moment_stability_start_sec",
-            60,
-        ),
+        "moment_stability_start_sec": moment_stability_start_sec,
         "max_moment_proposal_correction_log10": (
             max_moment_proposal_correction_log10
         ),
+        "use_moment_rebase_window": use_moment_rebase_window,
+        "moment_rebase_start_sec": moment_rebase_start_sec,
     }
 
 
