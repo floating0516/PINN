@@ -9,6 +9,7 @@ from src.utils.config_v2 import (
     moment_head_dropout_from_config,
     moment_linear_skip_from_config,
     radial_dynamic_range_stem_from_config,
+    stateful_streaming_config_from_config,
     waveform_input_components_from_config,
 )
 
@@ -17,6 +18,34 @@ from src.utils.config_v2 import (
 class PINNPrediction:
     stf_encoded: torch.Tensor
     catalog_mw: torch.Tensor
+
+
+@dataclass(frozen=True)
+class PINNStreamingState:
+    released_rate: torch.Tensor
+    proposal_rate: torch.Tensor
+    hidden: torch.Tensor
+    horizon_sec: int
+
+
+@dataclass(frozen=True)
+class ReleasedSTFTransitionOutput:
+    released_rate: torch.Tensor
+    released_stf_encoded: torch.Tensor
+    released_mw: torch.Tensor
+    retention_gate: torch.Tensor
+    support_fraction: torch.Tensor
+    state: PINNStreamingState
+
+
+@dataclass(frozen=True)
+class StatefulPINNPrediction:
+    final_prediction: PINNPrediction
+    released_stf_encoded: torch.Tensor
+    released_mw: torch.Tensor
+    retention_gate: torch.Tensor
+    support_fraction: torch.Tensor
+    state: PINNStreamingState
 
 
 class RadialAsinhZeroConv(nn.Module):
@@ -51,6 +80,203 @@ class MomentLinearSkip(nn.Module):
                 'moment linear skip expects input shape (B, hidden_dim)'
             )
         return F.linear(pooled_features, self.weight, bias=None)
+
+
+class ReleasedSTFTransition(nn.Module):
+    """Model-internal recurrent update for a causally released STF state."""
+
+    def __init__(
+        self,
+        *,
+        source_steps: int,
+        stf_m_ref: float,
+        local_channels: int,
+        hidden_size: int,
+        support_ramp_sec: float,
+        initial_gate_logit: float,
+    ) -> None:
+        super().__init__()
+        self.source_steps = int(source_steps)
+        self.stf_m_ref = float(stf_m_ref)
+        self.hidden_size = int(hidden_size)
+        self.support_ramp_sec = float(support_ramp_sec)
+        self.local_context = nn.Conv1d(
+            1,
+            int(local_channels),
+            kernel_size=5,
+            padding=2,
+        )
+        self.feature_count = 7 + int(local_channels)
+        self.temporal_cell = nn.GRUCell(
+            input_size=self.feature_count,
+            hidden_size=self.hidden_size,
+        )
+        self.gate_head = nn.Linear(self.hidden_size, 1)
+        nn.init.normal_(self.gate_head.weight, mean=0.0, std=0.01)
+        nn.init.constant_(self.gate_head.bias, float(initial_gate_logit))
+
+    def encode_rate(self, rate: torch.Tensor) -> torch.Tensor:
+        return torch.log10(1.0 + rate.clamp_min(0.0) / self.stf_m_ref)
+
+    def support_fraction(
+        self,
+        *,
+        horizon_sec: int,
+        source_distance_m: torch.Tensor,
+        beta_m_per_s: float,
+        reference: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if isinstance(horizon_sec, bool) or not isinstance(horizon_sec, int):
+            raise ValueError("horizon_sec must be an integer")
+        if horizon_sec < 1:
+            raise ValueError("horizon_sec must be positive")
+        if not math.isfinite(beta_m_per_s) or beta_m_per_s <= 0.0:
+            raise ValueError("beta_m_per_s must be positive and finite")
+        distance = source_distance_m.reshape(-1).to(
+            device=reference.device,
+            dtype=reference.dtype,
+        )
+        if distance.shape != (reference.shape[0],):
+            raise ValueError("source_distance_m must contain one value per sample")
+        if bool(torch.any(distance < 0.0)):
+            raise ValueError("source_distance_m must be nonnegative")
+        source_index = torch.arange(
+            self.source_steps,
+            device=reference.device,
+            dtype=reference.dtype,
+        ).reshape(1, -1)
+        support_age = (
+            float(horizon_sec)
+            - distance.reshape(-1, 1) / float(beta_m_per_s)
+            - source_index
+        )
+        support = torch.clamp(
+            support_age / self.support_ramp_sec,
+            min=0.0,
+            max=1.0,
+        )
+        return support, support_age
+
+    def step(
+        self,
+        raw_rate: torch.Tensor,
+        *,
+        state: PINNStreamingState | None,
+        horizon_sec: int,
+        source_distance_m: torch.Tensor,
+        source_dt_sec: torch.Tensor,
+        beta_m_per_s: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, PINNStreamingState]:
+        if raw_rate.ndim != 2 or raw_rate.shape[1] != self.source_steps:
+            raise ValueError(
+                "raw_rate must have shape "
+                f"(batch, {self.source_steps})"
+            )
+        if not raw_rate.is_floating_point() or not bool(
+            torch.isfinite(raw_rate).all()
+        ):
+            raise ValueError("raw_rate must be finite floating point")
+        if bool(torch.any(raw_rate < 0.0)):
+            raise ValueError("raw_rate must be nonnegative")
+        source_dt = source_dt_sec.reshape(-1).to(
+            device=raw_rate.device,
+            dtype=raw_rate.dtype,
+        )
+        if source_dt.shape != (raw_rate.shape[0],) or bool(
+            torch.any(source_dt <= 0.0)
+        ):
+            raise ValueError(
+                "source_dt_sec must be positive with one value per sample"
+            )
+        if state is not None:
+            if horizon_sec != state.horizon_sec + 1:
+                raise ValueError(
+                    "stateful horizons must advance by exactly one second"
+                )
+            expected_rate_shape = raw_rate.shape
+            expected_hidden_shape = (
+                raw_rate.shape[0],
+                self.source_steps,
+                self.hidden_size,
+            )
+            if state.released_rate.shape != expected_rate_shape:
+                raise ValueError("state released_rate shape changed")
+            if state.proposal_rate.shape != expected_rate_shape:
+                raise ValueError("state proposal_rate shape changed")
+            if state.hidden.shape != expected_hidden_shape:
+                raise ValueError("state hidden shape changed")
+
+        support, support_age = self.support_fraction(
+            horizon_sec=horizon_sec,
+            source_distance_m=source_distance_m,
+            beta_m_per_s=beta_m_per_s,
+            reference=raw_rate,
+        )
+        proposal = raw_rate * support
+        encoded_proposal = self.encode_rate(proposal)
+        batch_size = raw_rate.shape[0]
+        if state is None:
+            previous_released = torch.zeros_like(raw_rate)
+            previous_proposal = torch.zeros_like(raw_rate)
+            previous_hidden = raw_rate.new_zeros(
+                batch_size,
+                self.source_steps,
+                self.hidden_size,
+            )
+        else:
+            previous_released = state.released_rate
+            previous_proposal = state.proposal_rate
+            previous_hidden = state.hidden
+        encoded_previous_proposal = self.encode_rate(previous_proposal)
+        encoded_previous_released = self.encode_rate(previous_released)
+        local = F.gelu(self.local_context(encoded_proposal.unsqueeze(1)))
+        local = local.transpose(1, 2)
+        horizon_feature = raw_rate.new_full(
+            (batch_size, self.source_steps),
+            float(horizon_sec) / float(max(self.source_steps, 1)),
+        )
+        raw_moment = torch.sum(
+            raw_rate * source_dt.reshape(-1, 1),
+            dim=1,
+        ).clamp_min(1.0e10)
+        raw_moment_feature = torch.clamp(
+            (torch.log10(raw_moment) - 20.0) / 3.0,
+            min=-2.0,
+            max=2.0,
+        ).unsqueeze(1).expand(-1, self.source_steps)
+        scalar = torch.stack(
+            (
+                encoded_proposal,
+                encoded_proposal - encoded_previous_proposal,
+                encoded_previous_released,
+                encoded_proposal - encoded_previous_released,
+                torch.clamp(support_age / 30.0, min=-1.0, max=1.0),
+                horizon_feature,
+                raw_moment_feature,
+            ),
+            dim=2,
+        )
+        features = torch.cat((scalar, local), dim=2)
+        hidden = self.temporal_cell(
+            features.reshape(batch_size * self.source_steps, -1),
+            previous_hidden.reshape(batch_size * self.source_steps, -1),
+        ).reshape(batch_size, self.source_steps, self.hidden_size)
+        retention = torch.sigmoid(self.gate_head(hidden).squeeze(-1)) * support
+        if state is None:
+            released = proposal
+            retention = torch.zeros_like(retention)
+        else:
+            released = (
+                retention * previous_released
+                + (1.0 - retention) * proposal
+            )
+        next_state = PINNStreamingState(
+            released_rate=released,
+            proposal_rate=proposal,
+            hidden=hidden,
+            horizon_sec=int(horizon_sec),
+        )
+        return released, retention, support, next_state
 
 
 class PINNModel(nn.Module):
@@ -300,6 +526,32 @@ class PINNModel(nn.Module):
         else:
             self.moment_linear_skip = None
 
+        self.stateful_streaming = stateful_streaming_config_from_config(config)
+        self.released_stf_transition: ReleasedSTFTransition | None
+        if self.stateful_streaming["mode"] == "released_stf_gru":
+            if (
+                self.output_time_steps is None
+                or self.factorized_m_ref is None
+                or self.factorized_source_dt_sec is None
+            ):
+                raise ValueError(
+                    "released_stf_gru requires the factorized v2 STF head"
+                )
+            self.released_stf_transition = ReleasedSTFTransition(
+                source_steps=self.output_time_steps,
+                stf_m_ref=self.factorized_m_ref,
+                local_channels=int(self.stateful_streaming["local_channels"]),
+                hidden_size=int(self.stateful_streaming["hidden_size"]),
+                support_ramp_sec=float(
+                    self.stateful_streaming["support_ramp_sec"]
+                ),
+                initial_gate_logit=float(
+                    self.stateful_streaming["initial_gate_logit"]
+                ),
+            )
+        else:
+            self.released_stf_transition = None
+
     def _embed_backbone_input(self, backbone_input: torch.Tensor) -> torch.Tensor:
         pre_activation = self.embed[0](backbone_input)
         if self.radial_asinh_zero_conv is not None:
@@ -449,6 +701,131 @@ class PINNModel(nn.Module):
         return PINNPrediction(
             stf_encoded=self._predict_stf(sequence),
             catalog_mw=catalog_mw,
+        )
+
+    def _decode_streaming_rate(self, encoded: torch.Tensor) -> torch.Tensor:
+        if self.factorized_m_ref is None:
+            raise RuntimeError("stateful streaming requires factorized STF")
+        safe = torch.clamp(
+            torch.nan_to_num(encoded, nan=0.0, posinf=6.0, neginf=0.0),
+            min=0.0,
+            max=6.0,
+        )
+        return self.factorized_m_ref * torch.expm1(safe * math.log(10.0))
+
+    def _encode_streaming_rate(self, rate: torch.Tensor) -> torch.Tensor:
+        if self.factorized_m_ref is None:
+            raise RuntimeError("stateful streaming requires factorized STF")
+        return torch.log10(1.0 + rate.clamp_min(0.0) / self.factorized_m_ref)
+
+    def stream_step_from_rate(
+        self,
+        raw_rate: torch.Tensor,
+        *,
+        state: PINNStreamingState | None,
+        horizon_sec: int,
+        source_distance_m: torch.Tensor,
+        source_dt_sec: torch.Tensor,
+        beta_m_per_s: float,
+    ) -> ReleasedSTFTransitionOutput:
+        if self.released_stf_transition is None:
+            raise RuntimeError("released_stf_gru is disabled")
+        released, retention, support, next_state = (
+            self.released_stf_transition.step(
+                raw_rate,
+                state=state,
+                horizon_sec=horizon_sec,
+                source_distance_m=source_distance_m,
+                source_dt_sec=source_dt_sec,
+                beta_m_per_s=beta_m_per_s,
+            )
+        )
+        dt = source_dt_sec.reshape(-1).to(
+            device=released.device,
+            dtype=released.dtype,
+        )
+        moment = torch.sum(released * dt.reshape(-1, 1), dim=1).clamp_min(
+            1.0e10
+        )
+        released_mw = (2.0 / 3.0) * (torch.log10(moment) - 9.1)
+        return ReleasedSTFTransitionOutput(
+            released_rate=released,
+            released_stf_encoded=self._encode_streaming_rate(released),
+            released_mw=released_mw,
+            retention_gate=retention,
+            support_fraction=support,
+            state=next_state,
+        )
+
+    def stream_sequence_from_rates(
+        self,
+        raw_rates: torch.Tensor,
+        *,
+        horizons_sec: list[int] | tuple[int, ...],
+        source_distance_m: torch.Tensor,
+        source_dt_sec: torch.Tensor,
+        beta_m_per_s: float,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        if raw_rates.ndim != 3:
+            raise ValueError(
+                "raw_rates must have shape (batch, issue_time, source_time)"
+            )
+        horizons = tuple(int(value) for value in horizons_sec)
+        if len(horizons) != raw_rates.shape[1]:
+            raise ValueError("horizons must match the issue-time dimension")
+        state: PINNStreamingState | None = None
+        released: list[torch.Tensor] = []
+        encoded: list[torch.Tensor] = []
+        magnitudes: list[torch.Tensor] = []
+        gates: list[torch.Tensor] = []
+        for index, horizon in enumerate(horizons):
+            output = self.stream_step_from_rate(
+                raw_rates[:, index],
+                state=state,
+                horizon_sec=horizon,
+                source_distance_m=source_distance_m,
+                source_dt_sec=source_dt_sec,
+                beta_m_per_s=beta_m_per_s,
+            )
+            state = output.state
+            released.append(output.released_rate)
+            encoded.append(output.released_stf_encoded)
+            magnitudes.append(output.released_mw)
+            gates.append(output.retention_gate)
+        return (
+            torch.stack(released, dim=1),
+            torch.stack(encoded, dim=1),
+            torch.stack(magnitudes, dim=1),
+            torch.stack(gates, dim=1),
+        )
+
+    def stream_step(
+        self,
+        x: torch.Tensor,
+        *,
+        meta: Optional[torch.Tensor],
+        state: PINNStreamingState | None,
+        horizon_sec: int,
+        source_distance_m: torch.Tensor,
+        source_dt_sec: torch.Tensor,
+        beta_m_per_s: float,
+    ) -> StatefulPINNPrediction:
+        final_prediction = self.predict_heads(x, meta=meta)
+        transition = self.stream_step_from_rate(
+            self._decode_streaming_rate(final_prediction.stf_encoded),
+            state=state,
+            horizon_sec=horizon_sec,
+            source_distance_m=source_distance_m,
+            source_dt_sec=source_dt_sec,
+            beta_m_per_s=beta_m_per_s,
+        )
+        return StatefulPINNPrediction(
+            final_prediction=final_prediction,
+            released_stf_encoded=transition.released_stf_encoded,
+            released_mw=transition.released_mw,
+            retention_gate=transition.retention_gate,
+            support_fraction=transition.support_fraction,
+            state=transition.state,
         )
 
     def forward(self, x: torch.Tensor, meta: Optional[torch.Tensor] = None) -> torch.Tensor:

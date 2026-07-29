@@ -233,6 +233,95 @@ def moment_head_dropout_from_config(config: dict[str, Any]) -> bool:
     return value
 
 
+def stateful_streaming_config_from_config(
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    model = config.get("model", {}) or {}
+    raw = model.get("stateful_streaming", {})
+    if raw is None:
+        raw = {}
+    if not isinstance(raw, dict):
+        raise ValueError("model.stateful_streaming must be a mapping")
+    mode = raw.get("mode", "none")
+    if not isinstance(mode, str) or mode not in {
+        "none",
+        "released_stf_gru",
+    }:
+        raise ValueError(
+            "model.stateful_streaming.mode must be none or released_stf_gru"
+        )
+    if mode == "none":
+        extra = set(raw) - {"mode"}
+        if extra:
+            raise ValueError(
+                "model.stateful_streaming parameters require "
+                "mode=released_stf_gru"
+            )
+        return {"mode": "none"}
+    if model.get("stf_output_parameterization", "direct") != (
+        "moment_shape_factorized"
+    ):
+        raise ValueError(
+            "released_stf_gru requires "
+            "model.stf_output_parameterization=moment_shape_factorized"
+        )
+    if waveform_input_components_from_config(config) != ("radial",):
+        raise ValueError("released_stf_gru requires R-only input")
+
+    allowed = {
+        "mode",
+        "local_channels",
+        "hidden_size",
+        "support_ramp_sec",
+        "initial_gate_logit",
+    }
+    extra = set(raw) - allowed
+    if extra:
+        raise ValueError(
+            "unknown model.stateful_streaming keys: "
+            + ", ".join(sorted(extra))
+        )
+
+    def positive_int(name: str, default: int) -> int:
+        value = raw.get(name, default)
+        if isinstance(value, bool) or not isinstance(value, Integral):
+            raise ValueError(
+                f"model.stateful_streaming.{name} must be a positive integer"
+            )
+        result = int(value)
+        if result < 1:
+            raise ValueError(
+                f"model.stateful_streaming.{name} must be a positive integer"
+            )
+        return result
+
+    def finite_float(name: str, default: float) -> float:
+        value = raw.get(name, default)
+        if isinstance(value, bool) or not isinstance(value, Real):
+            raise ValueError(
+                f"model.stateful_streaming.{name} must be finite"
+            )
+        result = float(value)
+        if not math.isfinite(result):
+            raise ValueError(
+                f"model.stateful_streaming.{name} must be finite"
+            )
+        return result
+
+    support_ramp_sec = finite_float("support_ramp_sec", 6.0)
+    if support_ramp_sec <= 0.0:
+        raise ValueError(
+            "model.stateful_streaming.support_ramp_sec must be positive"
+        )
+    return {
+        "mode": mode,
+        "local_channels": positive_int("local_channels", 4),
+        "hidden_size": positive_int("hidden_size", 8),
+        "support_ramp_sec": support_ramp_sec,
+        "initial_gate_logit": finite_float("initial_gate_logit", -4.0),
+    }
+
+
 def magnitude_penalty_from_config(config: dict[str, Any]) -> str:
     training = config.get("training", {}) or {}
     loss_config = training.get("stf_rate_loss", {}) or {}
@@ -296,6 +385,7 @@ def validate_config_v2(config: dict[str, Any]) -> None:
     radial_dynamic_range_stem_from_config(config)
     moment_linear_skip_from_config(config)
     moment_head_dropout_from_config(config)
+    stateful_streaming_config_from_config(config)
     magnitude_penalty_from_config(config)
     synth_polarity_mode_from_config(config)
     radiation_coefficient_contract_from_config(config)
