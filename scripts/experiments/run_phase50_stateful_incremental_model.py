@@ -56,7 +56,7 @@ DEFAULT_CACHE_ROOT = Path(
 )
 SEEDS = (17, 42, 73)
 EXPECTED_BASE_PARAMETER_COUNT = 1_010_850
-EXPECTED_TRANSITION_PARAMETER_COUNT = 981
+EXPECTED_TRANSITION_PARAMETER_COUNT = 1_029
 EXPECTED_TOTAL_PARAMETER_COUNT = (
     EXPECTED_BASE_PARAMETER_COUNT + EXPECTED_TRANSITION_PARAMETER_COUNT
 )
@@ -64,7 +64,7 @@ EXPECTED_TRAIN_COUNT = 1_788
 EXPECTED_VALIDATION_COUNT = 385
 
 BATCH_SIZE = 32
-EPOCHS = 60
+EPOCHS = 30
 LEARNING_RATE = 1.0e-3
 WEIGHT_DECAY = 1.0e-5
 GRAD_CLIP_NORM = 1.0
@@ -836,6 +836,11 @@ def _protocol(
             "complete_stf_alignment_window_sec": [
                 FULL_STF_ALIGNMENT_START_SEC,
                 HORIZONS[-1],
+            ],
+            "moment_evidence_features": [
+                "causal_candidate_log10_moment",
+                "complete_proposal_log10_moment",
+                "complete_proposal_minus_previous_state_log10",
             ],
             "alignment_max_downward_fraction_per_step": (
                 FULL_STF_ALIGNMENT_DOWN_FRACTION_PER_STEP

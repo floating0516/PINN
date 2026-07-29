@@ -240,7 +240,7 @@ def test_phase39_checkpoint_loads_with_only_transition_keys_missing() -> None:
         for name, parameter in stateful.named_parameters()
         if name.startswith("released_stf_transition.")
     )
-    assert transition_parameters == 981
+    assert transition_parameters == 1_029
 
 
 def test_stream_sequence_carries_state_and_matches_manual_steps() -> None:
@@ -609,6 +609,35 @@ def test_full_stf_alignment_adds_unsupported_content() -> None:
     assert aligned.released_rate[0, -1] > 0.0
 
 
+def test_full_proposal_moment_is_visible_to_moment_gru() -> None:
+    model = PINNModel(_stateful_config()).eval()
+    transition = model.released_stf_transition
+    assert transition is not None
+    captured: list[torch.Tensor] = []
+    handle = transition.moment_cell.register_forward_pre_hook(
+        lambda _module, args: captured.append(args[0].detach().clone())
+    )
+    low = torch.full((1, 200), 1.0e18)
+    low[:, 40:] = 0.0
+    high = low.clone()
+    high[:, 40:] = 1.0e20
+    for raw in (low, high):
+        model.stream_step_from_rate(
+            raw,
+            state=None,
+            horizon_sec=20,
+            source_distance_m=torch.zeros(1),
+            source_dt_sec=torch.ones(1),
+            beta_m_per_s=4_533.0,
+        )
+    handle.remove()
+
+    assert len(captured) == 2
+    assert captured[0].shape == (1, 9)
+    torch.testing.assert_close(captured[0][:, :7], captured[1][:, :7])
+    assert not torch.allclose(captured[0][:, 7:], captured[1][:, 7:])
+
+
 def test_full_stf_alignment_caps_each_downward_step() -> None:
     model = PINNModel(_stateful_config()).eval()
     transition = model.released_stf_transition
@@ -654,7 +683,7 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
     config = _stateful_config()
     model = PINNModel(config).train()
     trainable = freeze_transition_scope(model)
-    assert sum(parameter.numel() for parameter in trainable) == 981
+    assert sum(parameter.numel() for parameter in trainable) == 1_029
     assert all(
         parameter.requires_grad == name.startswith("released_stf_transition.")
         for name, parameter in model.named_parameters()
@@ -803,4 +832,4 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
     assert "--stage" in help_text
     assert "--normalizer-path" in help_text
     assert "no external adapter" in help_text
-    assert EPOCHS == 60
+    assert EPOCHS == 30

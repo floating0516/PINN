@@ -158,7 +158,7 @@ class ReleasedSTFTransition(nn.Module):
         self.candidate_correction_head = nn.Linear(self.hidden_size, 1)
         nn.init.zeros_(self.candidate_correction_head.weight)
         nn.init.zeros_(self.candidate_correction_head.bias)
-        self.moment_feature_count = 7
+        self.moment_feature_count = 9
         self.moment_cell = nn.GRUCell(
             input_size=self.moment_feature_count,
             hidden_size=self.hidden_size,
@@ -318,8 +318,9 @@ class ReleasedSTFTransition(nn.Module):
             raw_rate * source_dt.reshape(-1, 1),
             dim=1,
         ).clamp_min(1.0e10)
+        raw_log10_moment = torch.log10(raw_moment)
         raw_moment_feature = torch.clamp(
-            (torch.log10(raw_moment) - 20.0) / 3.0,
+            (raw_log10_moment - 20.0) / 3.0,
             min=-2.0,
             max=2.0,
         ).unsqueeze(1).expand(-1, self.source_steps)
@@ -427,6 +428,17 @@ class ReleasedSTFTransition(nn.Module):
                     / float(beta_m_per_s)
                     / float(max(self.source_steps, 1)),
                     min=0.0,
+                    max=2.0,
+                ),
+                torch.clamp(
+                    (raw_log10_moment - 20.0) / 3.0,
+                    min=-2.0,
+                    max=2.0,
+                ),
+                torch.clamp(
+                    raw_log10_moment
+                    - previous_released_log10_moment,
+                    min=-2.0,
                     max=2.0,
                 ),
             ),
