@@ -383,8 +383,20 @@ def stateful_loss_components(
         batch["raw_rate"][:, -1],
         stf_m_ref=stf_m_ref_from_config(dict(config)),
     )
+    raw_endpoint_mw = moment_magnitude_from_rate(
+        batch["raw_rate"][:, -1],
+        source_dt,
+    )
+    endpoint_teacher_mw_error = torch.abs(
+        state_mw[:, -1] - raw_endpoint_mw
+    )
     endpoint_teacher = _weighted_mean(
-        (encoded_states[:, -1] - raw_endpoint_encoded).pow(2).mean(dim=1),
+        (
+            (encoded_states[:, -1] - raw_endpoint_encoded)
+            .pow(2)
+            .mean(dim=1)
+            + endpoint_teacher_mw_error
+        ),
         sample_weights,
     )
 
@@ -452,6 +464,9 @@ def stateful_loss_components(
         ),
         "mean_downward_step_mw": float(adjacent_down.detach().mean().cpu()),
         "target_mw_mae": float(magnitude_error.detach().mean().cpu()),
+        "endpoint_teacher_mw_mae": float(
+            endpoint_teacher_mw_error.detach().mean().cpu()
+        ),
         "endpoint_L_MSE": float(endpoint_parts["L_MSE"]),
         "endpoint_L_synth": float(endpoint_parts["L_synth"]),
         "endpoint_L_mag": float(endpoint_parts["L_mag"]),
@@ -565,6 +580,7 @@ def audit_loss_scales(
         },
         "normalizers": normalizers,
         "loss_weights": dict(LOSS_WEIGHTS),
+        "endpoint_teacher": "encoded_stf_mse_plus_raw_phase39_mw_l1",
         "normalized_gradient_norms_first_batch": gradient_norms,
         "initial_diagnostics_first_batch": diagnostics,
         "provenance": {
@@ -956,6 +972,7 @@ def train_seed(
             "late_mean_gate": 0.0,
             "mean_downward_step_mw": 0.0,
             "target_mw_mae": 0.0,
+            "endpoint_teacher_mw_mae": 0.0,
             "endpoint_L_MSE": 0.0,
             "endpoint_L_synth": 0.0,
             "endpoint_L_mag": 0.0,
