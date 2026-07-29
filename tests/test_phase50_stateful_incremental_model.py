@@ -19,6 +19,7 @@ from scripts.experiments.run_phase50_stateful_incremental_model import (
     normalizer_training_indices,
     normalized_loss,
     stateful_loss_components,
+    target_support_fraction,
     validation_gate,
 )
 from src.models.model import PINNModel, PINNStreamingState
@@ -63,6 +64,9 @@ def _stateful_config() -> dict:
         "max_moment_proposal_correction_log10": 3.0,
         "use_moment_rebase_window": True,
         "moment_rebase_start_sec": 40,
+        "use_full_stf_alignment": True,
+        "full_stf_alignment_start_sec": 180,
+        "full_stf_alignment_down_fraction_per_step": 0.03,
     }
     return config
 
@@ -72,6 +76,18 @@ def test_stateful_config_defaults_to_disabled() -> None:
 
     assert stateful_streaming_config_from_config(config) == {"mode": "none"}
     validate_config_v2(config)
+
+
+def test_target_support_aligns_to_full_stf_from_180_seconds() -> None:
+    causal = torch.zeros(1, len(HORIZONS), 3)
+    target = target_support_fraction(causal)
+
+    assert torch.equal(target[:, HORIZONS.index(179)], torch.zeros(1, 3))
+    torch.testing.assert_close(
+        target[:, HORIZONS.index(180)],
+        torch.full((1, 3), 1.0 / 21.0),
+    )
+    assert torch.equal(target[:, HORIZONS.index(200)], torch.ones(1, 3))
 
 
 @pytest.mark.parametrize(
@@ -143,6 +159,28 @@ def test_stateful_config_defaults_to_disabled() -> None:
             },
             "must not exceed",
         ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "use_full_stf_alignment": 1,
+            },
+            "boolean",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "use_full_stf_alignment": True,
+                "full_stf_alignment_start_sec": 60,
+            },
+            "must be after",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "full_stf_alignment_down_fraction_per_step": 0.0,
+            },
+            "between zero and one",
+        ),
     ],
 )
 def test_stateful_config_rejects_invalid_values(
@@ -172,6 +210,16 @@ def test_default_phase39_state_dict_is_unchanged_by_disabled_mode() -> None:
         for key in implicit_model.state_dict()
     )
     explicit_model.load_state_dict(implicit_model.state_dict(), strict=True)
+
+
+def test_full_stf_alignment_start_cannot_exceed_source_steps() -> None:
+    config = _stateful_config()
+    config["model"]["stateful_streaming"][
+        "full_stf_alignment_start_sec"
+    ] = 201
+
+    with pytest.raises(ValueError, match="must not exceed source steps"):
+        PINNModel(config)
 
 
 def test_phase39_checkpoint_loads_with_only_transition_keys_missing() -> None:
@@ -491,7 +539,7 @@ def test_moment_proposal_correction_calibrates_first_state() -> None:
     assert torch.sum(boosted) > torch.sum(reduced)
 
 
-def test_late_moment_bound_caps_post_60_peak_to_final() -> None:
+def test_late_moment_bound_caps_decline_before_full_alignment() -> None:
     model = PINNModel(_stateful_config()).eval()
     transition = model.released_stf_transition
     assert transition is not None
@@ -511,7 +559,7 @@ def test_late_moment_bound_caps_post_60_peak_to_final() -> None:
             beta_m_per_s=4_533.0,
         )
         moments = [torch.sum(output.released_rate)]
-        for horizon in range(61, 201):
+        for horizon in range(61, 180):
             output = model.stream_step_from_rate(
                 torch.zeros(1, 200),
                 state=output.state,
@@ -528,10 +576,76 @@ def test_late_moment_bound_caps_post_60_peak_to_final() -> None:
     peak_to_final = torch.max(magnitude) - magnitude[-1]
     theoretical_bound = (
         (2.0 / 3.0)
-        * -140.0
+        * -119.0
         * math.log10(1.0 - transition.max_moment_down_fraction_per_step)
     )
     assert float(peak_to_final) <= theoretical_bound + 1.0e-5
+
+
+def test_full_stf_alignment_adds_unsupported_content() -> None:
+    model = PINNModel(_stateful_config()).eval()
+    raw = torch.full((1, 200), 2.0e18)
+    source_distance = torch.zeros(1)
+    source_dt = torch.ones(1)
+    first = model.stream_step_from_rate(
+        raw,
+        state=None,
+        horizon_sec=179,
+        source_distance_m=source_distance,
+        source_dt_sec=source_dt,
+        beta_m_per_s=4_533.0,
+    )
+    aligned = model.stream_step_from_rate(
+        raw,
+        state=first.state,
+        horizon_sec=180,
+        source_distance_m=source_distance,
+        source_dt_sec=source_dt,
+        beta_m_per_s=4_533.0,
+    )
+
+    assert aligned.support_fraction[0, -1] == pytest.approx(0.0)
+    assert aligned.released_rate[0, -1] > 0.0
+
+
+def test_full_stf_alignment_caps_each_downward_step() -> None:
+    model = PINNModel(_stateful_config()).eval()
+    transition = model.released_stf_transition
+    assert transition is not None
+    source_distance = torch.zeros(1)
+    source_dt = torch.ones(1)
+    with torch.no_grad():
+        transition.moment_update_head.weight.zero_()
+        transition.moment_update_head.bias.copy_(
+            torch.tensor([0.0, 4.0, 10.0])
+        )
+        first = model.stream_step_from_rate(
+            torch.full((1, 200), 2.0e18),
+            state=None,
+            horizon_sec=179,
+            source_distance_m=source_distance,
+            source_dt_sec=source_dt,
+            beta_m_per_s=4_533.0,
+        )
+        second = model.stream_step_from_rate(
+            torch.zeros(1, 200),
+            state=first.state,
+            horizon_sec=180,
+            source_distance_m=source_distance,
+            source_dt_sec=source_dt,
+            beta_m_per_s=4_533.0,
+        )
+
+    first_mw = (2.0 / 3.0) * (
+        torch.log10(torch.sum(first.released_rate).clamp_min(1.0e10)) - 9.1
+    )
+    second_mw = (2.0 / 3.0) * (
+        torch.log10(torch.sum(second.released_rate).clamp_min(1.0e10)) - 9.1
+    )
+    theoretical_bound = (2.0 / 3.0) * -math.log10(
+        1.0 - transition.full_stf_alignment_down_fraction_per_step
+    )
+    assert float(first_mw - second_mw) <= theoretical_bound + 1.0e-5
 
 
 def test_phase50_training_runner_contracts_are_enforced_together() -> None:
@@ -627,7 +741,13 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
         for name, value in components.items()
     }
     total = normalized_loss(components, normalizers)
-    assert total.item() == pytest.approx(sum(LOSS_WEIGHTS.values()))
+    expected_total = sum(
+        LOSS_WEIGHTS[name]
+        * float(components[name].detach())
+        / normalizers[name]
+        for name in LOSS_WEIGHTS
+    )
+    assert total.item() == pytest.approx(expected_total)
     total.backward()
     assert all(
         parameter.grad is not None and torch.isfinite(parameter.grad).all()

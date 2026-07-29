@@ -281,6 +281,9 @@ def stateful_streaming_config_from_config(
         "max_moment_proposal_correction_log10",
         "use_moment_rebase_window",
         "moment_rebase_start_sec",
+        "use_full_stf_alignment",
+        "full_stf_alignment_start_sec",
+        "full_stf_alignment_down_fraction_per_step",
     }
     extra = set(raw) - allowed
     if extra:
@@ -386,6 +389,33 @@ def stateful_streaming_config_from_config(
             "model.stateful_streaming.moment_rebase_start_sec must not "
             "exceed moment_stability_start_sec"
         )
+    use_full_stf_alignment = raw.get("use_full_stf_alignment", False)
+    if not isinstance(use_full_stf_alignment, bool):
+        raise ValueError(
+            "model.stateful_streaming.use_full_stf_alignment must be boolean"
+        )
+    full_stf_alignment_start_sec = positive_int(
+        "full_stf_alignment_start_sec",
+        180,
+    )
+    full_stf_alignment_down_fraction_per_step = finite_float(
+        "full_stf_alignment_down_fraction_per_step",
+        0.03,
+    )
+    if not 0.0 < full_stf_alignment_down_fraction_per_step < 1.0:
+        raise ValueError(
+            "model.stateful_streaming."
+            "full_stf_alignment_down_fraction_per_step must be between "
+            "zero and one"
+        )
+    if (
+        use_full_stf_alignment
+        and full_stf_alignment_start_sec <= moment_stability_start_sec
+    ):
+        raise ValueError(
+            "model.stateful_streaming.full_stf_alignment_start_sec must "
+            "be after moment_stability_start_sec"
+        )
     return {
         "mode": mode,
         "local_channels": positive_int("local_channels", 4),
@@ -405,6 +435,11 @@ def stateful_streaming_config_from_config(
         ),
         "use_moment_rebase_window": use_moment_rebase_window,
         "moment_rebase_start_sec": moment_rebase_start_sec,
+        "use_full_stf_alignment": use_full_stf_alignment,
+        "full_stf_alignment_start_sec": full_stf_alignment_start_sec,
+        "full_stf_alignment_down_fraction_per_step": (
+            full_stf_alignment_down_fraction_per_step
+        ),
     }
 
 

@@ -75,6 +75,8 @@ EARLY_MOMENT_DOWN_FRACTION_PER_STEP = 0.1
 MOMENT_STABILITY_START_SEC = 60
 MOMENT_REBASE_START_SEC = 40
 MAX_MOMENT_PROPOSAL_CORRECTION_LOG10 = 3.0
+FULL_STF_ALIGNMENT_START_SEC = 180
+FULL_STF_ALIGNMENT_DOWN_FRACTION_PER_STEP = 0.03
 STEP_HUBER_BETA_MW = 0.01
 HISTORY_HUBER_BETA_LOG10 = 0.05
 MULTISCALE_OFFSETS = (5, 20, 60)
@@ -160,6 +162,11 @@ def phase50_config() -> dict[str, Any]:
         ),
         "use_moment_rebase_window": True,
         "moment_rebase_start_sec": MOMENT_REBASE_START_SEC,
+        "use_full_stf_alignment": True,
+        "full_stf_alignment_start_sec": FULL_STF_ALIGNMENT_START_SEC,
+        "full_stf_alignment_down_fraction_per_step": (
+            FULL_STF_ALIGNMENT_DOWN_FRACTION_PER_STEP
+        ),
     }
     return config
 
@@ -263,6 +270,23 @@ def causal_support_fraction(
     return torch.clamp(age / SUPPORT_RAMP_SEC, min=0.0, max=1.0)
 
 
+def target_support_fraction(causal_support: torch.Tensor) -> torch.Tensor:
+    if causal_support.ndim != 3 or causal_support.shape[1] != len(HORIZONS):
+        raise ValueError("causal support shape changed")
+    horizons = causal_support.new_tensor(HORIZONS).reshape(1, -1, 1)
+    alignment_weight = torch.clamp(
+        (
+            horizons
+            - float(FULL_STF_ALIGNMENT_START_SEC)
+            + 1.0
+        )
+        / float(HORIZONS[-1] - FULL_STF_ALIGNMENT_START_SEC + 1),
+        min=0.0,
+        max=1.0,
+    )
+    return causal_support + alignment_weight * (1.0 - causal_support)
+
+
 def _weighted_mean(
     per_sample: torch.Tensor,
     sample_weights: torch.Tensor,
@@ -301,12 +325,14 @@ def stateful_loss_components(
         source_dt_sec=source_dt,
         beta_m_per_s=beta,
     )
-    support = causal_support_fraction(
+    causal_support = causal_support_fraction(
         batch,
         beta_m_per_s=beta,
         source_steps=states.shape[2],
     )
-    target_rate = batch["stf"].unsqueeze(1) * support
+    target_rate = batch["stf"].unsqueeze(1) * target_support_fraction(
+        causal_support
+    )
     target_encoded = encode_rate(
         target_rate,
         stf_m_ref=stf_m_ref_from_config(dict(config)),
@@ -392,7 +418,7 @@ def stateful_loss_components(
         torch.cumsum(states * dt, dim=2).clamp_min(1.0e10)
     )
     confirmed_delta = cumulative_log[:, 1:] - cumulative_log[:, :-1]
-    previous_support = support[:, :-1] >= 1.0
+    previous_support = causal_support[:, :-1] >= 1.0
     confirmed_loss = F.smooth_l1_loss(
         confirmed_delta,
         torch.zeros_like(confirmed_delta),
@@ -625,12 +651,14 @@ def evaluate_model(
                 source_dt_sec=batch["source_dt_sec"],
                 beta_m_per_s=float(config["physics"]["beta"]),
             )
-            support = causal_support_fraction(
+            causal_support = causal_support_fraction(
                 batch,
                 beta_m_per_s=float(config["physics"]["beta"]),
                 source_steps=states.shape[2],
             )
-            target_rate = batch["stf"].unsqueeze(1) * support
+            target_rate = batch["stf"].unsqueeze(1) * target_support_fraction(
+                causal_support
+            )
             target_mw = moment_magnitude_from_rate(
                 target_rate.reshape(-1, target_rate.shape[2]),
                 batch["source_dt_sec"]
@@ -805,10 +833,27 @@ def _protocol(
                 MOMENT_REBASE_START_SEC,
                 MOMENT_STABILITY_START_SEC,
             ],
-            "theoretical_post_60_peak_to_final_bound_mw": (
+            "complete_stf_alignment_window_sec": [
+                FULL_STF_ALIGNMENT_START_SEC,
+                HORIZONS[-1],
+            ],
+            "alignment_max_downward_fraction_per_step": (
+                FULL_STF_ALIGNMENT_DOWN_FRACTION_PER_STEP
+            ),
+            "theoretical_60_to_179_decline_bound_mw": (
                 (2.0 / 3.0)
-                * -float(HORIZONS[-1] - MOMENT_STABILITY_START_SEC)
+                * -float(
+                    FULL_STF_ALIGNMENT_START_SEC
+                    - 1
+                    - MOMENT_STABILITY_START_SEC
+                )
                 * math.log10(1.0 - MAX_MOMENT_DOWN_FRACTION_PER_STEP)
+            ),
+            "theoretical_alignment_step_bound_mw": (
+                (2.0 / 3.0)
+                * -math.log10(
+                    1.0 - FULL_STF_ALIGNMENT_DOWN_FRACTION_PER_STEP
+                )
             ),
         },
         "batch_size": BATCH_SIZE,

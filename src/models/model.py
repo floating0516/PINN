@@ -103,6 +103,9 @@ class ReleasedSTFTransition(nn.Module):
         max_moment_proposal_correction_log10: float,
         use_moment_rebase_window: bool,
         moment_rebase_start_sec: int,
+        use_full_stf_alignment: bool,
+        full_stf_alignment_start_sec: int,
+        full_stf_alignment_down_fraction_per_step: float,
     ) -> None:
         super().__init__()
         self.source_steps = int(source_steps)
@@ -124,6 +127,20 @@ class ReleasedSTFTransition(nn.Module):
         )
         self.use_moment_rebase_window = bool(use_moment_rebase_window)
         self.moment_rebase_start_sec = int(moment_rebase_start_sec)
+        self.use_full_stf_alignment = bool(use_full_stf_alignment)
+        self.full_stf_alignment_start_sec = int(
+            full_stf_alignment_start_sec
+        )
+        self.full_stf_alignment_down_fraction_per_step = float(
+            full_stf_alignment_down_fraction_per_step
+        )
+        if (
+            self.use_full_stf_alignment
+            and self.full_stf_alignment_start_sec > self.source_steps
+        ):
+            raise ValueError(
+                "full STF alignment start must not exceed source steps"
+            )
         self.local_context = nn.Conv1d(
             1,
             int(local_channels),
@@ -326,7 +343,31 @@ class ReleasedSTFTransition(nn.Module):
         correction_log10 = self.max_proposal_correction_log10 * torch.tanh(
             self.candidate_correction_head(hidden).squeeze(-1)
         )
-        candidate = proposal * torch.exp(correction_log10 * math.log(10.0))
+        candidate_scale = torch.exp(correction_log10 * math.log(10.0))
+        candidate = proposal * candidate_scale
+        if self.use_full_stf_alignment:
+            alignment_weight = min(
+                max(
+                    (
+                        horizon_sec
+                        - self.full_stf_alignment_start_sec
+                        + 1
+                    )
+                    / (
+                        self.source_steps
+                        - self.full_stf_alignment_start_sec
+                        + 1
+                    ),
+                    0.0,
+                ),
+                1.0,
+            )
+            alignment_support = support + alignment_weight * (1.0 - support)
+            alignment_candidate = (
+                raw_rate * alignment_support * candidate_scale
+            )
+        else:
+            alignment_candidate = candidate
         retention = torch.sigmoid(self.gate_head(hidden).squeeze(-1)) * support
         if state is None:
             preliminary_released = candidate
@@ -405,9 +446,14 @@ class ReleasedSTFTransition(nn.Module):
         )
         calibrated_preliminary = preliminary_released * proposal_scale
         calibrated_candidate = candidate * proposal_scale
+        calibrated_alignment_candidate = alignment_candidate * proposal_scale
         if state is None:
             released = calibrated_preliminary
         else:
+            in_full_alignment = (
+                self.use_full_stf_alignment
+                and horizon_sec >= self.full_stf_alignment_start_sec
+            )
             in_rebase_window = (
                 self.use_moment_rebase_window
                 and self.moment_rebase_start_sec
@@ -415,16 +461,24 @@ class ReleasedSTFTransition(nn.Module):
                 <= self.moment_stability_start_sec
             )
             evidence_rate = (
-                calibrated_candidate
-                if in_rebase_window
-                else calibrated_preliminary
+                calibrated_alignment_candidate
+                if in_full_alignment
+                else (
+                    calibrated_candidate
+                    if in_rebase_window
+                    else calibrated_preliminary
+                )
             )
             upward_fraction = torch.sigmoid(moment_logits[:, 1])
             max_downward_fraction = (
-                self.early_moment_down_fraction_per_step
-                if horizon_sec < self.moment_stability_start_sec
-                or in_rebase_window
-                else self.max_moment_down_fraction_per_step
+                self.full_stf_alignment_down_fraction_per_step
+                if in_full_alignment
+                else (
+                    self.early_moment_down_fraction_per_step
+                    if horizon_sec < self.moment_stability_start_sec
+                    or in_rebase_window
+                    else self.max_moment_down_fraction_per_step
+                )
             )
             downward_fraction = max_downward_fraction * torch.sigmoid(
                 moment_logits[:, 2]
@@ -775,6 +829,19 @@ class PINNModel(nn.Module):
                 ),
                 moment_rebase_start_sec=int(
                     self.stateful_streaming["moment_rebase_start_sec"]
+                ),
+                use_full_stf_alignment=bool(
+                    self.stateful_streaming["use_full_stf_alignment"]
+                ),
+                full_stf_alignment_start_sec=int(
+                    self.stateful_streaming[
+                        "full_stf_alignment_start_sec"
+                    ]
+                ),
+                full_stf_alignment_down_fraction_per_step=float(
+                    self.stateful_streaming[
+                        "full_stf_alignment_down_fraction_per_step"
+                    ]
                 ),
             )
         else:
