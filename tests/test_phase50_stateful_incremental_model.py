@@ -13,6 +13,7 @@ from scripts.experiments.run_phase43_streaming_adapter import HORIZONS
 from scripts.experiments.run_phase50_stateful_incremental_model import (
     EPOCHS,
     LOSS_WEIGHTS,
+    MAX_MOMENT_DOWN_FRACTION_PER_STEP,
     VALIDATION_GATES,
     _assert_backbone_unchanged,
     build_arg_parser,
@@ -833,3 +834,4 @@ def test_phase50_training_runner_contracts_are_enforced_together() -> None:
     assert "--normalizer-path" in help_text
     assert "no external adapter" in help_text
     assert EPOCHS == 30
+    assert MAX_MOMENT_DOWN_FRACTION_PER_STEP == pytest.approx(0.01)
