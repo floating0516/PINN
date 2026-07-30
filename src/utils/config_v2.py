@@ -285,6 +285,9 @@ def stateful_streaming_config_from_config(
             "confidence_step_max",
             "initial_absorption_logit",
             "initial_confidence_logit",
+            "use_late_proposal_assimilation",
+            "late_proposal_assimilation_start_sec",
+            "initial_proposal_assimilation_logit",
             "pgd_hint_law",
         }
         extra = set(raw) - allowed
@@ -370,6 +373,15 @@ def stateful_streaming_config_from_config(
             raise ValueError(
                 "model.stateful_streaming.confidence_step_max must be below one"
             )
+        use_late_proposal_assimilation = raw.get(
+            "use_late_proposal_assimilation",
+            False,
+        )
+        if not isinstance(use_late_proposal_assimilation, bool):
+            raise ValueError(
+                "model.stateful_streaming.use_late_proposal_assimilation "
+                "must be boolean"
+            )
         pgd_hint_law = raw.get("pgd_hint_law", "crowell")
         if pgd_hint_law != "crowell":
             raise ValueError(
@@ -403,6 +415,17 @@ def stateful_streaming_config_from_config(
             ),
             "initial_confidence_logit": pgd_finite_float(
                 "initial_confidence_logit",
+                -4.0,
+            ),
+            "use_late_proposal_assimilation": (
+                use_late_proposal_assimilation
+            ),
+            "late_proposal_assimilation_start_sec": pgd_positive_int(
+                "late_proposal_assimilation_start_sec",
+                160,
+            ),
+            "initial_proposal_assimilation_logit": pgd_finite_float(
+                "initial_proposal_assimilation_logit",
                 -4.0,
             ),
             "pgd_hint_law": pgd_hint_law,

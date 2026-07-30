@@ -47,6 +47,7 @@ class ReleasedSTFTransitionOutput:
     plateau_confidence: torch.Tensor | None = None
     pgd_anchor_mw: torch.Tensor | None = None
     pgd_residual_mw: torch.Tensor | None = None
+    proposal_assimilation_mw: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,7 @@ class StatefulPINNPrediction:
     plateau_confidence: torch.Tensor | None = None
     pgd_anchor_mw: torch.Tensor | None = None
     pgd_residual_mw: torch.Tensor | None = None
+    proposal_assimilation_mw: torch.Tensor | None = None
 
 
 class RadialAsinhZeroConv(nn.Module):
@@ -673,6 +675,9 @@ class PGDGuidedSTFTransition(nn.Module):
         confidence_step_max: float,
         initial_absorption_logit: float,
         initial_confidence_logit: float,
+        use_late_proposal_assimilation: bool,
+        late_proposal_assimilation_start_sec: int,
+        initial_proposal_assimilation_logit: float,
     ) -> None:
         super().__init__()
         self.source_steps = int(source_steps)
@@ -692,9 +697,24 @@ class PGDGuidedSTFTransition(nn.Module):
             max_late_revision_mw_per_step
         )
         self.confidence_step_max = float(confidence_step_max)
+        self.use_late_proposal_assimilation = bool(
+            use_late_proposal_assimilation
+        )
+        self.late_proposal_assimilation_start_sec = int(
+            late_proposal_assimilation_start_sec
+        )
         if self.shape_identity_start_sec >= self.source_steps:
             raise ValueError(
                 "PGD shape identity start must be before source steps"
+            )
+        if (
+            self.use_late_proposal_assimilation
+            and self.late_proposal_assimilation_start_sec
+            >= self.source_steps
+        ):
+            raise ValueError(
+                "PGD late proposal assimilation start must be before "
+                "source steps"
             )
 
         self.local_context = nn.Conv1d(
@@ -734,6 +754,19 @@ class PGDGuidedSTFTransition(nn.Module):
                     dtype=self.moment_update_head.bias.dtype,
                 )
             )
+        self.proposal_assimilation_head: nn.Linear | None
+        if self.use_late_proposal_assimilation:
+            self.proposal_assimilation_head = nn.Linear(
+                self.hidden_size,
+                1,
+            )
+            nn.init.zeros_(self.proposal_assimilation_head.weight)
+            nn.init.constant_(
+                self.proposal_assimilation_head.bias,
+                float(initial_proposal_assimilation_logit),
+            )
+        else:
+            self.proposal_assimilation_head = None
 
     def encode_rate(self, rate: torch.Tensor) -> torch.Tensor:
         return torch.log10(1.0 + rate.clamp_min(0.0) / self.stf_m_ref)
@@ -1026,6 +1059,7 @@ class PGDGuidedSTFTransition(nn.Module):
         moment_logits = self.moment_update_head(moment_hidden)
         absorption = torch.sigmoid(moment_logits[:, 1])
         reliability = 0.25 + 0.75 * pgd_valid.to(dtype=raw_rate.dtype)
+        proposal_assimilation = raw_rate.new_zeros(batch_size)
         if state is None:
             residual = self.max_initial_residual_mw * torch.tanh(
                 moment_logits[:, 0]
@@ -1053,6 +1087,38 @@ class PGDGuidedSTFTransition(nn.Module):
                 min=-self.max_residual_mw,
                 max=self.max_residual_mw,
             )
+            if (
+                self.proposal_assimilation_head is not None
+                and horizon_sec >= self.late_proposal_assimilation_start_sec
+            ):
+                assimilation_progress = min(
+                    max(
+                        (
+                            horizon_sec
+                            - self.late_proposal_assimilation_start_sec
+                        )
+                        / (
+                            self.source_steps
+                            - self.late_proposal_assimilation_start_sec
+                        ),
+                        0.0,
+                    ),
+                    1.0,
+                )
+                proposal_gap = raw_mw - (anchor + residual)
+                proposal_assimilation = (
+                    revision_limit
+                    * assimilation_progress
+                    * torch.sigmoid(
+                        self.proposal_assimilation_head(moment_hidden).squeeze(-1)
+                    )
+                    * torch.tanh(proposal_gap / 0.25)
+                )
+                residual = torch.clamp(
+                    residual + proposal_assimilation,
+                    min=-self.max_residual_mw,
+                    max=self.max_residual_mw,
+                )
             confidence_step = (
                 (1.0 - previous_confidence)
                 * self.confidence_step_max
@@ -1097,6 +1163,7 @@ class PGDGuidedSTFTransition(nn.Module):
             "plateau_confidence": confidence,
             "pgd_anchor_mw": anchor,
             "pgd_residual_mw": residual,
+            "proposal_assimilation_mw": proposal_assimilation,
         }
         return released, retention, support, next_state, diagnostics
 
@@ -1493,6 +1560,21 @@ class PINNModel(nn.Module):
                 initial_confidence_logit=float(
                     self.stateful_streaming["initial_confidence_logit"]
                 ),
+                use_late_proposal_assimilation=bool(
+                    self.stateful_streaming[
+                        "use_late_proposal_assimilation"
+                    ]
+                ),
+                late_proposal_assimilation_start_sec=int(
+                    self.stateful_streaming[
+                        "late_proposal_assimilation_start_sec"
+                    ]
+                ),
+                initial_proposal_assimilation_logit=float(
+                    self.stateful_streaming[
+                        "initial_proposal_assimilation_logit"
+                    ]
+                ),
             )
         else:
             self.released_stf_transition = None
@@ -1724,6 +1806,9 @@ class PINNModel(nn.Module):
             plateau_confidence=diagnostics.get("plateau_confidence"),
             pgd_anchor_mw=diagnostics.get("pgd_anchor_mw"),
             pgd_residual_mw=diagnostics.get("pgd_residual_mw"),
+            proposal_assimilation_mw=diagnostics.get(
+                "proposal_assimilation_mw"
+            ),
         )
 
     def stream_sequence_from_rates(
@@ -1776,6 +1861,12 @@ class PINNModel(nn.Module):
             "pgd_anchor_mw": [],
             "pgd_residual_mw": [],
         }
+        if (
+            isinstance(self.released_stf_transition, PGDGuidedSTFTransition)
+            and self.released_stf_transition.proposal_assimilation_head
+            is not None
+        ):
+            diagnostic_values["proposal_assimilation_mw"] = []
         for index, horizon in enumerate(horizons):
             output = self.stream_step_from_rate(
                 raw_rates[:, index],
@@ -1856,6 +1947,9 @@ class PINNModel(nn.Module):
             plateau_confidence=transition.plateau_confidence,
             pgd_anchor_mw=transition.pgd_anchor_mw,
             pgd_residual_mw=transition.pgd_residual_mw,
+            proposal_assimilation_mw=(
+                transition.proposal_assimilation_mw
+            ),
         )
 
     def forward(self, x: torch.Tensor, meta: Optional[torch.Tensor] = None) -> torch.Tensor:

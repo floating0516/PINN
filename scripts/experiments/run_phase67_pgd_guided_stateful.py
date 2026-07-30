@@ -60,6 +60,9 @@ DEFAULT_CACHE_ROOT = Path(
 )
 EXPERIMENT_PHASE = "Phase67"
 STATE_HIDDEN_SIZE = 8
+USE_LATE_PROPOSAL_ASSIMILATION = False
+LATE_PROPOSAL_ASSIMILATION_START_SEC = 160
+INITIAL_PROPOSAL_ASSIMILATION_LOGIT = -4.0
 SEEDS = (17, 42, 73)
 EXPECTED_BASE_PARAMETER_COUNT = 1_010_850
 EXPECTED_TRANSITION_PARAMETER_COUNT = 1_110
@@ -193,6 +196,15 @@ def phase67_config() -> dict[str, Any]:
         "confidence_step_max": CONFIDENCE_STEP_MAX,
         "initial_absorption_logit": INITIAL_ABSORPTION_LOGIT,
         "initial_confidence_logit": INITIAL_CONFIDENCE_LOGIT,
+        "use_late_proposal_assimilation": (
+            USE_LATE_PROPOSAL_ASSIMILATION
+        ),
+        "late_proposal_assimilation_start_sec": (
+            LATE_PROPOSAL_ASSIMILATION_START_SEC
+        ),
+        "initial_proposal_assimilation_logit": (
+            INITIAL_PROPOSAL_ASSIMILATION_LOGIT
+        ),
         "pgd_hint_law": "crowell",
     }
     return config
@@ -586,6 +598,16 @@ def stateful_loss_components(
         "mean_abs_revision_mw": float(
             stream_diagnostics["revision_mw"].detach().abs().mean().cpu()
         ),
+        "mean_abs_proposal_assimilation_mw": float(
+            stream_diagnostics.get(
+                "proposal_assimilation_mw",
+                torch.zeros_like(stream_diagnostics["revision_mw"]),
+            )
+            .detach()
+            .abs()
+            .mean()
+            .cpu()
+        ),
         "mean_plateau_confidence": float(
             stream_diagnostics["plateau_confidence"].detach().mean().cpu()
         ),
@@ -826,6 +848,7 @@ def evaluate_model(
         "revision_mw": 0.0,
         "plateau_confidence": 0.0,
         "pgd_residual_mw": 0.0,
+        "proposal_assimilation_mw": 0.0,
     }
     diagnostic_count = 0
     model.eval()
@@ -889,6 +912,15 @@ def evaluate_model(
             )
             diagnostic_sums["pgd_residual_mw"] += float(
                 stream_diagnostics["pgd_residual_mw"].sum().cpu()
+            )
+            diagnostic_sums["proposal_assimilation_mw"] += float(
+                stream_diagnostics.get(
+                    "proposal_assimilation_mw",
+                    torch.zeros_like(stream_diagnostics["revision_mw"]),
+                )
+                .abs()
+                .sum()
+                .cpu()
             )
             diagnostic_count += int(
                 stream_diagnostics["absorption_gate"].numel()
@@ -1195,6 +1227,13 @@ def _protocol(
             "confidence_step_max": CONFIDENCE_STEP_MAX,
             "initial_absorption_logit": INITIAL_ABSORPTION_LOGIT,
             "initial_confidence_logit": INITIAL_CONFIDENCE_LOGIT,
+            "late_proposal_assimilation": {
+                "enabled": USE_LATE_PROPOSAL_ASSIMILATION,
+                "start_sec": LATE_PROPOSAL_ASSIMILATION_START_SEC,
+                "initial_logit": INITIAL_PROPOSAL_ASSIMILATION_LOGIT,
+                "direction": "current Phase39 proposal gap",
+                "per_step_budget": "shared confidence-dependent revision limit",
+            },
         },
         "batch_size": BATCH_SIZE,
         "epochs": EPOCHS,
@@ -1312,6 +1351,7 @@ def train_seed(
             "late_mean_gate": 0.0,
             "mean_absorption_gate": 0.0,
             "mean_abs_revision_mw": 0.0,
+            "mean_abs_proposal_assimilation_mw": 0.0,
             "mean_plateau_confidence": 0.0,
             "endpoint_plateau_confidence": 0.0,
             "mean_pgd_residual_mw": 0.0,
