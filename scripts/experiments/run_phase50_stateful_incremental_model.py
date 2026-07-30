@@ -88,6 +88,7 @@ LOSS_WEIGHTS = {
     "endpoint_science": 2.0,
     "released_sequence": 1.0,
     "endpoint_teacher": 1.0,
+    "post60_target_overshoot": 1.0,
     "downward_step": 2.0,
     "multiscale_downward": 2.0,
     "confirmed_history": 1.0,
@@ -96,6 +97,7 @@ NORMALIZER_FLOORS = {
     "endpoint_science": 1.0e-8,
     "released_sequence": 1.0e-8,
     "endpoint_teacher": 1.0e-4,
+    "post60_target_overshoot": 1.0e-8,
     "downward_step": 1.0e-8,
     "multiscale_downward": 1.0e-8,
     "confirmed_history": 1.0e-8,
@@ -339,6 +341,26 @@ def _weighted_mean(
     return torch.mean(per_sample * sample_weights)
 
 
+def post60_target_overshoot_loss(
+    state_mw: torch.Tensor,
+    target_mw: torch.Tensor,
+    sample_weights: torch.Tensor,
+) -> torch.Tensor:
+    if state_mw.shape != target_mw.shape or state_mw.ndim != 2:
+        raise ValueError("state and target magnitude must have matching 2D shapes")
+    if state_mw.shape[1] != len(HORIZONS):
+        raise ValueError("magnitude sequence must match Phase50 horizons")
+    start = HORIZONS.index(MOMENT_STABILITY_START_SEC)
+    overshoot = torch.relu(state_mw[:, start:] - target_mw[:, start:])
+    per_sample = F.smooth_l1_loss(
+        overshoot,
+        torch.zeros_like(overshoot),
+        reduction="none",
+        beta=STEP_HUBER_BETA_MW,
+    ).mean(dim=1)
+    return _weighted_mean(per_sample, sample_weights)
+
+
 def normalizer_training_indices(train_indices: np.ndarray) -> np.ndarray:
     sample_count = NORMALIZER_BATCHES * BATCH_SIZE
     if train_indices.ndim != 1 or len(train_indices) < sample_count:
@@ -444,6 +466,11 @@ def stateful_loss_components(
         ),
         sample_weights,
     )
+    post60_target_overshoot = post60_target_overshoot_loss(
+        state_mw,
+        target_mw,
+        sample_weights,
+    )
 
     adjacent_down = torch.relu(state_mw[:, :-1] - state_mw[:, 1:])
     adjacent_loss = F.smooth_l1_loss(
@@ -495,6 +522,7 @@ def stateful_loss_components(
         "endpoint_science": endpoint_science,
         "released_sequence": released_sequence,
         "endpoint_teacher": endpoint_teacher,
+        "post60_target_overshoot": post60_target_overshoot,
         "downward_step": downward_step,
         "multiscale_downward": multiscale_downward,
         "confirmed_history": confirmed_history,
@@ -511,6 +539,15 @@ def stateful_loss_components(
         "target_mw_mae": float(magnitude_error.detach().mean().cpu()),
         "endpoint_teacher_mw_mae": float(
             endpoint_teacher_mw_error.detach().mean().cpu()
+        ),
+        "post60_target_overshoot_mw": float(
+            torch.relu(
+                state_mw[:, HORIZONS.index(MOMENT_STABILITY_START_SEC) :]
+                - target_mw[:, HORIZONS.index(MOMENT_STABILITY_START_SEC) :]
+            )
+            .detach()
+            .mean()
+            .cpu()
         ),
         "endpoint_L_MSE": float(endpoint_parts["L_MSE"]),
         "endpoint_L_synth": float(endpoint_parts["L_synth"]),
@@ -874,6 +911,11 @@ def _protocol(
                 FULL_STF_ALIGNMENT_DOWN_FRACTION_PER_STEP
             ),
         },
+        "post60_target_overshoot": {
+            "start_sec": MOMENT_STABILITY_START_SEC,
+            "direction": "penalize_state_above_progressive_target_only",
+            "huber_beta_mw": STEP_HUBER_BETA_MW,
+        },
         "external_adapter": False,
         "source_model": "Phase39 Glehman scalar + global invariant, seed42",
         "source_checkpoint": str(PHASE39_CHECKPOINT),
@@ -1040,6 +1082,7 @@ def train_seed(
             "mean_downward_step_mw": 0.0,
             "target_mw_mae": 0.0,
             "endpoint_teacher_mw_mae": 0.0,
+            "post60_target_overshoot_mw": 0.0,
             "endpoint_L_MSE": 0.0,
             "endpoint_L_synth": 0.0,
             "endpoint_L_mag": 0.0,

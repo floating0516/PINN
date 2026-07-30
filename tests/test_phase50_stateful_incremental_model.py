@@ -21,6 +21,7 @@ from scripts.experiments.run_phase50_stateful_incremental_model import (
     freeze_transition_scope,
     normalizer_training_indices,
     normalized_loss,
+    post60_target_overshoot_loss,
     stateful_target_rate,
     stateful_loss_components,
     target_support_fraction,
@@ -573,6 +574,33 @@ def test_stateful_transition_receives_finite_gradients() -> None:
         for name, parameter in model.named_parameters()
         if name.startswith("released_stf_transition.")
     )
+
+
+def test_post60_target_overshoot_loss_is_one_sided() -> None:
+    target = torch.zeros(2, len(HORIZONS))
+    state = target.clone()
+    start = HORIZONS.index(60)
+    state[0, start:] = 0.2
+    state[1, start:] = -0.2
+
+    loss = post60_target_overshoot_loss(
+        state,
+        target,
+        torch.ones(2),
+    )
+    positive_only = post60_target_overshoot_loss(
+        state[:1],
+        target[:1],
+        torch.ones(1),
+    )
+
+    assert loss > 0.0
+    assert loss == pytest.approx(float(positive_only) / 2.0)
+    assert post60_target_overshoot_loss(
+        state[1:],
+        target[1:],
+        torch.ones(1),
+    ) == 0.0
 
 
 def test_asymmetric_moment_update_limits_downward_revision() -> None:
