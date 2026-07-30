@@ -58,6 +58,8 @@ DEFAULT_CACHE_ROOT = Path(
     "/home/lihe/PINN_Mag/runs/"
     "phase43-streaming-prefix-cache-20260728T115851Z-7bc63eb"
 )
+EXPERIMENT_PHASE = "Phase67"
+STATE_HIDDEN_SIZE = 8
 SEEDS = (17, 42, 73)
 EXPECTED_BASE_PARAMETER_COUNT = 1_010_850
 EXPECTED_TRANSITION_PARAMETER_COUNT = 1_110
@@ -175,7 +177,7 @@ def phase67_config() -> dict[str, Any]:
     config["model"]["stateful_streaming"] = {
         "mode": "pgd_residual_gru",
         "local_channels": 4,
-        "hidden_size": 8,
+        "hidden_size": STATE_HIDDEN_SIZE,
         "support_ramp_sec": SUPPORT_RAMP_SEC,
         "initial_gate_logit": -4.0,
         "max_proposal_correction_log10": MAX_PROPOSAL_CORRECTION_LOG10,
@@ -1140,7 +1142,7 @@ def _protocol(
     normalizers: Mapping[str, float],
 ) -> dict[str, Any]:
     return {
-        "phase": "Phase67",
+        "phase": EXPERIMENT_PHASE,
         "model_class": "PINNModel",
         "stateful_mode": "pgd_residual_gru",
         "stateful_output_semantics": "complete_stf_final_mw_forecast",
@@ -1181,7 +1183,7 @@ def _protocol(
                 "r_t=r_prev-absorption*positive_delta_pgd+revision; "
                 "mw_t=pgd_anchor+r_t"
             ),
-            "hidden_size": 8,
+            "hidden_size": STATE_HIDDEN_SIZE,
             "max_initial_residual_mw": MAX_INITIAL_RESIDUAL_MW,
             "max_residual_mw": MAX_RESIDUAL_MW,
             "max_early_revision_mw_per_step": (
@@ -1466,7 +1468,7 @@ def train_seed(
     if not changed_transition:
         raise RuntimeError("Phase67 training changed no transition tensors")
     summary = {
-        "phase": "Phase67",
+        "phase": EXPERIMENT_PHASE,
         "seed": seed,
         "status": status,
         "passed": passed,
@@ -1557,7 +1559,7 @@ def run_campaign(
         )
         status = "validation_gate_passed" if selected is not None else "validation_gate_failed"
     campaign = {
-        "phase": "Phase67",
+        "phase": EXPERIMENT_PHASE,
         "status": status,
         "passed": bool(smoke or selected is not None),
         "selected_seed": None if selected is None else int(selected["seed"]),
@@ -1576,7 +1578,8 @@ def run_campaign(
 def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
-            "Train the model-internal Phase67 PGD-guided recurrent STF state; "
+            f"Train the model-internal {EXPERIMENT_PHASE} PGD-guided "
+            "recurrent STF state; "
             "Crowell is a hint, not an external adapter or output projection."
         )
     )
