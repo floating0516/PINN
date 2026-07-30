@@ -1,49 +1,27 @@
 {
-  "schema_version": 2,
-  "report_status": "fixed_checkpoint_development_validation_prefix_diagnostic",
-  "git_base_commit": "846e666278dbe18af2004cbc9d438546bbaa1e84",
-  "source_run": "/home/lihe/PINN_Mag/runs/phase39-second-by-second-convergence-final-20260728T043504Z-846e666",
   "analysis_contract": {
-    "model": "Phase39 Glehman scalar + global invariant",
-    "selected_seed": 42,
-    "training_started": false,
-    "model_selection_performed": false,
-    "prediction_ensemble": false,
-    "external_role": "development_validation",
-    "event_count": 8,
-    "station_count": 158,
-    "observation_horizons_sec": "1..200",
-    "release_time_rule": "observation_horizon_sec + 5 s",
-    "target_error_mw": 0.15,
     "convergence_rule": "first horizon whose complete suffix through 200 s remains within target",
+    "event_count": 8,
+    "external_role": "development_validation",
+    "frozen_grouped_test_opened": false,
+    "model": "Phase39 Glehman scalar + global invariant",
+    "model_selection_performed": false,
+    "observation_horizons_sec": "1..200",
+    "prediction_ensemble": false,
+    "release_time_rule": "observation_horizon_sec + 5 s",
+    "selected_seed": 42,
+    "station_count": 158,
     "strict_causal_model_claim": false,
-    "frozen_grouped_test_opened": false
-  },
-  "verified_metrics": {
-    "stable_overall_event_mae_observation_sec": 188,
-    "stable_overall_event_mae_release_sec": 193,
-    "event_mae_at_200_sec": 0.14773725867271437,
-    "events_within_target_at_200_sec": "5/8",
-    "suffix_stable_individual_events": "5/8",
-    "endpoint_max_station_abs_diff_mw": 2.86102294921875e-06,
-    "endpoint_max_event_median_abs_diff_mw": 0.0,
-    "full_repository_tests": "752 passed, 1 skipped",
-    "internal_test_endpoint_station_mae_mw": 0.11933648616277263,
-    "internal_test_endpoint_event_mae_mw": 0.1522870352995013,
-    "internal_test_endpoint_station_pearson_r": 0.9713440940384902,
-    "internal_test_endpoint_event_pearson_r": 0.9604381219159038,
-    "full_repository_tests_after_scatter": "867 passed, 1 skipped in 55.43s"
+    "target_error_mw": 0.15,
+    "training_started": false
   },
   "generator": {
     "path": "scripts/evaluation/evaluate_phase39_second_by_second.py",
     "sha256": "7274563f8b021c9dd7205170c8087fd7fc385162a097507c08be117b86aebb66"
   },
-  "tests": {
-    "path": "tests/test_phase39_second_by_second.py",
-    "sha256": "f4aad2722ef80b6563232a7c62428e4b4bbbf125767052a1a8d7a2efca034c87"
-  },
+  "git_base_commit": "846e666278dbe18af2004cbc9d438546bbaa1e84",
   "outputs": {
-    "README.md": "f92ced3ab62e4b33dcd1cedfe0b45837ec7aa040d19f42429080c28c4ab3c1aa",
+    "README.md": "e9d1402c5c61d4d8e611294a329dc50fe14c59c0c1cf201c78694af053847215",
     "cohort_contract.json": "11c797bbb8f153212e37e245f36b2242199c1072a71ff5a10012114ecf32da30",
     "event_convergence.csv": "cbbed881bb4c6a035fc556ad6715f1f49aa81d2955414208fc65f871295b727a",
     "event_predictions.csv": "e2373994965472e71715eb8ba448aab58ecbb31e158290fc05ca5c086d44ab7a",
@@ -55,38 +33,139 @@
     "figures/03_convergence_times.png": "80d7400cec083e0d2f51715a2213cffb13a89de7f694531dd08194d2d83869c8",
     "figures/04_internal_test_endpoint_scatter.pdf": "8d49347f45bdd5651c0791ae6e49978b10ea6a538b35c66359f46f8ba7182142",
     "figures/04_internal_test_endpoint_scatter.png": "cf86f53d82dd4d661a24a406193f988903d94ee3b05a4c223a255afc6265f84a",
+    "figures/05_train_test_prefix_030s.pdf": "66d2e51c0d45dc9560d9e35b65971aa6f0488caf0afee517dd334c92e9fdfb2d",
+    "figures/05_train_test_prefix_030s.png": "07e92b289f382971d0a9d290107e1d3bedeabde38b03c4516981e02c1a329836",
+    "figures/06_train_test_prefix_060s.pdf": "9c05b07bfc5d2547584b070a6e5352c55e90982a1779ea07ff3343fa06d4890c",
+    "figures/06_train_test_prefix_060s.png": "a8a8435c1bee18e7f0280ef81b655b13df63fa6b3c94829d824a60b6dddad5bf",
+    "figures/07_train_test_prefix_090s.pdf": "13afa3cdc10c0d8665e862b478e6db3895cd37429ba2497ad6e5cfe277f687f7",
+    "figures/07_train_test_prefix_090s.png": "0f6e30bba06544dde9c5d1cde57e50b429422e090b62ed096f7fbe7e22c06f12",
+    "figures/08_train_test_prefix_120s.pdf": "a0ef077e2086597eaabc49d67e2f8657a33378424531e3c022386840b1dd73a4",
+    "figures/08_train_test_prefix_120s.png": "a250aa805860ce7198a3d9166fe2d860fa4d90d5d33a09bf7bce7f702425de1a",
+    "figures/09_train_test_prefix_200s.pdf": "e08ca96e0a6de2a5cc053dd35c57ca6fc268a31397c1c0eb198cb0d170ddc7fb",
+    "figures/09_train_test_prefix_200s.png": "b7b0955b3fc3067c7d3a79ba7238976ee850457a8b9a82c3bc6409eb3075ff0c",
     "horizon_metrics.csv": "b504ef9b88a60e300c3a3b5f59b577daf3c8c46a7d4f4304caac1da11c414e54",
     "horizon_metrics.json": "f730096540e3439333837d01ea0bc26840085e0c92c796e3dd2828d1b9528d43",
     "internal_test_endpoint_event_predictions.csv": "f2491f0b8fc206b7f7bd89857e8794991006191b4c951f928e3f5d9ed93bccaf",
     "internal_test_endpoint_station_predictions.csv": "aaa40e46b9a8b48111d66349910bf1dd39bd07dc27e6048a5add385edaf57627",
     "internal_test_endpoint_summary.json": "f62802fce92f251b343040e72416016364b1ba3582c5557e18924d76bfd8c9c8",
+    "internal_train_test_prefix_event_predictions.csv": "460471d22eb5ba56681b7126754ba1c229652c3f6c2cad63099873e770049b91",
+    "internal_train_test_prefix_metrics.csv": "38ba0bafca3cfb6025592aa58bf4763966d0c002934a01211ed7fcea8b61eded",
+    "internal_train_test_prefix_station_predictions.csv": "eb40218c83282ea6e2e47ae6f7cae590c789240447c08448d39b6fb8aea77ab9",
+    "internal_train_test_prefix_summary.json": "10d3e6644f07b388780d5fb562e59f13214ecfe5a3d3ec986ffee6e0bb4d754a",
     "provenance.json": "efc2277a89908d1496958b891c3a7ac1c8f67ac3adacd807f835c82ec5623098",
     "station_predictions.csv": "f4a4f79a8ba16ec128793095d2872e69232b76ca0de5b8758ffcdac344c8c756",
-    "summary.json": "81e3687414cb4bdd367c94609bc280a4c2699790db0701a50690b729c327b00f",
+    "summary.json": "1f5baf6d4484fbfe6270bcf0e99f5aea10f022a663fbbd7bce4dabbb80cefe91",
     "unavailable_stations.csv": "5a979a4c215a14ddce4fea0d611de48865ffe205103351be02b73158807dc1c2"
   },
+  "report_status": "fixed_checkpoint_development_validation_prefix_diagnostic",
+  "schema_version": 3,
+  "source_run": "/home/lihe/PINN_Mag/runs/phase39-second-by-second-convergence-final-20260728T043504Z-846e666",
   "supplemental_generated_at_utc": "2026-07-30T06:09:49.111848+00:00",
-  "supplemental_internal_test_endpoint": {
-    "evaluation_role": "within_event_station_internal_test",
-    "station_count": 385,
-    "event_count": 30,
-    "station_mae_mw": 0.11933648616277263,
-    "event_mae_mw": 0.1522870352995013,
-    "source": {
-      "station_predictions_path": "docs/reports/phase66-stateful-test-external-zh/internal_endpoint_station_predictions.csv",
-      "station_predictions_sha256": "8ece743ea16ae6ef5d6f063dbfaad29ee3c9200761cf278e8f06542d88b06979",
-      "summary_path": "docs/reports/phase66-stateful-test-external-zh/summary.json",
-      "summary_sha256": "4182fab1ca1d7ae0bb9386b25399bf03a51de8959b4fac04ade7be1442a22d73",
-      "source_report_commit": "ebcabb4e75665b41b5ab69575724332ccce5175a",
-      "split_assignment_sha256": "5ac2e07ed186dce737a3592694632775b7bbf603bf922a4a74fa6b86a3d5c240"
-    }
-  },
   "supplemental_generator": {
     "path": "scripts/plotting/plot_phase39_internal_test_scatter_zh.py",
     "sha256": "f6b8591aeec59f4775044442a45ba7eac5df56f02e9a031157803ec2e31d7a5e"
   },
+  "supplemental_internal_test_endpoint": {
+    "evaluation_role": "within_event_station_internal_test",
+    "event_count": 30,
+    "event_mae_mw": 0.1522870352995013,
+    "source": {
+      "source_report_commit": "ebcabb4e75665b41b5ab69575724332ccce5175a",
+      "split_assignment_sha256": "5ac2e07ed186dce737a3592694632775b7bbf603bf922a4a74fa6b86a3d5c240",
+      "station_predictions_path": "docs/reports/phase66-stateful-test-external-zh/internal_endpoint_station_predictions.csv",
+      "station_predictions_sha256": "8ece743ea16ae6ef5d6f063dbfaad29ee3c9200761cf278e8f06542d88b06979",
+      "summary_path": "docs/reports/phase66-stateful-test-external-zh/summary.json",
+      "summary_sha256": "4182fab1ca1d7ae0bb9386b25399bf03a51de8959b4fac04ade7be1442a22d73"
+    },
+    "station_count": 385,
+    "station_mae_mw": 0.11933648616277263
+  },
   "supplemental_tests": {
     "path": "tests/test_phase39_internal_test_scatter.py",
     "sha256": "286ebd6b1c9b58350b645d73a77818907108f3e92050249244a7cd6090adac68"
+  },
+  "supplemental_train_test_generator": {
+    "path": "scripts/plotting/plot_phase39_train_test_horizons_zh.py",
+    "sha256": "a7b8d869a62c55cd319fdd5e990baa6165ae650d358daaeb6bc540ce8266bde3"
+  },
+  "supplemental_train_test_horizons": {
+    "evaluation_role": "within_event_station_train_vs_internal_test_diagnostic",
+    "horizons_sec": [
+      30,
+      60,
+      90,
+      120,
+      200
+    ],
+    "train_station_count": 1788,
+    "test_station_count": 385,
+    "train_event_count": 31,
+    "test_event_count": 30,
+    "test_endpoint_reproduction": {
+      "passed": true,
+      "station_count": 385,
+      "max_abs_diff_mw": 0.0,
+      "max_abs_diff_station": {
+        "event": "Aegean2014",
+        "station": "LEMN"
+      },
+      "tolerance_mw": 1e-12,
+      "source_path": "/home/lihe/PINN_Mag/runs/phase46-phase45-posthoc-20260728T131632Z-20d35a9/internal/endpoint_station_predictions.csv",
+      "source_sha256": "60ce7f363b979cbbd6161e3bb47f01b3d11e8815f67ad80bb1e94318dcda06ae"
+    },
+    "source": {
+      "phase39_checkpoint_sha256": "73500f365a58b248204d02333716f31674435927e9fc1c7d55a1453786b406f7",
+      "split_assignment_sha256": "5ac2e07ed186dce737a3592694632775b7bbf603bf922a4a74fa6b86a3d5c240",
+      "train_cache_root": "/home/lihe/PINN_Mag/runs/phase43-streaming-prefix-cache-20260728T115851Z-7bc63eb",
+      "train_cache_raw_rates_sha256": "f4587fb1289b90e8a20684cf11644241647203b94e7b6c0c33005afc1a0dd137",
+      "test_raw_rates_path": "/home/lihe/PINN_Mag/runs/phase46-phase45-posthoc-20260728T131632Z-20d35a9/internal/raw_rates.npy",
+      "test_raw_rates_sha256": "666f2e6a3fbf64a2e0889ddf5494f0f8bfa805b3893f6e1863f98f00907fd788"
+    }
+  },
+  "supplemental_train_test_tests": {
+    "path": "tests/test_phase39_train_test_horizons.py",
+    "sha256": "edf54e58cbfd22c8e053a3155e9f2f4c308d51e1d4f6535c6a6168e083e09f56"
+  },
+  "tests": {
+    "path": "tests/test_phase39_second_by_second.py",
+    "sha256": "f4aad2722ef80b6563232a7c62428e4b4bbbf125767052a1a8d7a2efca034c87"
+  },
+  "train_test_horizons_generated_at_utc": "2026-07-30T09:00:39.379871+00:00",
+  "verified_metrics": {
+    "endpoint_max_event_median_abs_diff_mw": 0.0,
+    "endpoint_max_station_abs_diff_mw": 2.86102294921875e-06,
+    "event_mae_at_200_sec": 0.14773725867271437,
+    "events_within_target_at_200_sec": "5/8",
+    "full_repository_tests": "752 passed, 1 skipped",
+    "full_repository_tests_after_scatter": "867 passed, 1 skipped in 55.43s",
+    "full_repository_tests_after_train_test_horizons": "871 passed, 1 skipped in 61.67s",
+    "internal_test_endpoint_event_mae_mw": 0.1522870352995013,
+    "internal_test_endpoint_event_pearson_r": 0.9604381219159038,
+    "internal_test_endpoint_station_mae_mw": 0.11933648616277263,
+    "internal_test_endpoint_station_pearson_r": 0.9713440940384902,
+    "stable_overall_event_mae_observation_sec": 188,
+    "stable_overall_event_mae_release_sec": 193,
+    "suffix_stable_individual_events": "5/8",
+    "test_120s_event_mae_mw": 0.3976712461625599,
+    "test_120s_station_mae_mw": 0.6634168207028001,
+    "test_200s_event_mae_mw": 0.15228705818768482,
+    "test_200s_station_mae_mw": 0.1193364829425736,
+    "test_30s_event_mae_mw": 0.8468829073846632,
+    "test_30s_station_mae_mw": 0.620839600766978,
+    "test_60s_event_mae_mw": 0.7930684204684557,
+    "test_60s_station_mae_mw": 0.8269980028272401,
+    "test_90s_event_mae_mw": 0.615656159269289,
+    "test_90s_station_mae_mw": 0.8164422651822577,
+    "train_120s_event_mae_mw": 0.39175938531770654,
+    "train_120s_station_mae_mw": 0.6453635943000333,
+    "train_200s_event_mae_mw": 0.03394015618891919,
+    "train_200s_station_mae_mw": 0.09755258407624998,
+    "train_30s_event_mae_mw": 0.8655454827646486,
+    "train_30s_station_mae_mw": 0.6420572495013867,
+    "train_60s_event_mae_mw": 0.6145263938138827,
+    "train_60s_station_mae_mw": 0.7967865461039948,
+    "train_90s_event_mae_mw": 0.5275846952200935,
+    "train_90s_station_mae_mw": 0.778692386310377,
+    "train_test_horizon_endpoint_max_abs_diff_mw": 0.0
   }
 }

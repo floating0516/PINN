@@ -37,6 +37,55 @@ Phase39 对每个台站输出一个最终 Mw；事件级最终结果不是另一
 Anchorage 2018（`+0.377 Mw`，1 个 test 台站）和 Napa 2014
 （`+0.302 Mw`，3 个 test 台站）。散点图中的点大小表示该事件的 test 台站数。
 
+<!-- phase39-train-test-horizons:start -->
+## 训练集与 internal test：五个严格变长前缀
+
+这组图固定 Phase39 seed42，不重新训练。每个时刻输入真正的 `B×1×h` R 波形前缀，
+每次独立预测完整 STF，不继承上一秒状态；发布时刻为 `h+6` 秒。
+
+| 观测/发布 | Train Station MAE | Train Event MAE | Test Station MAE | Test Event MAE |
+|---|---:|---:|---:|---:|
+| 30/36 s | 0.642057 | 0.865545 | 0.620840 | 0.846883 |
+| 60/66 s | 0.796787 | 0.614526 | 0.826998 | 0.793068 |
+| 90/96 s | 0.778692 | 0.527585 | 0.816442 | 0.615656 |
+| 120/126 s | 0.645364 | 0.391759 | 0.663417 | 0.397671 |
+| 200/206 s | 0.097553 | 0.033940 | 0.119336 | 0.152287 |
+
+短前缀结果不是逐步改善：Phase39 只用完整 200 秒训练，30--120 秒属于分布外输入。
+到 200 秒时，Train Event MAE 为 **0.033940 Mw**，Test Event MAE 为 **0.152287 Mw**。
+
+### 30 秒
+
+![Phase39 train/test 30 秒散点](figures/05_train_test_prefix_030s.png)
+
+[PDF 图件](figures/05_train_test_prefix_030s.pdf)
+
+### 60 秒
+
+![Phase39 train/test 60 秒散点](figures/06_train_test_prefix_060s.png)
+
+[PDF 图件](figures/06_train_test_prefix_060s.pdf)
+
+### 90 秒
+
+![Phase39 train/test 90 秒散点](figures/07_train_test_prefix_090s.png)
+
+[PDF 图件](figures/07_train_test_prefix_090s.pdf)
+
+### 120 秒
+
+![Phase39 train/test 120 秒散点](figures/08_train_test_prefix_120s.png)
+
+[PDF 图件](figures/08_train_test_prefix_120s.pdf)
+
+### 200 秒
+
+![Phase39 train/test 200 秒散点](figures/09_train_test_prefix_200s.png)
+
+[PDF 图件](figures/09_train_test_prefix_200s.pdf)
+
+<!-- phase39-train-test-horizons:end -->
+
 ## 八个事件轨迹
 
 ![事件逐秒轨迹](figures/02_event_trajectories.png)
