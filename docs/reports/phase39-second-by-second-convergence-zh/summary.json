@@ -141,5 +141,146 @@
       "stable_within_target_release_sec": 184.0,
       "right_censored_at_200_sec": false
     }
-  ]
+  ],
+  "internal_test_endpoint": {
+    "status": "complete",
+    "model": "Phase39 Glehman scalar + global invariant, seed42",
+    "evaluation_role": "within_event_station_internal_test",
+    "observation_horizon_sec": 200,
+    "station_metrics": {
+      "count": 385,
+      "mae_mw": 0.11933648616277263,
+      "rmse_mw": 0.18397753911857884,
+      "bias_mw": -0.017577311260156207,
+      "pearson_r": 0.9713440940384902,
+      "within_0_15_count": 284,
+      "within_0_15_fraction": 0.7376623376623377,
+      "within_0_30_count": 352,
+      "within_0_30_fraction": 0.9142857142857143,
+      "max_abs_error_mw": 0.9543425623153858
+    },
+    "event_metrics": {
+      "count": 30,
+      "mae_mw": 0.1522870352995013,
+      "rmse_mw": 0.20247630502678565,
+      "bias_mw": 0.017611397363499894,
+      "pearson_r": 0.9604381219159038,
+      "within_0_15_count": 18,
+      "within_0_15_fraction": 0.6,
+      "within_0_30_count": 27,
+      "within_0_30_fraction": 0.9,
+      "max_abs_error_mw": 0.6414854303956128
+    },
+    "largest_event_errors": [
+      {
+        "event": "Lefkada2015",
+        "display_event": "Lefkada 2015",
+        "observation_horizon_sec": 200,
+        "mw_catalog": 6.5,
+        "mw_pred_median": 7.141485430395613,
+        "error_mw": 0.6414854303956128,
+        "abs_error_mw": 0.6414854303956128,
+        "station_count": 1
+      },
+      {
+        "event": "Anchorage2018",
+        "display_event": "Anchorage 2018",
+        "observation_horizon_sec": 200,
+        "mw_catalog": 7.099999904632568,
+        "mw_pred_median": 7.476947729997212,
+        "error_mw": 0.37694782536464366,
+        "abs_error_mw": 0.37694782536464366,
+        "station_count": 1
+      },
+      {
+        "event": "Napa2014",
+        "display_event": "Napa 2014",
+        "observation_horizon_sec": 200,
+        "mw_catalog": 6.019999980926514,
+        "mw_pred_median": 6.321780278160042,
+        "error_mw": 0.3017802972335284,
+        "abs_error_mw": 0.3017802972335284,
+        "station_count": 3
+      },
+      {
+        "event": "Mentawai2010",
+        "display_event": "Mentawai 2010",
+        "observation_horizon_sec": 200,
+        "mw_catalog": 7.800000190734863,
+        "mw_pred_median": 7.512261941913826,
+        "error_mw": -0.2877382488210376,
+        "abs_error_mw": 0.2877382488210376,
+        "station_count": 1
+      },
+      {
+        "event": "Nicoya2012",
+        "display_event": "Nicoya 2012",
+        "observation_horizon_sec": 200,
+        "mw_catalog": 7.599999904632568,
+        "mw_pred_median": 7.3434882247851085,
+        "error_mw": -0.2565116798474598,
+        "abs_error_mw": 0.2565116798474598,
+        "station_count": 1
+      },
+      {
+        "event": "Eureka2014",
+        "display_event": "Eureka 2014",
+        "observation_horizon_sec": 200,
+        "mw_catalog": 6.800000190734863,
+        "mw_pred_median": 7.053348855595211,
+        "error_mw": 0.253348664860348,
+        "abs_error_mw": 0.253348664860348,
+        "station_count": 1
+      },
+      {
+        "event": "Kaikoura2016",
+        "display_event": "Kaikoura 2016",
+        "observation_horizon_sec": 200,
+        "mw_catalog": 7.800000190734863,
+        "mw_pred_median": 8.033702343573097,
+        "error_mw": 0.2337021528382337,
+        "abs_error_mw": 0.2337021528382337,
+        "station_count": 4
+      },
+      {
+        "event": "Chignic2021",
+        "display_event": "Chignic 2021",
+        "observation_horizon_sec": 200,
+        "mw_catalog": 8.199999809265137,
+        "mw_pred_median": 7.975395276110088,
+        "error_mw": -0.22460453315504836,
+        "abs_error_mw": 0.22460453315504836,
+        "station_count": 6
+      },
+      {
+        "event": "Ecuador2016",
+        "display_event": "Ecuador 2016",
+        "observation_horizon_sec": 200,
+        "mw_catalog": 7.800000190734863,
+        "mw_pred_median": 7.5793363225847905,
+        "error_mw": -0.22066386815007277,
+        "abs_error_mw": 0.22066386815007277,
+        "station_count": 3
+      },
+      {
+        "event": "SandPoint2020",
+        "display_event": "SandPoint 2020",
+        "observation_horizon_sec": 200,
+        "mw_catalog": 7.599999904632568,
+        "mw_pred_median": 7.389098311883362,
+        "error_mw": -0.21090159274920595,
+        "abs_error_mw": 0.21090159274920595,
+        "station_count": 1
+      }
+    ],
+    "source": {
+      "station_predictions_path": "docs/reports/phase66-stateful-test-external-zh/internal_endpoint_station_predictions.csv",
+      "station_predictions_sha256": "8ece743ea16ae6ef5d6f063dbfaad29ee3c9200761cf278e8f06542d88b06979",
+      "summary_path": "docs/reports/phase66-stateful-test-external-zh/summary.json",
+      "summary_sha256": "4182fab1ca1d7ae0bb9386b25399bf03a51de8959b4fac04ade7be1442a22d73",
+      "source_report_commit": "ebcabb4e75665b41b5ab69575724332ccce5175a",
+      "split_assignment_sha256": "5ac2e07ed186dce737a3592694632775b7bbf603bf922a4a74fa6b86a3d5c240"
+    },
+    "interpretation": "same-event held-out station interpolation; not unseen-event generalization"
+  }
 }

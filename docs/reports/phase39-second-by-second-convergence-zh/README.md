@@ -10,9 +10,32 @@
 
 200 秒端点复现门槛通过：逐站最大差异为 `2.86e-06 Mw`，事件中位数最大差异为 `0 Mw`。
 
+另外，Phase39 在 `within_event_station` internal test 的完整 200 秒最终结果为：
+台站级 MAE **0.119336 Mw**，30 个事件的台站中位数 MAE **0.152287 Mw**。
+这部分衡量同一事件的未见台站插值，不是未见事件泛化。
+
 ![总体逐秒指标](figures/01_overall_metrics.png)
 
 [PDF 图件](figures/01_overall_metrics.pdf)
+
+## 200 秒最终结果：internal test 散点
+
+![Phase39 internal test 最终预测散点](figures/04_internal_test_endpoint_scatter.png)
+
+[PDF 图件](figures/04_internal_test_endpoint_scatter.pdf)
+
+| 聚合层级 | 数量 | MAE | RMSE | Bias | Pearson r | ±0.15 Mw | ±0.30 Mw |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| 台站 | 385 | 0.119336 | 0.183978 | -0.017577 | 0.971344 | 73.8% | 91.4% |
+| 事件中位数 | 30 | 0.152287 | 0.202476 | +0.017611 | 0.960438 | 60.0% | 90.0% |
+
+Phase39 对每个台站输出一个最终 Mw；事件级最终结果不是另一个模型输出，
+而是同一事件所有 test 台站预测的中位数。事件等权 MAE 高于台站 MAE，
+是因为每个事件在事件指标中权重相同，而台站指标会让多台站事件贡献更多记录。
+
+事件中位数误差最大的三个事件是 Lefkada 2015（`+0.641 Mw`，1 个 test 台站）、
+Anchorage 2018（`+0.377 Mw`，1 个 test 台站）和 Napa 2014
+（`+0.302 Mw`，3 个 test 台站）。散点图中的点大小表示该事件的 test 台站数。
 
 ## 八个事件轨迹
 
@@ -61,4 +84,10 @@
 - [早期不可用台站](unavailable_stations.csv)：pre-P 基线尚未就绪的台站与时刻。
 - [固定 cohort](cohort_contract.json) 与 [运行来源](provenance.json)：评估合同和输入哈希。
 - [发布清单](publication_manifest.json)：GitHub 工件与生成代码 SHA-256。
+- [internal test 台站最终预测](internal_test_endpoint_station_predictions.csv)
+  与 [事件中位数最终预测](internal_test_endpoint_event_predictions.csv)。
+- [internal test 终点摘要](internal_test_endpoint_summary.json)：散点指标、
+  最大事件误差和冻结来源哈希。
+- [散点图生成脚本](../../../scripts/plotting/plot_phase39_internal_test_scatter_zh.py)
+  与 [测试](../../../tests/test_phase39_internal_test_scatter.py)。
 - [可复现评估脚本](../../../scripts/evaluation/evaluate_phase39_second_by_second.py) 与 [测试](../../../tests/test_phase39_second_by_second.py)。
