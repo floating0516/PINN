@@ -1,0 +1,132 @@
+{
+  "files": [
+    {
+      "bytes": 6151,
+      "path": "docs/reports/phase66-stateful-test-external-zh/README.md",
+      "sha256": "c91f6682b9ce84c66c0054576c33a9a5c660e24fb67872f00776c8f533632838"
+    },
+    {
+      "bytes": 27403,
+      "path": "docs/reports/phase66-stateful-test-external-zh/external_endpoint_station_predictions.csv",
+      "sha256": "046ddb65cf114c9bca6af3ed4a365316ac92d4452d08ad577a700996ad9fcb1e"
+    },
+    {
+      "bytes": 1203,
+      "path": "docs/reports/phase66-stateful-test-external-zh/external_event_convergence.csv",
+      "sha256": "8ca4a0b7d8872253d0805902d8537bea359df60712a4f150bbb4b8da1d35fc18"
+    },
+    {
+      "bytes": 294414,
+      "path": "docs/reports/phase66-stateful-test-external-zh/external_event_predictions.csv",
+      "sha256": "72f3c3f7e09fb5febf1b7d0717db081b3e1b0267447b41b04ba546ec377fe66e"
+    },
+    {
+      "bytes": 60462,
+      "path": "docs/reports/phase66-stateful-test-external-zh/external_horizon_metrics.csv",
+      "sha256": "69e10f41555ce928c1dad7046bb2359737884aa08ab8e2c3d2de3537c8de9146"
+    },
+    {
+      "bytes": 4885827,
+      "path": "docs/reports/phase66-stateful-test-external-zh/external_station_predictions.csv",
+      "sha256": "a4ac43ce5c1aaefdaf89f0dfb0daad13f1da5565b7911166dbd1df26cad80661"
+    },
+    {
+      "bytes": 1400,
+      "path": "docs/reports/phase66-stateful-test-external-zh/external_trajectory_diagnostics.csv",
+      "sha256": "f1756bc7e5e80c636667ae39de92476f9747978551768c72bcf09c59a8921141"
+    },
+    {
+      "bytes": 40343,
+      "path": "docs/reports/phase66-stateful-test-external-zh/figures/01_training_loss.pdf",
+      "sha256": "8b4e400b61bcbeac4fec0e04ccc3c160c487fa14b3b2464c4e87fea6e299c710"
+    },
+    {
+      "bytes": 233258,
+      "path": "docs/reports/phase66-stateful-test-external-zh/figures/01_training_loss.png",
+      "sha256": "798a638c3bb79015390bdaa101010b6bb602de8d04dd7486dafce971d3eb4891"
+    },
+    {
+      "bytes": 36293,
+      "path": "docs/reports/phase66-stateful-test-external-zh/figures/02_internal_test.pdf",
+      "sha256": "a4d07cbb0f1efcf202f1a013374fe0844898a1c571872d7effa836630ec154c1"
+    },
+    {
+      "bytes": 181412,
+      "path": "docs/reports/phase66-stateful-test-external-zh/figures/02_internal_test.png",
+      "sha256": "329a7f0f897945b79aa4371e976b50ee0fd0bc334bb9a2b70ed4a9fea1087249"
+    },
+    {
+      "bytes": 37467,
+      "path": "docs/reports/phase66-stateful-test-external-zh/figures/03_external_overall.pdf",
+      "sha256": "d4f477fba949eeb0f0b518e2d9405c41ae121c5ed947cf702bbd809c43fc3e53"
+    },
+    {
+      "bytes": 251528,
+      "path": "docs/reports/phase66-stateful-test-external-zh/figures/03_external_overall.png",
+      "sha256": "6c91d9888e4d3308a11dddbce7b1913bf8650e4581754328b9a58b5af2246638"
+    },
+    {
+      "bytes": 63444,
+      "path": "docs/reports/phase66-stateful-test-external-zh/figures/04_external_event_trajectories.pdf",
+      "sha256": "bde8b08b887fcc48d67c7f64388f3320b651efa63842323b940599c8978ec4a5"
+    },
+    {
+      "bytes": 553246,
+      "path": "docs/reports/phase66-stateful-test-external-zh/figures/04_external_event_trajectories.png",
+      "sha256": "05a2b35ff856f165625c3257fddbfe2baca79193796d75e2d525b0f5ba193dcb"
+    },
+    {
+      "bytes": 38122,
+      "path": "docs/reports/phase66-stateful-test-external-zh/figures/05_external_revision_diagnostics.pdf",
+      "sha256": "f63219bb42941cc034ca027dff9e0de208d9f5a1ed3d4df2d2bc05c0ab02f13e"
+    },
+    {
+      "bytes": 170489,
+      "path": "docs/reports/phase66-stateful-test-external-zh/figures/05_external_revision_diagnostics.png",
+      "sha256": "f55755301a23f0f395eac35ec7ecd57ccf4fa50f89064abb863a7eb36ced78b2"
+    },
+    {
+      "bytes": 62652,
+      "path": "docs/reports/phase66-stateful-test-external-zh/internal_endpoint_station_predictions.csv",
+      "sha256": "8ece743ea16ae6ef5d6f063dbfaad29ee3c9200761cf278e8f06542d88b06979"
+    },
+    {
+      "bytes": 3804,
+      "path": "docs/reports/phase66-stateful-test-external-zh/internal_event_convergence.csv",
+      "sha256": "646402f991e469973041dac94afb2c4aa64961c92c12de0dfe1412e0c8d748e6"
+    },
+    {
+      "bytes": 1075328,
+      "path": "docs/reports/phase66-stateful-test-external-zh/internal_event_predictions.csv",
+      "sha256": "75eae11628668eebbdbba34910bde26fd50ad4aa9dde1003a6ded4fed04fe4f1"
+    },
+    {
+      "bytes": 60173,
+      "path": "docs/reports/phase66-stateful-test-external-zh/internal_horizon_metrics.csv",
+      "sha256": "79dbf0cbe95008ab5d21055381e972789b3e1412e3cf245f4e0af70a63d30c2a"
+    },
+    {
+      "bytes": 4458,
+      "path": "docs/reports/phase66-stateful-test-external-zh/internal_trajectory_diagnostics.csv",
+      "sha256": "484ff53705ebc49bea102193446b196ca84bbb0ed886e515ec4ffa6fcb196379"
+    },
+    {
+      "bytes": 22567,
+      "path": "docs/reports/phase66-stateful-test-external-zh/summary.json",
+      "sha256": "4182fab1ca1d7ae0bb9386b25399bf03a51de8959b4fac04ade7be1442a22d73"
+    },
+    {
+      "bytes": 13370,
+      "path": "docs/reports/phase66-stateful-test-external-zh/training_loss_by_epoch.csv",
+      "sha256": "08bf50f5966f1587747934f305b5414571fee5969c9935a0f90af4be594d6ee6"
+    }
+  ],
+  "generated_at_utc": "2026-07-30T05:28:29.702145+00:00",
+  "generator": {
+    "path": "scripts/plotting/plot_phase66_stateful_report_zh.py",
+    "sha256": "cbcd746b1695128f43196344bc65577bbc0e179c7b679681b2d014b9280fc4d8"
+  },
+  "report_role": "internal_test_and_development_validation_reporting",
+  "run_root": "/home/lihe/PINN_Mag/runs/phase66-stateful-test-external-report-20260730T0521Z-9ee21b2",
+  "source_model_commit": "9ee21b22116a6bfab9f0b93e808c7805e241b465"
+}
