@@ -63,6 +63,7 @@ STATE_HIDDEN_SIZE = 8
 USE_LATE_PROPOSAL_ASSIMILATION = False
 LATE_PROPOSAL_ASSIMILATION_START_SEC = 160
 INITIAL_PROPOSAL_ASSIMILATION_LOGIT = -4.0
+PROPOSAL_ASSIMILATION_SCALE = 1.0
 SEEDS = (17, 42, 73)
 EXPECTED_BASE_PARAMETER_COUNT = 1_010_850
 EXPECTED_TRANSITION_PARAMETER_COUNT = 1_110
@@ -209,6 +210,7 @@ def phase67_config() -> dict[str, Any]:
         "initial_proposal_assimilation_logit": (
             INITIAL_PROPOSAL_ASSIMILATION_LOGIT
         ),
+        "proposal_assimilation_scale": PROPOSAL_ASSIMILATION_SCALE,
         "pgd_hint_law": "crowell",
     }
     return config
@@ -1266,6 +1268,7 @@ def _protocol(
                 "enabled": USE_LATE_PROPOSAL_ASSIMILATION,
                 "start_sec": LATE_PROPOSAL_ASSIMILATION_START_SEC,
                 "initial_logit": INITIAL_PROPOSAL_ASSIMILATION_LOGIT,
+                "scale": PROPOSAL_ASSIMILATION_SCALE,
                 "direction": "current Phase39 proposal gap",
                 "per_step_budget": "shared confidence-dependent revision limit",
             },

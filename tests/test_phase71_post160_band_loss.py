@@ -18,6 +18,10 @@ from scripts.experiments.run_phase73_endpoint_teacher_weight2 import (
     PHASE73_ENDPOINT_TEACHER_WEIGHT,
     configure_phase73,
 )
+from scripts.experiments.run_phase74_assimilation_scale15 import (
+    PHASE74_PROPOSAL_ASSIMILATION_SCALE,
+    configure_phase74,
+)
 
 
 MUTABLE_CAMPAIGN_NAMES = (
@@ -30,6 +34,7 @@ MUTABLE_CAMPAIGN_NAMES = (
     "USE_PLATEAU_BAND_LOSS",
     "LOSS_WEIGHTS",
     "NORMALIZER_FLOORS",
+    "PROPOSAL_ASSIMILATION_SCALE",
 )
 
 
@@ -111,6 +116,32 @@ def test_phase73_changes_only_the_endpoint_teacher_weight(
         assert campaign.LOSS_WEIGHTS == expected
         assert campaign.LOSS_WEIGHTS["plateau_band"] == pytest.approx(0.25)
         assert campaign.NORMALIZER_FLOORS == phase72_normalizers
+
+    for name, value in original.items():
+        assert getattr(campaign, name) is value
+
+
+def test_phase74_changes_only_late_assimilation_scale(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = {
+        name: getattr(campaign, name) for name in MUTABLE_CAMPAIGN_NAMES
+    }
+
+    with monkeypatch.context() as restore:
+        for name, value in original.items():
+            restore.setattr(campaign, name, value)
+        configure_phase72()
+        phase72_weights = dict(campaign.LOSS_WEIGHTS)
+        configure_phase74()
+
+        assert campaign.EXPERIMENT_PHASE == "Phase74"
+        assert campaign.PROPOSAL_ASSIMILATION_SCALE == pytest.approx(
+            PHASE74_PROPOSAL_ASSIMILATION_SCALE
+        )
+        assert campaign.LOSS_WEIGHTS == phase72_weights
+        assert campaign.LOSS_WEIGHTS["endpoint_teacher"] == pytest.approx(1.0)
+        assert campaign.LOSS_WEIGHTS["plateau_band"] == pytest.approx(0.25)
 
     for name, value in original.items():
         assert getattr(campaign, name) is value

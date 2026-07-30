@@ -678,6 +678,7 @@ class PGDGuidedSTFTransition(nn.Module):
         use_late_proposal_assimilation: bool,
         late_proposal_assimilation_start_sec: int,
         initial_proposal_assimilation_logit: float,
+        proposal_assimilation_scale: float,
     ) -> None:
         super().__init__()
         self.source_steps = int(source_steps)
@@ -702,6 +703,9 @@ class PGDGuidedSTFTransition(nn.Module):
         )
         self.late_proposal_assimilation_start_sec = int(
             late_proposal_assimilation_start_sec
+        )
+        self.proposal_assimilation_scale = float(
+            proposal_assimilation_scale
         )
         if self.shape_identity_start_sec >= self.source_steps:
             raise ValueError(
@@ -1109,6 +1113,7 @@ class PGDGuidedSTFTransition(nn.Module):
                 proposal_assimilation = (
                     revision_limit
                     * assimilation_progress
+                    * self.proposal_assimilation_scale
                     * torch.sigmoid(
                         self.proposal_assimilation_head(moment_hidden).squeeze(-1)
                     )
@@ -1573,6 +1578,11 @@ class PINNModel(nn.Module):
                 initial_proposal_assimilation_logit=float(
                     self.stateful_streaming[
                         "initial_proposal_assimilation_logit"
+                    ]
+                ),
+                proposal_assimilation_scale=float(
+                    self.stateful_streaming[
+                        "proposal_assimilation_scale"
                     ]
                 ),
             )

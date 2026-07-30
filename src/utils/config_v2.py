@@ -288,6 +288,7 @@ def stateful_streaming_config_from_config(
             "use_late_proposal_assimilation",
             "late_proposal_assimilation_start_sec",
             "initial_proposal_assimilation_logit",
+            "proposal_assimilation_scale",
             "pgd_hint_law",
         }
         extra = set(raw) - allowed
@@ -345,6 +346,10 @@ def stateful_streaming_config_from_config(
             "confidence_step_max",
             0.05,
         )
+        proposal_assimilation_scale = pgd_finite_float(
+            "proposal_assimilation_scale",
+            1.0,
+        )
         positive_values = {
             "support_ramp_sec": support_ramp_sec,
             "max_proposal_correction_log10": max_proposal_correction_log10,
@@ -353,6 +358,7 @@ def stateful_streaming_config_from_config(
             "max_early_revision_mw_per_step": max_early_revision,
             "max_late_revision_mw_per_step": max_late_revision,
             "confidence_step_max": confidence_step_max,
+            "proposal_assimilation_scale": proposal_assimilation_scale,
         }
         for name, value in positive_values.items():
             if value <= 0.0:
@@ -372,6 +378,11 @@ def stateful_streaming_config_from_config(
         if confidence_step_max >= 1.0:
             raise ValueError(
                 "model.stateful_streaming.confidence_step_max must be below one"
+            )
+        if proposal_assimilation_scale > 2.0:
+            raise ValueError(
+                "model.stateful_streaming.proposal_assimilation_scale "
+                "must not exceed 2"
             )
         use_late_proposal_assimilation = raw.get(
             "use_late_proposal_assimilation",
@@ -428,6 +439,7 @@ def stateful_streaming_config_from_config(
                 "initial_proposal_assimilation_logit",
                 -4.0,
             ),
+            "proposal_assimilation_scale": proposal_assimilation_scale,
             "pgd_hint_law": pgd_hint_law,
         }
 

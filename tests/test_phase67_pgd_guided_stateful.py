@@ -69,6 +69,7 @@ def _pgd_config() -> dict:
         "confidence_step_max": 0.05,
         "initial_absorption_logit": -4.0,
         "initial_confidence_logit": -4.0,
+        "proposal_assimilation_scale": 1.0,
         "pgd_hint_law": "crowell",
     }
     return config
@@ -82,6 +83,7 @@ def test_pgd_residual_config_parses_and_validates() -> None:
     assert parsed["pgd_hint_law"] == "crowell"
     assert parsed["max_early_revision_mw_per_step"] == 0.04
     assert parsed["max_late_revision_mw_per_step"] == 0.008
+    assert parsed["proposal_assimilation_scale"] == 1.0
     validate_config_v2(_pgd_config())
 
 
@@ -91,6 +93,7 @@ def test_pgd_residual_config_parses_and_validates() -> None:
         ("max_initial_residual_mw", 3.0, "must not exceed"),
         ("max_late_revision_mw_per_step", 0.05, "must not exceed"),
         ("confidence_step_max", 1.0, "must be below one"),
+        ("proposal_assimilation_scale", 2.5, "must not exceed"),
         ("pgd_hint_law", "melgar", "must be crowell"),
     ],
 )
@@ -261,6 +264,82 @@ def test_high_confidence_negative_revision_is_bounded() -> None:
     assert 0.0079 <= drop <= 0.0081
     assert second.revision_mw is not None
     assert float(second.revision_mw.item()) == pytest.approx(-0.008, abs=1.0e-5)
+
+
+def test_late_proposal_assimilation_scale_changes_only_late_update() -> None:
+    base_config = _pgd_config()
+    base_config["model"]["stateful_streaming"].update(
+        {
+            "use_late_proposal_assimilation": True,
+            "late_proposal_assimilation_start_sec": 199,
+            "initial_proposal_assimilation_logit": 20.0,
+            "proposal_assimilation_scale": 1.0,
+        }
+    )
+    scaled_config = _pgd_config()
+    scaled_config["model"]["stateful_streaming"].update(
+        {
+            "use_late_proposal_assimilation": True,
+            "late_proposal_assimilation_start_sec": 199,
+            "initial_proposal_assimilation_logit": 20.0,
+            "proposal_assimilation_scale": 1.5,
+        }
+    )
+    base = PINNModel(base_config).eval()
+    transition = base.released_stf_transition
+    assert isinstance(transition, PGDGuidedSTFTransition)
+    with torch.no_grad():
+        transition.moment_update_head.weight.zero_()
+        transition.moment_update_head.bias.copy_(
+            torch.tensor([0.0, -20.0, 0.0, -20.0])
+        )
+        assert transition.proposal_assimilation_head is not None
+        transition.proposal_assimilation_head.weight.zero_()
+        transition.proposal_assimilation_head.bias.fill_(20.0)
+    scaled = PINNModel(scaled_config).eval()
+    scaled.load_state_dict(base.state_dict(), strict=True)
+
+    raw = torch.full((1, 200), 2.0e18)
+    metadata = {
+        "source_distance_m": torch.tensor([20_000.0]),
+        "source_dt_sec": torch.ones(1),
+        "beta_m_per_s": 4_533.0,
+        "pgd_mw_hint": torch.tensor([6.0]),
+        "pgd_valid_hint": torch.tensor([True]),
+    }
+    base_first = base.stream_step_from_rate(
+        raw,
+        state=None,
+        horizon_sec=199,
+        **metadata,
+    )
+    scaled_first = scaled.stream_step_from_rate(
+        raw,
+        state=None,
+        horizon_sec=199,
+        **metadata,
+    )
+    torch.testing.assert_close(base_first.released_mw, scaled_first.released_mw)
+
+    base_late = base.stream_step_from_rate(
+        raw,
+        state=base_first.state,
+        horizon_sec=200,
+        **metadata,
+    )
+    scaled_late = scaled.stream_step_from_rate(
+        raw,
+        state=scaled_first.state,
+        horizon_sec=200,
+        **metadata,
+    )
+    assert base_late.proposal_assimilation_mw is not None
+    assert scaled_late.proposal_assimilation_mw is not None
+    assert float(base_late.proposal_assimilation_mw.item()) > 0.0
+    torch.testing.assert_close(
+        scaled_late.proposal_assimilation_mw,
+        1.5 * base_late.proposal_assimilation_mw,
+    )
 
 
 def test_pgd_state_checkpoint_round_trip() -> None:
