@@ -69,6 +69,7 @@ LEARNING_RATE = 1.0e-3
 WEIGHT_DECAY = 1.0e-5
 GRAD_CLIP_NORM = 1.0
 SUPPORT_RAMP_SEC = 6.0
+PROPOSAL_SEMANTICS = "complete_forecast"
 MAX_PROPOSAL_CORRECTION_LOG10 = 1.0
 MAX_MOMENT_DOWN_FRACTION_PER_STEP = 0.01
 EARLY_MOMENT_DOWN_FRACTION_PER_STEP = 0.1
@@ -145,6 +146,7 @@ def phase50_config() -> dict[str, Any]:
     config = copy.deepcopy(load_frozen_config())
     config["model"]["stateful_streaming"] = {
         "mode": "released_stf_gru",
+        "proposal_semantics": PROPOSAL_SEMANTICS,
         "local_channels": 4,
         "hidden_size": 8,
         "support_ramp_sec": SUPPORT_RAMP_SEC,
@@ -287,6 +289,31 @@ def target_support_fraction(causal_support: torch.Tensor) -> torch.Tensor:
     return causal_support + alignment_weight * (1.0 - causal_support)
 
 
+def stateful_target_rate(
+    batch: Mapping[str, torch.Tensor],
+    causal_support: torch.Tensor,
+    *,
+    config: Mapping[str, Any],
+) -> torch.Tensor:
+    semantics = str(
+        config["model"]["stateful_streaming"].get(
+            "proposal_semantics",
+            "causal_released",
+        )
+    )
+    if semantics == "complete_forecast":
+        return batch["stf"].unsqueeze(1).expand(
+            -1,
+            len(HORIZONS),
+            -1,
+        )
+    if semantics == "causal_released":
+        return batch["stf"].unsqueeze(1) * target_support_fraction(
+            causal_support
+        )
+    raise ValueError("unsupported stateful proposal semantics")
+
+
 def _weighted_mean(
     per_sample: torch.Tensor,
     sample_weights: torch.Tensor,
@@ -330,8 +357,10 @@ def stateful_loss_components(
         beta_m_per_s=beta,
         source_steps=states.shape[2],
     )
-    target_rate = batch["stf"].unsqueeze(1) * target_support_fraction(
-        causal_support
+    target_rate = stateful_target_rate(
+        batch,
+        causal_support,
+        config=config,
     )
     target_encoded = encode_rate(
         target_rate,
@@ -672,8 +701,10 @@ def evaluate_model(
                 beta_m_per_s=float(config["physics"]["beta"]),
                 source_steps=states.shape[2],
             )
-            target_rate = batch["stf"].unsqueeze(1) * target_support_fraction(
-                causal_support
+            target_rate = stateful_target_rate(
+                batch,
+                causal_support,
+                config=config,
             )
             target_mw = moment_magnitude_from_rate(
                 target_rate.reshape(-1, target_rate.shape[2]),
@@ -808,6 +839,7 @@ def _protocol(
         "phase": "Phase50",
         "model_class": "PINNModel",
         "stateful_mode": "released_stf_gru",
+        "stateful_output_semantics": PROPOSAL_SEMANTICS,
         "external_adapter": False,
         "source_model": "Phase39 Glehman scalar + global invariant, seed42",
         "source_checkpoint": str(PHASE39_CHECKPOINT),
@@ -827,6 +859,7 @@ def _protocol(
         },
         "stateful_total_moment": {
             "coordinate": "asymmetric_linear_moment_evidence",
+            "proposal_semantics": PROPOSAL_SEMANTICS,
             "hidden_size": 8,
             "max_proposal_correction_log10": (
                 MAX_MOMENT_PROPOSAL_CORRECTION_LOG10
@@ -854,7 +887,7 @@ def _protocol(
                 HORIZONS[-1],
             ],
             "moment_evidence_features": [
-                "causal_candidate_log10_moment",
+                "complete_candidate_log10_moment",
                 "complete_proposal_log10_moment",
                 "complete_proposal_minus_previous_state_log10",
             ],

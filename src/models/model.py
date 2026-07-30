@@ -95,6 +95,7 @@ class ReleasedSTFTransition(nn.Module):
         local_channels: int,
         hidden_size: int,
         support_ramp_sec: float,
+        proposal_semantics: str,
         initial_gate_logit: float,
         max_proposal_correction_log10: float,
         max_moment_down_fraction_per_step: float,
@@ -112,6 +113,15 @@ class ReleasedSTFTransition(nn.Module):
         self.stf_m_ref = float(stf_m_ref)
         self.hidden_size = int(hidden_size)
         self.support_ramp_sec = float(support_ramp_sec)
+        self.proposal_semantics = str(proposal_semantics)
+        if self.proposal_semantics not in {
+            "causal_released",
+            "complete_forecast",
+        }:
+            raise ValueError(
+                "proposal_semantics must be causal_released or "
+                "complete_forecast"
+            )
         self.max_proposal_correction_log10 = float(
             max_proposal_correction_log10
         )
@@ -281,7 +291,11 @@ class ReleasedSTFTransition(nn.Module):
             device=raw_rate.device,
             dtype=raw_rate.dtype,
         )
-        proposal = raw_rate * support
+        proposal = (
+            raw_rate
+            if self.proposal_semantics == "complete_forecast"
+            else raw_rate * support
+        )
         encoded_proposal = self.encode_rate(proposal)
         batch_size = raw_rate.shape[0]
         if state is None:
@@ -346,7 +360,10 @@ class ReleasedSTFTransition(nn.Module):
         )
         candidate_scale = torch.exp(correction_log10 * math.log(10.0))
         candidate = proposal * candidate_scale
-        if self.use_full_stf_alignment:
+        if (
+            self.use_full_stf_alignment
+            and self.proposal_semantics == "causal_released"
+        ):
             alignment_weight = min(
                 max(
                     (
@@ -807,6 +824,9 @@ class PINNModel(nn.Module):
                 hidden_size=int(self.stateful_streaming["hidden_size"]),
                 support_ramp_sec=float(
                     self.stateful_streaming["support_ramp_sec"]
+                ),
+                proposal_semantics=str(
+                    self.stateful_streaming["proposal_semantics"]
                 ),
                 initial_gate_logit=float(
                     self.stateful_streaming["initial_gate_logit"]

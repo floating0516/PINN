@@ -20,6 +20,7 @@ from scripts.experiments.run_phase50_stateful_incremental_model import (
     freeze_transition_scope,
     normalizer_training_indices,
     normalized_loss,
+    stateful_target_rate,
     stateful_loss_components,
     target_support_fraction,
     validation_gate,
@@ -73,6 +74,14 @@ def _stateful_config() -> dict:
     return config
 
 
+def _forecast_config() -> dict:
+    config = _stateful_config()
+    config["model"]["stateful_streaming"][
+        "proposal_semantics"
+    ] = "complete_forecast"
+    return config
+
+
 def test_stateful_config_defaults_to_disabled() -> None:
     config = _config()
 
@@ -97,6 +106,13 @@ def test_target_support_aligns_to_full_stf_from_180_seconds() -> None:
     [
         ({"mode": "unknown"}, "mode"),
         ({"mode": "none", "hidden_size": 8}, "require"),
+        (
+            {
+                "mode": "released_stf_gru",
+                "proposal_semantics": "unknown",
+            },
+            "proposal_semantics",
+        ),
         (
             {"mode": "released_stf_gru", "hidden_size": 0},
             "positive integer",
@@ -315,6 +331,38 @@ def test_first_stream_step_is_causally_supported_proposal() -> None:
     assert torch.equal(output.retention_gate, torch.zeros_like(raw))
     assert output.support_fraction[0, 0] == pytest.approx(1.0)
     assert output.support_fraction[0, 10] == pytest.approx(0.0)
+
+
+def test_complete_forecast_keeps_unsupported_stf_content() -> None:
+    model = PINNModel(_forecast_config()).eval()
+    raw = torch.full((1, 200), 3.0e18)
+
+    output = model.stream_step_from_rate(
+        raw,
+        state=None,
+        horizon_sec=20,
+        source_distance_m=torch.tensor([45_330.0]),
+        source_dt_sec=torch.ones(1),
+        beta_m_per_s=4_533.0,
+    )
+
+    torch.testing.assert_close(output.released_rate, raw)
+    assert output.support_fraction[0, 10] == pytest.approx(0.0)
+    assert output.released_rate[0, 10] > 0.0
+
+
+def test_complete_forecast_training_target_is_full_stf() -> None:
+    causal = torch.zeros(1, len(HORIZONS), 3)
+    stf = torch.tensor([[1.0, 2.0, 3.0]])
+    target = stateful_target_rate(
+        {"stf": stf},
+        causal,
+        config=_forecast_config(),
+    )
+
+    assert target.shape == (1, len(HORIZONS), 3)
+    torch.testing.assert_close(target[:, 0], stf)
+    torch.testing.assert_close(target[:, -1], stf)
 
 
 def test_stream_step_rejects_nonconsecutive_state() -> None:
@@ -681,7 +729,7 @@ def test_full_stf_alignment_caps_each_downward_step() -> None:
 
 def test_phase50_training_runner_contracts_are_enforced_together() -> None:
     torch.manual_seed(50)
-    config = _stateful_config()
+    config = _forecast_config()
     model = PINNModel(config).train()
     trainable = freeze_transition_scope(model)
     assert sum(parameter.numel() for parameter in trainable) == 1_029

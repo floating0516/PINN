@@ -270,6 +270,7 @@ def stateful_streaming_config_from_config(
 
     allowed = {
         "mode",
+        "proposal_semantics",
         "local_channels",
         "hidden_size",
         "support_ramp_sec",
@@ -290,6 +291,16 @@ def stateful_streaming_config_from_config(
         raise ValueError(
             "unknown model.stateful_streaming keys: "
             + ", ".join(sorted(extra))
+        )
+
+    proposal_semantics = raw.get("proposal_semantics", "causal_released")
+    if not isinstance(proposal_semantics, str) or proposal_semantics not in {
+        "causal_released",
+        "complete_forecast",
+    }:
+        raise ValueError(
+            "model.stateful_streaming.proposal_semantics must be "
+            "causal_released or complete_forecast"
         )
 
     def positive_int(name: str, default: int) -> int:
@@ -418,6 +429,7 @@ def stateful_streaming_config_from_config(
         )
     return {
         "mode": mode,
+        "proposal_semantics": proposal_semantics,
         "local_channels": positive_int("local_channels", 4),
         "hidden_size": positive_int("hidden_size", 8),
         "support_ramp_sec": support_ramp_sec,
