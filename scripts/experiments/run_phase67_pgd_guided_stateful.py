@@ -96,6 +96,10 @@ TREND_ALLOWANCES_MW = (0.02, 0.05, 0.10)
 PGD_ADVANTAGE_MARGIN_MW = 0.01
 PLATEAU_START_SEC = 120
 OSCILLATION_ALLOWANCE_MW = 0.01
+USE_PLATEAU_BAND_LOSS = False
+PLATEAU_BAND_START_SEC = 160
+PLATEAU_BAND_ALLOWANCE_MW = 0.30
+PLATEAU_BAND_EPS_MW = 1.0e-6
 NORMALIZER_BATCHES = 8
 NORMALIZER_SEED = 42
 LOSS_WEIGHTS = {
@@ -340,6 +344,29 @@ def _weighted_mean(
     return torch.mean(per_sample * sample_weights)
 
 
+def _plateau_band_component(
+    state_mw: torch.Tensor,
+    sample_weights: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    plateau_band_start = HORIZONS.index(PLATEAU_BAND_START_SEC)
+    plateau_band = (
+        state_mw[:, plateau_band_start:].amax(dim=1)
+        - state_mw[:, plateau_band_start:].amin(dim=1)
+    )
+    violation = torch.relu(
+        plateau_band
+        - PLATEAU_BAND_ALLOWANCE_MW
+        - PLATEAU_BAND_EPS_MW
+    )
+    per_sample = F.smooth_l1_loss(
+        violation,
+        torch.zeros_like(violation),
+        reduction="none",
+        beta=STEP_HUBER_BETA_MW,
+    )
+    return _weighted_mean(per_sample, sample_weights), violation
+
+
 def _tensor_batch_with_hints(
     cache: CacheBundle,
     hints: PGDHintCache,
@@ -544,6 +571,9 @@ def stateful_loss_components(
         oscillation_per_sample,
         sample_weights,
     )
+    plateau_band_loss, plateau_band_violation = (
+        _plateau_band_component(state_mw, sample_weights)
+    )
 
     dt = source_dt.reshape(-1, 1, 1)
     cumulative_log = torch.log10(
@@ -584,6 +614,8 @@ def stateful_loss_components(
         "confirmed_history": confirmed_history,
         "confidence_supervision": confidence_supervision,
     }
+    if USE_PLATEAU_BAND_LOSS:
+        components["plateau_band"] = plateau_band_loss
     diagnostics = {
         "mean_gate": float(gates.detach().mean().cpu()),
         "late_mean_gate": float(
@@ -629,6 +661,9 @@ def stateful_loss_components(
         ),
         "mean_oscillation_violation_mw": float(
             oscillation_violation.detach().mean().cpu()
+        ),
+        "mean_plateau_band_violation_mw": float(
+            plateau_band_violation.detach().mean().cpu()
         ),
         "target_mw_mae": float(magnitude_error.detach().mean().cpu()),
         "endpoint_teacher_mw_mae": float(
@@ -1246,6 +1281,12 @@ def _protocol(
         "pgd_advantage_margin_mw": PGD_ADVANTAGE_MARGIN_MW,
         "plateau_start_sec": PLATEAU_START_SEC,
         "oscillation_allowance_mw": OSCILLATION_ALLOWANCE_MW,
+        "plateau_band_loss": {
+            "enabled": USE_PLATEAU_BAND_LOSS,
+            "start_sec": PLATEAU_BAND_START_SEC,
+            "allowance_mw": PLATEAU_BAND_ALLOWANCE_MW,
+            "numerical_tolerance_mw": PLATEAU_BAND_EPS_MW,
+        },
         "loss_weights": dict(LOSS_WEIGHTS),
         "loss_normalizers": dict(normalizers),
         "normalizer_path": str(normalizer_path),
@@ -1358,6 +1399,7 @@ def train_seed(
             "mean_pgd_advantage_violation_mw": 0.0,
             "mean_trend_violation_mw": 0.0,
             "mean_oscillation_violation_mw": 0.0,
+            "mean_plateau_band_violation_mw": 0.0,
             "target_mw_mae": 0.0,
             "endpoint_teacher_mw_mae": 0.0,
             "endpoint_L_MSE": 0.0,
