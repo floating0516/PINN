@@ -14,6 +14,10 @@ from scripts.experiments.run_phase72_post160_band_weight025 import (
     PHASE72_BAND_LOSS_WEIGHT,
     configure_phase72,
 )
+from scripts.experiments.run_phase73_endpoint_teacher_weight2 import (
+    PHASE73_ENDPOINT_TEACHER_WEIGHT,
+    configure_phase73,
+)
 
 
 MUTABLE_CAMPAIGN_NAMES = (
@@ -79,6 +83,34 @@ def test_phase72_changes_only_the_band_loss_weight(
         assert campaign.EXPERIMENT_PHASE == "Phase72"
         assert campaign.LOSS_WEIGHTS == expected
         assert campaign.NORMALIZER_FLOORS == phase71_normalizers
+
+    for name, value in original.items():
+        assert getattr(campaign, name) is value
+
+
+def test_phase73_changes_only_the_endpoint_teacher_weight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = {
+        name: getattr(campaign, name) for name in MUTABLE_CAMPAIGN_NAMES
+    }
+
+    with monkeypatch.context() as restore:
+        for name, value in original.items():
+            restore.setattr(campaign, name, value)
+        configure_phase72()
+        phase72_weights = dict(campaign.LOSS_WEIGHTS)
+        phase72_normalizers = dict(campaign.NORMALIZER_FLOORS)
+        configure_phase73()
+
+        expected = {
+            **phase72_weights,
+            "endpoint_teacher": PHASE73_ENDPOINT_TEACHER_WEIGHT,
+        }
+        assert campaign.EXPERIMENT_PHASE == "Phase73"
+        assert campaign.LOSS_WEIGHTS == expected
+        assert campaign.LOSS_WEIGHTS["plateau_band"] == pytest.approx(0.25)
+        assert campaign.NORMALIZER_FLOORS == phase72_normalizers
 
     for name, value in original.items():
         assert getattr(campaign, name) is value
