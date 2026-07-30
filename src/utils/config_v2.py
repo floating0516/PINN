@@ -246,16 +246,17 @@ def stateful_streaming_config_from_config(
     if not isinstance(mode, str) or mode not in {
         "none",
         "released_stf_gru",
+        "pgd_residual_gru",
     }:
         raise ValueError(
-            "model.stateful_streaming.mode must be none or released_stf_gru"
+            "model.stateful_streaming.mode must be none, released_stf_gru, "
+            "or pgd_residual_gru"
         )
     if mode == "none":
         extra = set(raw) - {"mode"}
         if extra:
             raise ValueError(
-                "model.stateful_streaming parameters require "
-                "mode=released_stf_gru"
+                "model.stateful_streaming parameters require an enabled mode"
             )
         return {"mode": "none"}
     if model.get("stf_output_parameterization", "direct") != (
@@ -266,7 +267,146 @@ def stateful_streaming_config_from_config(
             "model.stf_output_parameterization=moment_shape_factorized"
         )
     if waveform_input_components_from_config(config) != ("radial",):
-        raise ValueError("released_stf_gru requires R-only input")
+        raise ValueError("stateful streaming requires R-only waveform input")
+
+    if mode == "pgd_residual_gru":
+        allowed = {
+            "mode",
+            "local_channels",
+            "hidden_size",
+            "support_ramp_sec",
+            "initial_gate_logit",
+            "max_proposal_correction_log10",
+            "shape_identity_start_sec",
+            "max_initial_residual_mw",
+            "max_residual_mw",
+            "max_early_revision_mw_per_step",
+            "max_late_revision_mw_per_step",
+            "confidence_step_max",
+            "initial_absorption_logit",
+            "initial_confidence_logit",
+            "pgd_hint_law",
+        }
+        extra = set(raw) - allowed
+        if extra:
+            raise ValueError(
+                "unknown model.stateful_streaming keys: "
+                + ", ".join(sorted(extra))
+            )
+
+        def pgd_positive_int(name: str, default: int) -> int:
+            value = raw.get(name, default)
+            if isinstance(value, bool) or not isinstance(value, Integral):
+                raise ValueError(
+                    f"model.stateful_streaming.{name} must be a positive integer"
+                )
+            result = int(value)
+            if result < 1:
+                raise ValueError(
+                    f"model.stateful_streaming.{name} must be a positive integer"
+                )
+            return result
+
+        def pgd_finite_float(name: str, default: float) -> float:
+            value = raw.get(name, default)
+            if isinstance(value, bool) or not isinstance(value, Real):
+                raise ValueError(
+                    f"model.stateful_streaming.{name} must be finite"
+                )
+            result = float(value)
+            if not math.isfinite(result):
+                raise ValueError(
+                    f"model.stateful_streaming.{name} must be finite"
+                )
+            return result
+
+        support_ramp_sec = pgd_finite_float("support_ramp_sec", 6.0)
+        max_proposal_correction_log10 = pgd_finite_float(
+            "max_proposal_correction_log10",
+            1.0,
+        )
+        max_initial_residual_mw = pgd_finite_float(
+            "max_initial_residual_mw",
+            1.5,
+        )
+        max_residual_mw = pgd_finite_float("max_residual_mw", 2.0)
+        max_early_revision = pgd_finite_float(
+            "max_early_revision_mw_per_step",
+            0.04,
+        )
+        max_late_revision = pgd_finite_float(
+            "max_late_revision_mw_per_step",
+            0.008,
+        )
+        confidence_step_max = pgd_finite_float(
+            "confidence_step_max",
+            0.05,
+        )
+        positive_values = {
+            "support_ramp_sec": support_ramp_sec,
+            "max_proposal_correction_log10": max_proposal_correction_log10,
+            "max_initial_residual_mw": max_initial_residual_mw,
+            "max_residual_mw": max_residual_mw,
+            "max_early_revision_mw_per_step": max_early_revision,
+            "max_late_revision_mw_per_step": max_late_revision,
+            "confidence_step_max": confidence_step_max,
+        }
+        for name, value in positive_values.items():
+            if value <= 0.0:
+                raise ValueError(
+                    f"model.stateful_streaming.{name} must be positive"
+                )
+        if max_initial_residual_mw > max_residual_mw:
+            raise ValueError(
+                "model.stateful_streaming.max_initial_residual_mw must not "
+                "exceed max_residual_mw"
+            )
+        if max_late_revision > max_early_revision:
+            raise ValueError(
+                "model.stateful_streaming.max_late_revision_mw_per_step "
+                "must not exceed max_early_revision_mw_per_step"
+            )
+        if confidence_step_max >= 1.0:
+            raise ValueError(
+                "model.stateful_streaming.confidence_step_max must be below one"
+            )
+        pgd_hint_law = raw.get("pgd_hint_law", "crowell")
+        if pgd_hint_law != "crowell":
+            raise ValueError(
+                "model.stateful_streaming.pgd_hint_law must be crowell"
+            )
+        return {
+            "mode": mode,
+            "proposal_semantics": "complete_forecast",
+            "local_channels": pgd_positive_int("local_channels", 4),
+            "hidden_size": pgd_positive_int("hidden_size", 8),
+            "support_ramp_sec": support_ramp_sec,
+            "initial_gate_logit": pgd_finite_float(
+                "initial_gate_logit",
+                -4.0,
+            ),
+            "max_proposal_correction_log10": (
+                max_proposal_correction_log10
+            ),
+            "shape_identity_start_sec": pgd_positive_int(
+                "shape_identity_start_sec",
+                160,
+            ),
+            "max_initial_residual_mw": max_initial_residual_mw,
+            "max_residual_mw": max_residual_mw,
+            "max_early_revision_mw_per_step": max_early_revision,
+            "max_late_revision_mw_per_step": max_late_revision,
+            "confidence_step_max": confidence_step_max,
+            "initial_absorption_logit": pgd_finite_float(
+                "initial_absorption_logit",
+                -4.0,
+            ),
+            "initial_confidence_logit": pgd_finite_float(
+                "initial_confidence_logit",
+                -4.0,
+            ),
+            "pgd_hint_law": pgd_hint_law,
+        }
 
     allowed = {
         "mode",

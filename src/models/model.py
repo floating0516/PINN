@@ -28,6 +28,10 @@ class PINNStreamingState:
     moment_hidden: torch.Tensor
     released_log10_moment: torch.Tensor
     horizon_sec: int
+    pgd_anchor_mw: torch.Tensor | None = None
+    pgd_residual_mw: torch.Tensor | None = None
+    pgd_valid_seen: torch.Tensor | None = None
+    plateau_confidence: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -38,6 +42,11 @@ class ReleasedSTFTransitionOutput:
     retention_gate: torch.Tensor
     support_fraction: torch.Tensor
     state: PINNStreamingState
+    absorption_gate: torch.Tensor | None = None
+    revision_mw: torch.Tensor | None = None
+    plateau_confidence: torch.Tensor | None = None
+    pgd_anchor_mw: torch.Tensor | None = None
+    pgd_residual_mw: torch.Tensor | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +57,11 @@ class StatefulPINNPrediction:
     retention_gate: torch.Tensor
     support_fraction: torch.Tensor
     state: PINNStreamingState
+    absorption_gate: torch.Tensor | None = None
+    revision_mw: torch.Tensor | None = None
+    plateau_confidence: torch.Tensor | None = None
+    pgd_anchor_mw: torch.Tensor | None = None
+    pgd_residual_mw: torch.Tensor | None = None
 
 
 class RadialAsinhZeroConv(nn.Module):
@@ -638,6 +652,455 @@ class ReleasedSTFTransition(nn.Module):
         return released, retention, support, next_state
 
 
+class PGDGuidedSTFTransition(nn.Module):
+    """Recurrent complete-STF forecast guided by a causal PGD magnitude."""
+
+    def __init__(
+        self,
+        *,
+        source_steps: int,
+        stf_m_ref: float,
+        local_channels: int,
+        hidden_size: int,
+        support_ramp_sec: float,
+        initial_gate_logit: float,
+        max_proposal_correction_log10: float,
+        shape_identity_start_sec: int,
+        max_initial_residual_mw: float,
+        max_residual_mw: float,
+        max_early_revision_mw_per_step: float,
+        max_late_revision_mw_per_step: float,
+        confidence_step_max: float,
+        initial_absorption_logit: float,
+        initial_confidence_logit: float,
+    ) -> None:
+        super().__init__()
+        self.source_steps = int(source_steps)
+        self.stf_m_ref = float(stf_m_ref)
+        self.hidden_size = int(hidden_size)
+        self.support_ramp_sec = float(support_ramp_sec)
+        self.max_proposal_correction_log10 = float(
+            max_proposal_correction_log10
+        )
+        self.shape_identity_start_sec = int(shape_identity_start_sec)
+        self.max_initial_residual_mw = float(max_initial_residual_mw)
+        self.max_residual_mw = float(max_residual_mw)
+        self.max_early_revision_mw_per_step = float(
+            max_early_revision_mw_per_step
+        )
+        self.max_late_revision_mw_per_step = float(
+            max_late_revision_mw_per_step
+        )
+        self.confidence_step_max = float(confidence_step_max)
+        if self.shape_identity_start_sec >= self.source_steps:
+            raise ValueError(
+                "PGD shape identity start must be before source steps"
+            )
+
+        self.local_context = nn.Conv1d(
+            1,
+            int(local_channels),
+            kernel_size=5,
+            padding=2,
+        )
+        self.feature_count = 7 + int(local_channels)
+        self.temporal_cell = nn.GRUCell(
+            input_size=self.feature_count,
+            hidden_size=self.hidden_size,
+        )
+        self.gate_head = nn.Linear(self.hidden_size, 1)
+        nn.init.normal_(self.gate_head.weight, mean=0.0, std=0.01)
+        nn.init.constant_(self.gate_head.bias, float(initial_gate_logit))
+        self.candidate_correction_head = nn.Linear(self.hidden_size, 1)
+        nn.init.zeros_(self.candidate_correction_head.weight)
+        nn.init.zeros_(self.candidate_correction_head.bias)
+
+        self.moment_feature_count = 12
+        self.moment_cell = nn.GRUCell(
+            input_size=self.moment_feature_count,
+            hidden_size=self.hidden_size,
+        )
+        self.moment_update_head = nn.Linear(self.hidden_size, 4)
+        nn.init.normal_(self.moment_update_head.weight, mean=0.0, std=0.005)
+        with torch.no_grad():
+            self.moment_update_head.bias.copy_(
+                torch.tensor(
+                    [
+                        0.0,
+                        float(initial_absorption_logit),
+                        0.0,
+                        float(initial_confidence_logit),
+                    ],
+                    dtype=self.moment_update_head.bias.dtype,
+                )
+            )
+
+    def encode_rate(self, rate: torch.Tensor) -> torch.Tensor:
+        return torch.log10(1.0 + rate.clamp_min(0.0) / self.stf_m_ref)
+
+    def support_fraction(
+        self,
+        *,
+        horizon_sec: int,
+        source_distance_m: torch.Tensor,
+        beta_m_per_s: float,
+        reference: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        distance = source_distance_m.reshape(-1).to(
+            device=reference.device,
+            dtype=reference.dtype,
+        )
+        source_index = torch.arange(
+            self.source_steps,
+            device=reference.device,
+            dtype=reference.dtype,
+        ).reshape(1, -1)
+        support_age = (
+            float(horizon_sec)
+            - distance.reshape(-1, 1) / float(beta_m_per_s)
+            - source_index
+        )
+        support = torch.clamp(
+            support_age / self.support_ramp_sec,
+            min=0.0,
+            max=1.0,
+        )
+        return support, support_age
+
+    @staticmethod
+    def _mw_from_rate(
+        rate: torch.Tensor,
+        source_dt: torch.Tensor,
+    ) -> torch.Tensor:
+        moment = torch.sum(rate * source_dt.reshape(-1, 1), dim=1).clamp_min(
+            1.0e10
+        )
+        return (2.0 / 3.0) * (torch.log10(moment) - 9.1)
+
+    def step(
+        self,
+        raw_rate: torch.Tensor,
+        *,
+        pgd_mw_hint: torch.Tensor,
+        pgd_valid_hint: torch.Tensor,
+        state: PINNStreamingState | None,
+        horizon_sec: int,
+        source_distance_m: torch.Tensor,
+        source_dt_sec: torch.Tensor,
+        beta_m_per_s: float,
+    ) -> tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        PINNStreamingState,
+        dict[str, torch.Tensor],
+    ]:
+        if raw_rate.ndim != 2 or raw_rate.shape[1] != self.source_steps:
+            raise ValueError(
+                f"raw_rate must have shape (batch, {self.source_steps})"
+            )
+        if not raw_rate.is_floating_point() or not bool(
+            torch.isfinite(raw_rate).all()
+        ):
+            raise ValueError("raw_rate must be finite floating point")
+        if bool(torch.any(raw_rate < 0.0)):
+            raise ValueError("raw_rate must be nonnegative")
+        batch_size = raw_rate.shape[0]
+        source_dt = source_dt_sec.reshape(-1).to(
+            device=raw_rate.device,
+            dtype=raw_rate.dtype,
+        )
+        distance = source_distance_m.reshape(-1).to(
+            device=raw_rate.device,
+            dtype=raw_rate.dtype,
+        )
+        pgd_mw = pgd_mw_hint.reshape(-1).to(
+            device=raw_rate.device,
+            dtype=raw_rate.dtype,
+        )
+        pgd_valid = pgd_valid_hint.reshape(-1).to(
+            device=raw_rate.device,
+            dtype=torch.bool,
+        )
+        if source_dt.shape != (batch_size,) or bool(torch.any(source_dt <= 0.0)):
+            raise ValueError(
+                "source_dt_sec must be positive with one value per sample"
+            )
+        if distance.shape != (batch_size,) or bool(torch.any(distance < 0.0)):
+            raise ValueError(
+                "source_distance_m must be nonnegative with one value per sample"
+            )
+        if pgd_mw.shape != (batch_size,) or not bool(torch.isfinite(pgd_mw).all()):
+            raise ValueError("pgd_mw_hint must be finite with one value per sample")
+        if pgd_valid.shape != (batch_size,):
+            raise ValueError("pgd_valid_hint must contain one value per sample")
+        if state is not None:
+            if horizon_sec != state.horizon_sec + 1:
+                raise ValueError(
+                    "stateful horizons must advance by exactly one second"
+                )
+            expected_hidden = (
+                batch_size,
+                self.source_steps,
+                self.hidden_size,
+            )
+            if state.released_rate.shape != raw_rate.shape:
+                raise ValueError("state released_rate shape changed")
+            if state.proposal_rate.shape != raw_rate.shape:
+                raise ValueError("state proposal_rate shape changed")
+            if state.hidden.shape != expected_hidden:
+                raise ValueError("state hidden shape changed")
+            if state.moment_hidden.shape != (batch_size, self.hidden_size):
+                raise ValueError("state moment_hidden shape changed")
+            pgd_state = (
+                state.pgd_anchor_mw,
+                state.pgd_residual_mw,
+                state.pgd_valid_seen,
+                state.plateau_confidence,
+            )
+            if any(value is None for value in pgd_state):
+                raise ValueError("PGD-guided state fields are missing")
+            if any(value.shape != (batch_size,) for value in pgd_state):
+                raise ValueError("PGD-guided state shape changed")
+
+        support, support_age = self.support_fraction(
+            horizon_sec=horizon_sec,
+            source_distance_m=distance,
+            beta_m_per_s=beta_m_per_s,
+            reference=raw_rate,
+        )
+        encoded_proposal = self.encode_rate(raw_rate)
+        if state is None:
+            previous_released = torch.zeros_like(raw_rate)
+            previous_proposal = torch.zeros_like(raw_rate)
+            previous_hidden = raw_rate.new_zeros(
+                batch_size,
+                self.source_steps,
+                self.hidden_size,
+            )
+            previous_moment_hidden = raw_rate.new_zeros(
+                batch_size,
+                self.hidden_size,
+            )
+            previous_output_mw = pgd_mw
+            previous_anchor = pgd_mw
+            previous_residual = raw_rate.new_zeros(batch_size)
+            previous_valid_seen = raw_rate.new_zeros(
+                batch_size,
+                dtype=torch.bool,
+            )
+            previous_confidence = raw_rate.new_zeros(batch_size)
+        else:
+            previous_released = state.released_rate
+            previous_proposal = state.proposal_rate
+            previous_hidden = state.hidden
+            previous_moment_hidden = state.moment_hidden
+            previous_output_mw = (2.0 / 3.0) * (
+                state.released_log10_moment - 9.1
+            )
+            previous_anchor = state.pgd_anchor_mw
+            previous_residual = state.pgd_residual_mw
+            previous_valid_seen = state.pgd_valid_seen
+            previous_confidence = state.plateau_confidence
+
+        encoded_previous_proposal = self.encode_rate(previous_proposal)
+        encoded_previous_released = self.encode_rate(previous_released)
+        local = F.gelu(self.local_context(encoded_proposal.unsqueeze(1)))
+        local = local.transpose(1, 2)
+        horizon_feature = raw_rate.new_full(
+            (batch_size, self.source_steps),
+            float(horizon_sec) / float(max(self.source_steps, 1)),
+        )
+        raw_mw = self._mw_from_rate(raw_rate, source_dt)
+        raw_moment_feature = torch.clamp(
+            (raw_mw - 7.0) / 2.0,
+            min=-2.0,
+            max=2.0,
+        ).unsqueeze(1).expand(-1, self.source_steps)
+        scalar = torch.stack(
+            (
+                encoded_proposal,
+                encoded_proposal - encoded_previous_proposal,
+                encoded_previous_released,
+                encoded_proposal - encoded_previous_released,
+                torch.clamp(support_age / 30.0, min=-1.0, max=1.0),
+                horizon_feature,
+                raw_moment_feature,
+            ),
+            dim=2,
+        )
+        features = torch.cat((scalar, local), dim=2)
+        hidden = self.temporal_cell(
+            features.reshape(batch_size * self.source_steps, -1),
+            previous_hidden.reshape(batch_size * self.source_steps, -1),
+        ).reshape(batch_size, self.source_steps, self.hidden_size)
+
+        identity_weight = 0.0
+        if horizon_sec >= self.shape_identity_start_sec:
+            identity_weight = min(
+                max(
+                    (
+                        horizon_sec - self.shape_identity_start_sec
+                    )
+                    / (
+                        self.source_steps - self.shape_identity_start_sec
+                    ),
+                    0.0,
+                ),
+                1.0,
+            )
+        correction_log10 = (
+            (1.0 - identity_weight)
+            * self.max_proposal_correction_log10
+            * torch.tanh(self.candidate_correction_head(hidden).squeeze(-1))
+        )
+        candidate = raw_rate * torch.exp(
+            correction_log10 * math.log(10.0)
+        )
+        retention = (
+            (1.0 - identity_weight)
+            * torch.sigmoid(self.gate_head(hidden).squeeze(-1))
+            * support
+        )
+        if state is None:
+            shape_rate = candidate
+            retention = torch.zeros_like(retention)
+        else:
+            shape_rate = (
+                retention * previous_released
+                + (1.0 - retention) * candidate
+            )
+
+        newly_valid = pgd_valid & ~previous_valid_seen
+        continuing_valid = pgd_valid & previous_valid_seen
+        anchor = previous_anchor
+        anchor = torch.where(newly_valid, pgd_mw, anchor)
+        anchor = torch.where(
+            continuing_valid,
+            torch.maximum(previous_anchor, pgd_mw),
+            anchor,
+        )
+        if state is None:
+            anchor = pgd_mw
+        valid_seen = previous_valid_seen | pgd_valid
+        positive_pgd_delta = torch.relu(anchor - previous_anchor)
+        previous_raw_mw = self._mw_from_rate(previous_proposal, source_dt)
+        moment_features = torch.stack(
+            (
+                torch.clamp((raw_mw - 7.0) / 2.0, min=-2.0, max=2.0),
+                torch.clamp((anchor - 7.0) / 2.0, min=-2.0, max=2.0),
+                torch.clamp((raw_mw - anchor) / 2.0, min=-2.0, max=2.0),
+                torch.clamp(positive_pgd_delta / 0.20, min=0.0, max=2.0),
+                torch.clamp(raw_mw - previous_raw_mw, min=-1.0, max=1.0),
+                torch.clamp(
+                    (previous_output_mw - 7.0) / 2.0,
+                    min=-2.0,
+                    max=2.0,
+                ),
+                torch.clamp(
+                    previous_residual / self.max_residual_mw,
+                    min=-1.0,
+                    max=1.0,
+                ),
+                support.mean(dim=1),
+                raw_rate.new_full(
+                    (batch_size,),
+                    float(horizon_sec) / float(max(self.source_steps, 1)),
+                ),
+                torch.clamp(
+                    distance
+                    / float(beta_m_per_s)
+                    / float(max(self.source_steps, 1)),
+                    min=0.0,
+                    max=2.0,
+                ),
+                pgd_valid.to(dtype=raw_rate.dtype),
+                previous_confidence,
+            ),
+            dim=1,
+        )
+        moment_hidden = self.moment_cell(
+            moment_features,
+            previous_moment_hidden,
+        )
+        moment_logits = self.moment_update_head(moment_hidden)
+        absorption = torch.sigmoid(moment_logits[:, 1])
+        reliability = 0.25 + 0.75 * pgd_valid.to(dtype=raw_rate.dtype)
+        if state is None:
+            residual = self.max_initial_residual_mw * torch.tanh(
+                moment_logits[:, 0]
+            )
+            revision = raw_rate.new_zeros(batch_size)
+            confidence = (
+                self.confidence_step_max
+                * torch.sigmoid(moment_logits[:, 3])
+                * reliability
+            )
+        else:
+            revision_limit = (
+                self.max_late_revision_mw_per_step
+                + (
+                    self.max_early_revision_mw_per_step
+                    - self.max_late_revision_mw_per_step
+                )
+                * (1.0 - previous_confidence)
+            )
+            revision = revision_limit * torch.tanh(moment_logits[:, 2])
+            residual = torch.clamp(
+                previous_residual
+                - absorption * positive_pgd_delta
+                + revision,
+                min=-self.max_residual_mw,
+                max=self.max_residual_mw,
+            )
+            confidence_step = (
+                (1.0 - previous_confidence)
+                * self.confidence_step_max
+                * torch.sigmoid(moment_logits[:, 3])
+                * reliability
+            )
+            confidence = torch.clamp(
+                previous_confidence + confidence_step,
+                min=0.0,
+                max=1.0,
+            )
+
+        output_mw = anchor + residual
+        output_log10_moment = 1.5 * output_mw + 9.1
+        output_moment = torch.exp(output_log10_moment * math.log(10.0))
+        shape_moment = torch.sum(
+            shape_rate * source_dt.reshape(-1, 1),
+            dim=1,
+        ).clamp_min(1.0e10)
+        released = shape_rate * (output_moment / shape_moment).unsqueeze(1)
+        released_log10_moment = torch.log10(
+            torch.sum(
+                released * source_dt.reshape(-1, 1),
+                dim=1,
+            ).clamp_min(1.0e10)
+        )
+        next_state = PINNStreamingState(
+            released_rate=released,
+            proposal_rate=raw_rate,
+            hidden=hidden,
+            moment_hidden=moment_hidden,
+            released_log10_moment=released_log10_moment,
+            horizon_sec=int(horizon_sec),
+            pgd_anchor_mw=anchor,
+            pgd_residual_mw=residual,
+            pgd_valid_seen=valid_seen,
+            plateau_confidence=confidence,
+        )
+        diagnostics = {
+            "absorption_gate": absorption,
+            "revision_mw": revision,
+            "plateau_confidence": confidence,
+            "pgd_anchor_mw": anchor,
+            "pgd_residual_mw": residual,
+        }
+        return released, retention, support, next_state, diagnostics
+
+
 class PINNModel(nn.Module):
     """
     基于 1D CNN 的 PINN 主干网络：输入径向位移时间序列，输出震级预测。
@@ -886,7 +1349,9 @@ class PINNModel(nn.Module):
             self.moment_linear_skip = None
 
         self.stateful_streaming = stateful_streaming_config_from_config(config)
-        self.released_stf_transition: ReleasedSTFTransition | None
+        self.released_stf_transition: (
+            ReleasedSTFTransition | PGDGuidedSTFTransition | None
+        )
         if self.stateful_streaming["mode"] == "released_stf_gru":
             if (
                 self.output_time_steps is None
@@ -973,6 +1438,60 @@ class PINNModel(nn.Module):
                     self.stateful_streaming[
                         "late_evidence_assimilation_anchor_start_sec"
                     ]
+                ),
+            )
+        elif self.stateful_streaming["mode"] == "pgd_residual_gru":
+            if (
+                self.output_time_steps is None
+                or self.factorized_m_ref is None
+                or self.factorized_source_dt_sec is None
+            ):
+                raise ValueError(
+                    "pgd_residual_gru requires the factorized v2 STF head"
+                )
+            self.released_stf_transition = PGDGuidedSTFTransition(
+                source_steps=self.output_time_steps,
+                stf_m_ref=self.factorized_m_ref,
+                local_channels=int(self.stateful_streaming["local_channels"]),
+                hidden_size=int(self.stateful_streaming["hidden_size"]),
+                support_ramp_sec=float(
+                    self.stateful_streaming["support_ramp_sec"]
+                ),
+                initial_gate_logit=float(
+                    self.stateful_streaming["initial_gate_logit"]
+                ),
+                max_proposal_correction_log10=float(
+                    self.stateful_streaming[
+                        "max_proposal_correction_log10"
+                    ]
+                ),
+                shape_identity_start_sec=int(
+                    self.stateful_streaming["shape_identity_start_sec"]
+                ),
+                max_initial_residual_mw=float(
+                    self.stateful_streaming["max_initial_residual_mw"]
+                ),
+                max_residual_mw=float(
+                    self.stateful_streaming["max_residual_mw"]
+                ),
+                max_early_revision_mw_per_step=float(
+                    self.stateful_streaming[
+                        "max_early_revision_mw_per_step"
+                    ]
+                ),
+                max_late_revision_mw_per_step=float(
+                    self.stateful_streaming[
+                        "max_late_revision_mw_per_step"
+                    ]
+                ),
+                confidence_step_max=float(
+                    self.stateful_streaming["confidence_step_max"]
+                ),
+                initial_absorption_logit=float(
+                    self.stateful_streaming["initial_absorption_logit"]
+                ),
+                initial_confidence_logit=float(
+                    self.stateful_streaming["initial_confidence_logit"]
                 ),
             )
         else:
@@ -1153,11 +1672,31 @@ class PINNModel(nn.Module):
         source_distance_m: torch.Tensor,
         source_dt_sec: torch.Tensor,
         beta_m_per_s: float,
+        pgd_mw_hint: torch.Tensor | None = None,
+        pgd_valid_hint: torch.Tensor | None = None,
     ) -> ReleasedSTFTransitionOutput:
         if self.released_stf_transition is None:
-            raise RuntimeError("released_stf_gru is disabled")
-        released, retention, support, next_state = (
-            self.released_stf_transition.step(
+            raise RuntimeError("stateful streaming is disabled")
+        diagnostics: dict[str, torch.Tensor] = {}
+        if isinstance(self.released_stf_transition, PGDGuidedSTFTransition):
+            if pgd_mw_hint is None or pgd_valid_hint is None:
+                raise ValueError(
+                    "pgd_residual_gru requires PGD magnitude and valid hints"
+                )
+            released, retention, support, next_state, diagnostics = (
+                self.released_stf_transition.step(
+                    raw_rate,
+                    pgd_mw_hint=pgd_mw_hint,
+                    pgd_valid_hint=pgd_valid_hint,
+                    state=state,
+                    horizon_sec=horizon_sec,
+                    source_distance_m=source_distance_m,
+                    source_dt_sec=source_dt_sec,
+                    beta_m_per_s=beta_m_per_s,
+                )
+            )
+        else:
+            released, retention, support, next_state = self.released_stf_transition.step(
                 raw_rate,
                 state=state,
                 horizon_sec=horizon_sec,
@@ -1165,7 +1704,6 @@ class PINNModel(nn.Module):
                 source_dt_sec=source_dt_sec,
                 beta_m_per_s=beta_m_per_s,
             )
-        )
         dt = source_dt_sec.reshape(-1).to(
             device=released.device,
             dtype=released.dtype,
@@ -1181,6 +1719,11 @@ class PINNModel(nn.Module):
             retention_gate=retention,
             support_fraction=support,
             state=next_state,
+            absorption_gate=diagnostics.get("absorption_gate"),
+            revision_mw=diagnostics.get("revision_mw"),
+            plateau_confidence=diagnostics.get("plateau_confidence"),
+            pgd_anchor_mw=diagnostics.get("pgd_anchor_mw"),
+            pgd_residual_mw=diagnostics.get("pgd_residual_mw"),
         )
 
     def stream_sequence_from_rates(
@@ -1191,7 +1734,19 @@ class PINNModel(nn.Module):
         source_distance_m: torch.Tensor,
         source_dt_sec: torch.Tensor,
         beta_m_per_s: float,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        pgd_mw_hint: torch.Tensor | None = None,
+        pgd_valid_hint: torch.Tensor | None = None,
+        return_diagnostics: bool = False,
+    ) -> (
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]
+        | tuple[
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            torch.Tensor,
+            dict[str, torch.Tensor],
+        ]
+    ):
         if raw_rates.ndim != 3:
             raise ValueError(
                 "raw_rates must have shape (batch, issue_time, source_time)"
@@ -1199,11 +1754,28 @@ class PINNModel(nn.Module):
         horizons = tuple(int(value) for value in horizons_sec)
         if len(horizons) != raw_rates.shape[1]:
             raise ValueError("horizons must match the issue-time dimension")
+        if isinstance(self.released_stf_transition, PGDGuidedSTFTransition):
+            expected_hint_shape = raw_rates.shape[:2]
+            if pgd_mw_hint is None or pgd_valid_hint is None:
+                raise ValueError(
+                    "pgd_residual_gru requires PGD magnitude and valid hints"
+                )
+            if pgd_mw_hint.shape != expected_hint_shape:
+                raise ValueError("PGD magnitude hints must match issue times")
+            if pgd_valid_hint.shape != expected_hint_shape:
+                raise ValueError("PGD valid hints must match issue times")
         state: PINNStreamingState | None = None
         released: list[torch.Tensor] = []
         encoded: list[torch.Tensor] = []
         magnitudes: list[torch.Tensor] = []
         gates: list[torch.Tensor] = []
+        diagnostic_values: dict[str, list[torch.Tensor]] = {
+            "absorption_gate": [],
+            "revision_mw": [],
+            "plateau_confidence": [],
+            "pgd_anchor_mw": [],
+            "pgd_residual_mw": [],
+        }
         for index, horizon in enumerate(horizons):
             output = self.stream_step_from_rate(
                 raw_rates[:, index],
@@ -1212,18 +1784,41 @@ class PINNModel(nn.Module):
                 source_distance_m=source_distance_m,
                 source_dt_sec=source_dt_sec,
                 beta_m_per_s=beta_m_per_s,
+                pgd_mw_hint=(
+                    None if pgd_mw_hint is None else pgd_mw_hint[:, index]
+                ),
+                pgd_valid_hint=(
+                    None
+                    if pgd_valid_hint is None
+                    else pgd_valid_hint[:, index]
+                ),
             )
             state = output.state
             released.append(output.released_rate)
             encoded.append(output.released_stf_encoded)
             magnitudes.append(output.released_mw)
             gates.append(output.retention_gate)
-        return (
+            for name in diagnostic_values:
+                value = getattr(output, name)
+                if value is not None:
+                    diagnostic_values[name].append(value)
+        base = (
             torch.stack(released, dim=1),
             torch.stack(encoded, dim=1),
             torch.stack(magnitudes, dim=1),
             torch.stack(gates, dim=1),
         )
+        if not return_diagnostics:
+            return base
+        if not all(diagnostic_values.values()):
+            raise RuntimeError(
+                "stateful diagnostics are unavailable for this streaming mode"
+            )
+        diagnostics = {
+            name: torch.stack(values, dim=1)
+            for name, values in diagnostic_values.items()
+        }
+        return (*base, diagnostics)
 
     def stream_step(
         self,
@@ -1235,6 +1830,8 @@ class PINNModel(nn.Module):
         source_distance_m: torch.Tensor,
         source_dt_sec: torch.Tensor,
         beta_m_per_s: float,
+        pgd_mw_hint: torch.Tensor | None = None,
+        pgd_valid_hint: torch.Tensor | None = None,
     ) -> StatefulPINNPrediction:
         final_prediction = self.predict_heads(x, meta=meta)
         transition = self.stream_step_from_rate(
@@ -1244,6 +1841,8 @@ class PINNModel(nn.Module):
             source_distance_m=source_distance_m,
             source_dt_sec=source_dt_sec,
             beta_m_per_s=beta_m_per_s,
+            pgd_mw_hint=pgd_mw_hint,
+            pgd_valid_hint=pgd_valid_hint,
         )
         return StatefulPINNPrediction(
             final_prediction=final_prediction,
@@ -1252,6 +1851,11 @@ class PINNModel(nn.Module):
             retention_gate=transition.retention_gate,
             support_fraction=transition.support_fraction,
             state=transition.state,
+            absorption_gate=transition.absorption_gate,
+            revision_mw=transition.revision_mw,
+            plateau_confidence=transition.plateau_confidence,
+            pgd_anchor_mw=transition.pgd_anchor_mw,
+            pgd_residual_mw=transition.pgd_residual_mw,
         )
 
     def forward(self, x: torch.Tensor, meta: Optional[torch.Tensor] = None) -> torch.Tensor:
