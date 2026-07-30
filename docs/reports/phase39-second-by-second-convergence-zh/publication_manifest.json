@@ -21,7 +21,7 @@
   },
   "git_base_commit": "846e666278dbe18af2004cbc9d438546bbaa1e84",
   "outputs": {
-    "README.md": "e9d1402c5c61d4d8e611294a329dc50fe14c59c0c1cf201c78694af053847215",
+    "README.md": "3f501191f1fd63c7e1171ced41292bc215cb3bcd5688b0bd061a80ea4835a402",
     "cohort_contract.json": "11c797bbb8f153212e37e245f36b2242199c1072a71ff5a10012114ecf32da30",
     "event_convergence.csv": "cbbed881bb4c6a035fc556ad6715f1f49aa81d2955414208fc65f871295b727a",
     "event_predictions.csv": "e2373994965472e71715eb8ba448aab58ecbb31e158290fc05ca5c086d44ab7a",
@@ -43,22 +43,36 @@
     "figures/08_train_test_prefix_120s.png": "a250aa805860ce7198a3d9166fe2d860fa4d90d5d33a09bf7bce7f702425de1a",
     "figures/09_train_test_prefix_200s.pdf": "e08ca96e0a6de2a5cc053dd35c57ca6fc268a31397c1c0eb198cb0d170ddc7fb",
     "figures/09_train_test_prefix_200s.png": "b7b0955b3fc3067c7d3a79ba7238976ee850457a8b9a82c3bc6409eb3075ff0c",
+    "figures/10_phase39_pgd_comparison_030s.pdf": "2c8f034e60eb358ff3543bf7b58e7f09b4de92929990687cb2a8e0a9ecd5340d",
+    "figures/10_phase39_pgd_comparison_030s.png": "12e8b81f3573bf8fdbcecf10ef486caf527f0a03004678306c4e94471cefb778",
+    "figures/11_phase39_pgd_comparison_060s.pdf": "f304f3a87feefb2c3114a2f37245ce515c9a7385b95764edb3ac8c137b03d0d0",
+    "figures/11_phase39_pgd_comparison_060s.png": "58c3de1c7c96f4e996fcf80ab90b3fd025cec4b47ea9141293e10478b77be190",
+    "figures/12_phase39_pgd_comparison_090s.pdf": "21bfe36ad8848c74f529e80fb6524f246c15e9f0d91bc2d889d50e8089d6af27",
+    "figures/12_phase39_pgd_comparison_090s.png": "f843b753a895cbaac4585f0c657530b6bba0c0f1ae179fb3a2e2a1e400cf790b",
+    "figures/13_phase39_pgd_comparison_120s.pdf": "cbfc24ccd0c16b40ee02cb1836eea67c9e1d5cbd3fd8b3e9c438048cafa31ccc",
+    "figures/13_phase39_pgd_comparison_120s.png": "6135745ce672d0719c26190b871881b6a028b6710cb52855f24974c8b0c89de4",
+    "figures/14_phase39_pgd_comparison_200s.pdf": "3e05c22c63dae002a66224b2c6fb17bdb6d3d165af195948e1e0a4a186ad808a",
+    "figures/14_phase39_pgd_comparison_200s.png": "49c039723b81184b84e4c6b32e6aa95a41199278e97e2c8d771ad3ad7d723123",
     "horizon_metrics.csv": "b504ef9b88a60e300c3a3b5f59b577daf3c8c46a7d4f4304caac1da11c414e54",
     "horizon_metrics.json": "f730096540e3439333837d01ea0bc26840085e0c92c796e3dd2828d1b9528d43",
     "internal_test_endpoint_event_predictions.csv": "f2491f0b8fc206b7f7bd89857e8794991006191b4c951f928e3f5d9ed93bccaf",
     "internal_test_endpoint_station_predictions.csv": "aaa40e46b9a8b48111d66349910bf1dd39bd07dc27e6048a5add385edaf57627",
     "internal_test_endpoint_summary.json": "f62802fce92f251b343040e72416016364b1ba3582c5557e18924d76bfd8c9c8",
+    "internal_train_test_method_event_predictions.csv": "1f4a6c27d2b30793794a8fadb28c5d482303780d3d55932818060d8ba032cd41",
+    "internal_train_test_method_metrics.csv": "9071216a6f59879e22790b222fabbc7a8f4937f49a5ce7a15b95e967fdc13adb",
+    "internal_train_test_pgd_station_predictions.csv": "f800f8b31dfefe94172408c02230abc999a844083abe9e4c139cb2413174b7b2",
+    "internal_train_test_pgd_summary.json": "3caffa691dd19e933ec32bf1417c8b3266f9e1a8748844f1db4525f1b9f19acf",
     "internal_train_test_prefix_event_predictions.csv": "460471d22eb5ba56681b7126754ba1c229652c3f6c2cad63099873e770049b91",
     "internal_train_test_prefix_metrics.csv": "38ba0bafca3cfb6025592aa58bf4763966d0c002934a01211ed7fcea8b61eded",
     "internal_train_test_prefix_station_predictions.csv": "eb40218c83282ea6e2e47ae6f7cae590c789240447c08448d39b6fb8aea77ab9",
     "internal_train_test_prefix_summary.json": "10d3e6644f07b388780d5fb562e59f13214ecfe5a3d3ec986ffee6e0bb4d754a",
     "provenance.json": "efc2277a89908d1496958b891c3a7ac1c8f67ac3adacd807f835c82ec5623098",
     "station_predictions.csv": "f4a4f79a8ba16ec128793095d2872e69232b76ca0de5b8758ffcdac344c8c756",
-    "summary.json": "1f5baf6d4484fbfe6270bcf0e99f5aea10f022a663fbbd7bce4dabbb80cefe91",
+    "summary.json": "664591eb0ecf214293766807c4e41b4af174fa24e0e54acc746d9c88381b0a9b",
     "unavailable_stations.csv": "5a979a4c215a14ddce4fea0d611de48865ffe205103351be02b73158807dc1c2"
   },
   "report_status": "fixed_checkpoint_development_validation_prefix_diagnostic",
-  "schema_version": 3,
+  "schema_version": 4,
   "source_run": "/home/lihe/PINN_Mag/runs/phase39-second-by-second-convergence-final-20260728T043504Z-846e666",
   "supplemental_generated_at_utc": "2026-07-30T06:09:49.111848+00:00",
   "supplemental_generator": {
@@ -166,6 +180,123 @@
     "train_60s_station_mae_mw": 0.7967865461039948,
     "train_90s_event_mae_mw": 0.5275846952200935,
     "train_90s_station_mae_mw": 0.778692386310377,
-    "train_test_horizon_endpoint_max_abs_diff_mw": 0.0
+    "train_test_horizon_endpoint_max_abs_diff_mw": 0.0,
+    "train_30s_phase39_event_mae_mw": 0.8655454827646486,
+    "train_30s_crowell_event_mae_mw": 0.654048234683664,
+    "train_30s_melgar_event_mae_mw": 1.0322276928838419,
+    "train_30s_ruhl_event_mae_mw": 1.2493121674008247,
+    "train_60s_phase39_event_mae_mw": 0.6145263938138827,
+    "train_60s_crowell_event_mae_mw": 0.44995983365111947,
+    "train_60s_melgar_event_mae_mw": 0.7624021956212,
+    "train_60s_ruhl_event_mae_mw": 0.9494856791814764,
+    "train_90s_phase39_event_mae_mw": 0.5275846952200935,
+    "train_90s_crowell_event_mae_mw": 0.3171360887948362,
+    "train_90s_melgar_event_mae_mw": 0.5331894256526001,
+    "train_90s_ruhl_event_mae_mw": 0.6915097525819829,
+    "train_120s_phase39_event_mae_mw": 0.39175938531770654,
+    "train_120s_crowell_event_mae_mw": 0.2642306208577035,
+    "train_120s_melgar_event_mae_mw": 0.43725775615628193,
+    "train_120s_ruhl_event_mae_mw": 0.5770641392244835,
+    "train_200s_phase39_event_mae_mw": 0.03394015618891919,
+    "train_200s_crowell_event_mae_mw": 0.17950891716465023,
+    "train_200s_melgar_event_mae_mw": 0.2794402172994917,
+    "train_200s_ruhl_event_mae_mw": 0.38483702932462904,
+    "test_30s_phase39_event_mae_mw": 0.8468829073846632,
+    "test_30s_crowell_event_mae_mw": 0.7217564226259604,
+    "test_30s_melgar_event_mae_mw": 1.0490728560414078,
+    "test_30s_ruhl_event_mae_mw": 1.2772976436483618,
+    "test_60s_phase39_event_mae_mw": 0.7930684204684557,
+    "test_60s_crowell_event_mae_mw": 0.45435531510291,
+    "test_60s_melgar_event_mae_mw": 0.6545059721155645,
+    "test_60s_ruhl_event_mae_mw": 0.8174510727868245,
+    "test_90s_phase39_event_mae_mw": 0.615656159269289,
+    "test_90s_crowell_event_mae_mw": 0.366571990879854,
+    "test_90s_melgar_event_mae_mw": 0.5273532475524306,
+    "test_90s_ruhl_event_mae_mw": 0.6800818796900499,
+    "test_120s_phase39_event_mae_mw": 0.3976712461625599,
+    "test_120s_crowell_event_mae_mw": 0.3170332281151805,
+    "test_120s_melgar_event_mae_mw": 0.43092609968422335,
+    "test_120s_ruhl_event_mae_mw": 0.5538816853549091,
+    "test_200s_phase39_event_mae_mw": 0.15228705818768482,
+    "test_200s_crowell_event_mae_mw": 0.22885290007072898,
+    "test_200s_melgar_event_mae_mw": 0.2836257704604498,
+    "test_200s_ruhl_event_mae_mw": 0.3879285530742557,
+    "full_repository_tests_after_phase39_pgd_horizons": "875 passed, 1 skipped in 71.82s"
+  },
+  "phase39_pgd_horizons_generated_at_utc": "2026-07-30T09:32:22.566218+00:00",
+  "supplemental_phase39_pgd_horizons": {
+    "evaluation_role": "within_event_station_phase39_vs_causal_pgd_diagnostic",
+    "horizons_sec": [
+      30,
+      60,
+      90,
+      120,
+      200
+    ],
+    "methods": [
+      {
+        "method": "phase39",
+        "label": "Phase39"
+      },
+      {
+        "method": "crowell",
+        "label": "Crowell PGD"
+      },
+      {
+        "method": "melgar",
+        "label": "Melgar PGD"
+      },
+      {
+        "method": "ruhl",
+        "label": "Ruhl PGD"
+      }
+    ],
+    "pgd_contract": {
+      "components": [
+        "east",
+        "north",
+        "up"
+      ],
+      "peak": "max sqrt(E^2 + N^2 + U^2) over 0 <= t < h",
+      "baseline": "component-wise mean of pre-P raw samples available by release h+6; existing first-sample fallback if fewer than three pre-P samples",
+      "filter": "none",
+      "interpolation": "none",
+      "station_threshold": "none; exact Phase39 train/test station cohort",
+      "distance": "hypocentral/source distance",
+      "aggregation": "event median over identical station cohort"
+    },
+    "station_cohort_gate": {
+      "passed": true,
+      "row_count": 10865,
+      "train_station_count": 1788,
+      "test_station_count": 385,
+      "horizon_count": 5
+    },
+    "event_cohort_gate": {
+      "passed": true,
+      "train_event_count": 31,
+      "test_event_count": 30,
+      "methods": [
+        "phase39",
+        "crowell",
+        "melgar",
+        "ruhl"
+      ]
+    },
+    "source": {
+      "phase39_station_predictions_sha256": "eb40218c83282ea6e2e47ae6f7cae590c789240447c08448d39b6fb8aea77ab9",
+      "phase39_event_predictions_sha256": "460471d22eb5ba56681b7126754ba1c229652c3f6c2cad63099873e770049b91",
+      "split_assignment_sha256": "5ac2e07ed186dce737a3592694632775b7bbf603bf922a4a74fa6b86a3d5c240",
+      "dataset_path": "/home/lihe/PINN_Mag/data/magnitude-label-snapshots/usgs-priority-20260723T044422Z-40d808a/gnss_events_matched.usgs_priority.npz"
+    },
+    "interpretation_boundary": "PGD uses ENU while Phase39 uses R only; this is a method benchmark, not an input-component ablation"
+  },
+  "supplemental_phase39_pgd_generator": {
+    "path": "scripts/plotting/plot_phase39_pgd_horizon_comparison_zh.py",
+    "sha256": "b2c9715b10726a8e42df72bfd0fcfea27f25e72f3423cfcf3ec123cdd0ca0587"
+  },
+  "supplemental_phase39_pgd_tests": {
+    "path": "tests/test_phase39_pgd_horizon_comparison.py",
+    "sha256": "dd69e7a530e2be2ca1a65ef1985293243135a0c4b2158c1356c32544d619c328"
   }
 }

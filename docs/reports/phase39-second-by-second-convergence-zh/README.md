@@ -86,6 +86,65 @@ Anchorage 2018（`+0.377 Mw`，1 个 test 台站）和 Napa 2014
 
 <!-- phase39-train-test-horizons:end -->
 
+<!-- phase39-pgd-horizons:start -->
+## Phase39 与三种 PGD：五个时间节点
+
+PGD 基线使用同一 train/test 台站 cohort，在每个发布时间仅用当时可获得的原始 E/N/U 数据
+重新计算 3D PGD，再分别应用 Crowell、Melgar、Ruhl 标度律。没有额外 PGD 振幅筛选。
+Phase39 仍为 R-only 严格变长前缀，因此这是方法基线比较，不是相同输入分量的消融。
+
+| Train 观测/发布 | Phase39 | Crowell | Melgar | Ruhl |
+|---|---:|---:|---:|---:|
+| 30/36 s | 0.865545 | 0.654048 | 1.032228 | 1.249312 |
+| 60/66 s | 0.614526 | 0.449960 | 0.762402 | 0.949486 |
+| 90/96 s | 0.527585 | 0.317136 | 0.533189 | 0.691510 |
+| 120/126 s | 0.391759 | 0.264231 | 0.437258 | 0.577064 |
+| 200/206 s | 0.033940 | 0.179509 | 0.279440 | 0.384837 |
+
+| Test 观测/发布 | Phase39 | Crowell | Melgar | Ruhl |
+|---|---:|---:|---:|---:|
+| 30/36 s | 0.846883 | 0.721756 | 1.049073 | 1.277298 |
+| 60/66 s | 0.793068 | 0.454355 | 0.654506 | 0.817451 |
+| 90/96 s | 0.615656 | 0.366572 | 0.527353 | 0.680082 |
+| 120/126 s | 0.397671 | 0.317033 | 0.430926 | 0.553882 |
+| 200/206 s | 0.152287 | 0.228853 | 0.283626 | 0.387929 |
+
+internal test 上，Crowell 在 30--120 秒的事件 MAE 均低于未做前缀训练的 Phase39；
+200 秒时 Phase39 为 **0.152287 Mw**，优于 Crowell 的 **0.228853 Mw**。
+Melgar 和 Ruhl 在早期整体存在明显负偏差。
+
+### 30 秒方法比较
+
+![Phase39 与 PGD 30 秒比较](figures/10_phase39_pgd_comparison_030s.png)
+
+[PDF 图件](figures/10_phase39_pgd_comparison_030s.pdf)
+
+### 60 秒方法比较
+
+![Phase39 与 PGD 60 秒比较](figures/11_phase39_pgd_comparison_060s.png)
+
+[PDF 图件](figures/11_phase39_pgd_comparison_060s.pdf)
+
+### 90 秒方法比较
+
+![Phase39 与 PGD 90 秒比较](figures/12_phase39_pgd_comparison_090s.png)
+
+[PDF 图件](figures/12_phase39_pgd_comparison_090s.pdf)
+
+### 120 秒方法比较
+
+![Phase39 与 PGD 120 秒比较](figures/13_phase39_pgd_comparison_120s.png)
+
+[PDF 图件](figures/13_phase39_pgd_comparison_120s.pdf)
+
+### 200 秒方法比较
+
+![Phase39 与 PGD 200 秒比较](figures/14_phase39_pgd_comparison_200s.png)
+
+[PDF 图件](figures/14_phase39_pgd_comparison_200s.pdf)
+
+<!-- phase39-pgd-horizons:end -->
+
 ## 八个事件轨迹
 
 ![事件逐秒轨迹](figures/02_event_trajectories.png)
