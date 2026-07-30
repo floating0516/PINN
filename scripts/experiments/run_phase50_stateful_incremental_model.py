@@ -174,6 +174,10 @@ def phase50_config() -> dict[str, Any]:
         "late_proposal_identity_anchor_start_sec": (
             COMPLETE_FORECAST_TARGET_END_SEC
         ),
+        "use_late_evidence_assimilation_anchor": True,
+        "late_evidence_assimilation_anchor_start_sec": (
+            COMPLETE_FORECAST_TARGET_END_SEC
+        ),
     }
     return config
 
@@ -861,6 +865,14 @@ def _protocol(
             "start_sec": COMPLETE_FORECAST_TARGET_END_SEC,
             "end_sec": HORIZONS[-1],
             "endpoint_residual_weight": 0.0,
+        },
+        "late_evidence_assimilation_anchor": {
+            "start_sec": COMPLETE_FORECAST_TARGET_END_SEC,
+            "end_sec": HORIZONS[-1],
+            "endpoint_upward_fraction": 1.0,
+            "endpoint_downward_fraction": (
+                FULL_STF_ALIGNMENT_DOWN_FRACTION_PER_STEP
+            ),
         },
         "external_adapter": False,
         "source_model": "Phase39 Glehman scalar + global invariant, seed42",

@@ -109,6 +109,8 @@ class ReleasedSTFTransition(nn.Module):
         full_stf_alignment_down_fraction_per_step: float,
         use_late_proposal_identity_anchor: bool,
         late_proposal_identity_anchor_start_sec: int,
+        use_late_evidence_assimilation_anchor: bool,
+        late_evidence_assimilation_anchor_start_sec: int,
     ) -> None:
         super().__init__()
         self.source_steps = int(source_steps)
@@ -152,6 +154,12 @@ class ReleasedSTFTransition(nn.Module):
         self.late_proposal_identity_anchor_start_sec = int(
             late_proposal_identity_anchor_start_sec
         )
+        self.use_late_evidence_assimilation_anchor = bool(
+            use_late_evidence_assimilation_anchor
+        )
+        self.late_evidence_assimilation_anchor_start_sec = int(
+            late_evidence_assimilation_anchor_start_sec
+        )
         if (
             self.use_full_stf_alignment
             and self.full_stf_alignment_start_sec > self.source_steps
@@ -166,6 +174,15 @@ class ReleasedSTFTransition(nn.Module):
         ):
             raise ValueError(
                 "late proposal identity anchor start must be before "
+                "source steps"
+            )
+        if (
+            self.use_late_evidence_assimilation_anchor
+            and self.late_evidence_assimilation_anchor_start_sec
+            >= self.source_steps
+        ):
+            raise ValueError(
+                "late evidence assimilation anchor start must be before "
                 "source steps"
             )
         self.local_context = nn.Conv1d(
@@ -534,7 +551,31 @@ class ReleasedSTFTransition(nn.Module):
                     else calibrated_preliminary
                 )
             )
-            upward_fraction = torch.sigmoid(moment_logits[:, 1])
+            late_assimilation_weight = 0.0
+            if (
+                self.use_late_evidence_assimilation_anchor
+                and horizon_sec
+                >= self.late_evidence_assimilation_anchor_start_sec
+            ):
+                late_assimilation_weight = min(
+                    max(
+                        (
+                            horizon_sec
+                            - self.late_evidence_assimilation_anchor_start_sec
+                        )
+                        / (
+                            self.source_steps
+                            - self.late_evidence_assimilation_anchor_start_sec
+                        ),
+                        0.0,
+                    ),
+                    1.0,
+                )
+            upward_gate = torch.sigmoid(moment_logits[:, 1])
+            upward_fraction = (
+                late_assimilation_weight
+                + (1.0 - late_assimilation_weight) * upward_gate
+            )
             max_downward_fraction = (
                 self.full_stf_alignment_down_fraction_per_step
                 if in_full_alignment
@@ -545,8 +586,10 @@ class ReleasedSTFTransition(nn.Module):
                     else self.max_moment_down_fraction_per_step
                 )
             )
-            downward_fraction = max_downward_fraction * torch.sigmoid(
-                moment_logits[:, 2]
+            downward_gate = torch.sigmoid(moment_logits[:, 2])
+            downward_fraction = max_downward_fraction * (
+                late_assimilation_weight
+                + (1.0 - late_assimilation_weight) * downward_gate
             )
             previous_moment = torch.exp(
                 previous_released_log10_moment * math.log(10.0)
@@ -919,6 +962,16 @@ class PINNModel(nn.Module):
                 late_proposal_identity_anchor_start_sec=int(
                     self.stateful_streaming[
                         "late_proposal_identity_anchor_start_sec"
+                    ]
+                ),
+                use_late_evidence_assimilation_anchor=bool(
+                    self.stateful_streaming[
+                        "use_late_evidence_assimilation_anchor"
+                    ]
+                ),
+                late_evidence_assimilation_anchor_start_sec=int(
+                    self.stateful_streaming[
+                        "late_evidence_assimilation_anchor_start_sec"
                     ]
                 ),
             )

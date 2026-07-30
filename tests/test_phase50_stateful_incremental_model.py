@@ -84,6 +84,8 @@ def _forecast_config() -> dict:
         {
             "use_late_proposal_identity_anchor": True,
             "late_proposal_identity_anchor_start_sec": 160,
+            "use_late_evidence_assimilation_anchor": True,
+            "late_evidence_assimilation_anchor_start_sec": 160,
         }
     )
     return config
@@ -221,6 +223,21 @@ def test_target_support_aligns_to_full_stf_from_180_seconds() -> None:
             },
             "must be after",
         ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "use_late_evidence_assimilation_anchor": 1,
+            },
+            "boolean",
+        ),
+        (
+            {
+                "mode": "released_stf_gru",
+                "use_late_evidence_assimilation_anchor": True,
+                "late_evidence_assimilation_anchor_start_sec": 60,
+            },
+            "must be after",
+        ),
     ],
 )
 def test_stateful_config_rejects_invalid_values(
@@ -266,6 +283,16 @@ def test_late_identity_anchor_must_start_before_source_end() -> None:
     config = _forecast_config()
     config["model"]["stateful_streaming"][
         "late_proposal_identity_anchor_start_sec"
+    ] = 200
+
+    with pytest.raises(ValueError, match="must be before source steps"):
+        PINNModel(config)
+
+
+def test_late_assimilation_anchor_must_start_before_source_end() -> None:
+    config = _forecast_config()
+    config["model"]["stateful_streaming"][
+        "late_evidence_assimilation_anchor_start_sec"
     ] = 200
 
     with pytest.raises(ValueError, match="must be before source steps"):
@@ -415,6 +442,64 @@ def test_late_identity_anchor_removes_proposal_residuals_at_endpoint() -> None:
 
     assert torch.sum(anchored_start.released_rate) > torch.sum(raw)
     torch.testing.assert_close(endpoint.released_rate, raw)
+
+
+def test_late_assimilation_anchor_accepts_endpoint_evidence() -> None:
+    model = PINNModel(_forecast_config()).eval()
+    transition = model.released_stf_transition
+    assert transition is not None
+    low = torch.full((1, 200), 2.0e16)
+    high = torch.full((1, 200), 2.0e18)
+    with torch.no_grad():
+        transition.moment_update_head.weight.zero_()
+        transition.moment_update_head.bias.copy_(
+            torch.tensor([0.0, -10.0, -10.0])
+        )
+
+    low_state = model.stream_step_from_rate(
+        low,
+        state=None,
+        horizon_sec=199,
+        source_distance_m=torch.zeros(1),
+        source_dt_sec=torch.ones(1),
+        beta_m_per_s=4_533.0,
+    )
+    upward = model.stream_step_from_rate(
+        high,
+        state=low_state.state,
+        horizon_sec=200,
+        source_distance_m=torch.zeros(1),
+        source_dt_sec=torch.ones(1),
+        beta_m_per_s=4_533.0,
+    )
+    torch.testing.assert_close(
+        torch.sum(upward.released_rate),
+        torch.sum(high),
+    )
+
+    high_state = model.stream_step_from_rate(
+        high,
+        state=None,
+        horizon_sec=199,
+        source_distance_m=torch.zeros(1),
+        source_dt_sec=torch.ones(1),
+        beta_m_per_s=4_533.0,
+    )
+    downward = model.stream_step_from_rate(
+        low,
+        state=high_state.state,
+        horizon_sec=200,
+        source_distance_m=torch.zeros(1),
+        source_dt_sec=torch.ones(1),
+        beta_m_per_s=4_533.0,
+    )
+    expected_downward = torch.sum(high) - 0.03 * (
+        torch.sum(high) - torch.sum(low)
+    )
+    torch.testing.assert_close(
+        torch.sum(downward.released_rate),
+        expected_downward,
+    )
 
 
 def test_complete_forecast_target_grows_then_stays_full() -> None:

@@ -287,6 +287,8 @@ def stateful_streaming_config_from_config(
         "full_stf_alignment_down_fraction_per_step",
         "use_late_proposal_identity_anchor",
         "late_proposal_identity_anchor_start_sec",
+        "use_late_evidence_assimilation_anchor",
+        "late_evidence_assimilation_anchor_start_sec",
     }
     extra = set(raw) - allowed
     if extra:
@@ -452,6 +454,29 @@ def stateful_streaming_config_from_config(
             "late_proposal_identity_anchor_start_sec must be after "
             "moment_stability_start_sec"
         )
+    use_late_evidence_assimilation_anchor = raw.get(
+        "use_late_evidence_assimilation_anchor",
+        False,
+    )
+    if not isinstance(use_late_evidence_assimilation_anchor, bool):
+        raise ValueError(
+            "model.stateful_streaming."
+            "use_late_evidence_assimilation_anchor must be boolean"
+        )
+    late_evidence_assimilation_anchor_start_sec = positive_int(
+        "late_evidence_assimilation_anchor_start_sec",
+        160,
+    )
+    if (
+        use_late_evidence_assimilation_anchor
+        and late_evidence_assimilation_anchor_start_sec
+        <= moment_stability_start_sec
+    ):
+        raise ValueError(
+            "model.stateful_streaming."
+            "late_evidence_assimilation_anchor_start_sec must be after "
+            "moment_stability_start_sec"
+        )
     return {
         "mode": mode,
         "proposal_semantics": proposal_semantics,
@@ -482,6 +507,12 @@ def stateful_streaming_config_from_config(
         ),
         "late_proposal_identity_anchor_start_sec": (
             late_proposal_identity_anchor_start_sec
+        ),
+        "use_late_evidence_assimilation_anchor": (
+            use_late_evidence_assimilation_anchor
+        ),
+        "late_evidence_assimilation_anchor_start_sec": (
+            late_evidence_assimilation_anchor_start_sec
         ),
     }
 
