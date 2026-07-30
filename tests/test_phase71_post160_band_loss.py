@@ -10,23 +10,31 @@ from scripts.experiments.run_phase71_post160_band_loss import (
     PHASE71_BAND_NORMALIZER_FLOOR,
     configure_phase71,
 )
+from scripts.experiments.run_phase72_post160_band_weight025 import (
+    PHASE72_BAND_LOSS_WEIGHT,
+    configure_phase72,
+)
+
+
+MUTABLE_CAMPAIGN_NAMES = (
+    "EXPERIMENT_PHASE",
+    "STATE_HIDDEN_SIZE",
+    "USE_LATE_PROPOSAL_ASSIMILATION",
+    "LATE_PROPOSAL_ASSIMILATION_START_SEC",
+    "EXPECTED_TRANSITION_PARAMETER_COUNT",
+    "EXPECTED_TOTAL_PARAMETER_COUNT",
+    "USE_PLATEAU_BAND_LOSS",
+    "LOSS_WEIGHTS",
+    "NORMALIZER_FLOORS",
+)
 
 
 def test_phase71_configuration_enables_only_the_band_objective(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mutable_names = (
-        "EXPERIMENT_PHASE",
-        "STATE_HIDDEN_SIZE",
-        "USE_LATE_PROPOSAL_ASSIMILATION",
-        "LATE_PROPOSAL_ASSIMILATION_START_SEC",
-        "EXPECTED_TRANSITION_PARAMETER_COUNT",
-        "EXPECTED_TOTAL_PARAMETER_COUNT",
-        "USE_PLATEAU_BAND_LOSS",
-        "LOSS_WEIGHTS",
-        "NORMALIZER_FLOORS",
-    )
-    original = {name: getattr(campaign, name) for name in mutable_names}
+    original = {
+        name: getattr(campaign, name) for name in MUTABLE_CAMPAIGN_NAMES
+    }
 
     with monkeypatch.context() as restore:
         for name, value in original.items():
@@ -44,6 +52,33 @@ def test_phase71_configuration_enables_only_the_band_objective(
         assert campaign.NORMALIZER_FLOORS["plateau_band"] == pytest.approx(
             PHASE71_BAND_NORMALIZER_FLOOR
         )
+
+    for name, value in original.items():
+        assert getattr(campaign, name) is value
+
+
+def test_phase72_changes_only_the_band_loss_weight(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = {
+        name: getattr(campaign, name) for name in MUTABLE_CAMPAIGN_NAMES
+    }
+
+    with monkeypatch.context() as restore:
+        for name, value in original.items():
+            restore.setattr(campaign, name, value)
+        configure_phase71()
+        phase71_weights = dict(campaign.LOSS_WEIGHTS)
+        phase71_normalizers = dict(campaign.NORMALIZER_FLOORS)
+        configure_phase72()
+
+        expected = {
+            **phase71_weights,
+            "plateau_band": PHASE72_BAND_LOSS_WEIGHT,
+        }
+        assert campaign.EXPERIMENT_PHASE == "Phase72"
+        assert campaign.LOSS_WEIGHTS == expected
+        assert campaign.NORMALIZER_FLOORS == phase71_normalizers
 
     for name, value in original.items():
         assert getattr(campaign, name) is value
