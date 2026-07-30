@@ -107,6 +107,8 @@ class ReleasedSTFTransition(nn.Module):
         use_full_stf_alignment: bool,
         full_stf_alignment_start_sec: int,
         full_stf_alignment_down_fraction_per_step: float,
+        use_late_proposal_identity_anchor: bool,
+        late_proposal_identity_anchor_start_sec: int,
     ) -> None:
         super().__init__()
         self.source_steps = int(source_steps)
@@ -144,12 +146,27 @@ class ReleasedSTFTransition(nn.Module):
         self.full_stf_alignment_down_fraction_per_step = float(
             full_stf_alignment_down_fraction_per_step
         )
+        self.use_late_proposal_identity_anchor = bool(
+            use_late_proposal_identity_anchor
+        )
+        self.late_proposal_identity_anchor_start_sec = int(
+            late_proposal_identity_anchor_start_sec
+        )
         if (
             self.use_full_stf_alignment
             and self.full_stf_alignment_start_sec > self.source_steps
         ):
             raise ValueError(
                 "full STF alignment start must not exceed source steps"
+            )
+        if (
+            self.use_late_proposal_identity_anchor
+            and self.late_proposal_identity_anchor_start_sec
+            >= self.source_steps
+        ):
+            raise ValueError(
+                "late proposal identity anchor start must be before "
+                "source steps"
             )
         self.local_context = nn.Conv1d(
             1,
@@ -355,8 +372,26 @@ class ReleasedSTFTransition(nn.Module):
             features.reshape(batch_size * self.source_steps, -1),
             previous_hidden.reshape(batch_size * self.source_steps, -1),
         ).reshape(batch_size, self.source_steps, self.hidden_size)
-        correction_log10 = self.max_proposal_correction_log10 * torch.tanh(
-            self.candidate_correction_head(hidden).squeeze(-1)
+        proposal_residual_weight = 1.0
+        if (
+            self.use_late_proposal_identity_anchor
+            and horizon_sec >= self.late_proposal_identity_anchor_start_sec
+        ):
+            proposal_residual_weight = max(
+                (
+                    self.source_steps
+                    - horizon_sec
+                )
+                / (
+                    self.source_steps
+                    - self.late_proposal_identity_anchor_start_sec
+                ),
+                0.0,
+            )
+        correction_log10 = (
+            proposal_residual_weight
+            * self.max_proposal_correction_log10
+            * torch.tanh(self.candidate_correction_head(hidden).squeeze(-1))
         )
         candidate_scale = torch.exp(correction_log10 * math.log(10.0))
         candidate = proposal * candidate_scale
@@ -467,7 +502,8 @@ class ReleasedSTFTransition(nn.Module):
         )
         moment_logits = self.moment_update_head(moment_hidden)
         proposal_correction_log10 = (
-            self.max_moment_proposal_correction_log10
+            proposal_residual_weight
+            * self.max_moment_proposal_correction_log10
             * torch.tanh(moment_logits[:, 0])
         )
         proposal_scale = torch.exp(
@@ -873,6 +909,16 @@ class PINNModel(nn.Module):
                 full_stf_alignment_down_fraction_per_step=float(
                     self.stateful_streaming[
                         "full_stf_alignment_down_fraction_per_step"
+                    ]
+                ),
+                use_late_proposal_identity_anchor=bool(
+                    self.stateful_streaming[
+                        "use_late_proposal_identity_anchor"
+                    ]
+                ),
+                late_proposal_identity_anchor_start_sec=int(
+                    self.stateful_streaming[
+                        "late_proposal_identity_anchor_start_sec"
                     ]
                 ),
             )

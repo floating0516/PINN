@@ -170,6 +170,10 @@ def phase50_config() -> dict[str, Any]:
         "full_stf_alignment_down_fraction_per_step": (
             FULL_STF_ALIGNMENT_DOWN_FRACTION_PER_STEP
         ),
+        "use_late_proposal_identity_anchor": True,
+        "late_proposal_identity_anchor_start_sec": (
+            COMPLETE_FORECAST_TARGET_END_SEC
+        ),
     }
     return config
 
@@ -852,6 +856,11 @@ def _protocol(
             "schedule": "quadratic_ease_out",
             "start_sec": HORIZONS[0],
             "full_target_sec": COMPLETE_FORECAST_TARGET_END_SEC,
+        },
+        "late_proposal_identity_anchor": {
+            "start_sec": COMPLETE_FORECAST_TARGET_END_SEC,
+            "end_sec": HORIZONS[-1],
+            "endpoint_residual_weight": 0.0,
         },
         "external_adapter": False,
         "source_model": "Phase39 Glehman scalar + global invariant, seed42",
