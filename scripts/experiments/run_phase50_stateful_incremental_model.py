@@ -88,7 +88,7 @@ LOSS_WEIGHTS = {
     "endpoint_science": 2.0,
     "released_sequence": 1.0,
     "endpoint_teacher": 1.0,
-    "post60_target_overshoot": 1.0,
+    "post60_target_overshoot": 2.0,
     "downward_step": 2.0,
     "multiscale_downward": 2.0,
     "confirmed_history": 1.0,
@@ -882,6 +882,20 @@ def validation_gate(metrics: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def closest_candidate_rank(
+    metrics: Mapping[str, Any],
+    gate: Mapping[str, Any],
+) -> tuple[float, float]:
+    ratios = (
+        float(metrics["endpoint_event_mae"])
+        / VALIDATION_GATES["endpoint_event_mae_max"],
+        float(metrics["endpoint_station_mae"])
+        / VALIDATION_GATES["endpoint_station_mae_max"],
+        float(gate["selection_score"]),
+    )
+    return max(ratios), sum(ratios)
+
+
 def _protocol(
     *,
     cache: CacheBundle,
@@ -1006,6 +1020,10 @@ def _protocol(
             "lowest worst normalized streaming ratio; then choose one seed by "
             "the same score; never ensemble"
         ),
+        "closest_checkpoint": (
+            "diagnostic only: minimize the worst then summed normalized Event, "
+            "Station, and streaming ratios; never overrides the frozen gate"
+        ),
         "hidden_data": (
             "internal test, external development events, and grouped test are closed"
         ),
@@ -1065,6 +1083,12 @@ def train_seed(
     best_metrics = dict(baseline_metrics)
     best_gate: dict[str, Any] | None = None
     atomic_torch_save(dict(model.state_dict()), seed_root / "best_model.pth")
+    baseline_gate = validation_gate(baseline_metrics)
+    closest_rank = closest_candidate_rank(baseline_metrics, baseline_gate)
+    closest_epoch = 0
+    closest_metrics = dict(baseline_metrics)
+    closest_gate = dict(baseline_gate)
+    atomic_torch_save(dict(model.state_dict()), seed_root / "closest_model.pth")
 
     rows: list[dict[str, Any]] = []
     epoch_count = 1 if smoke else EPOCHS
@@ -1162,6 +1186,17 @@ def train_seed(
                     dict(model.state_dict()),
                     seed_root / "best_model.pth",
                 )
+        if gate is not None:
+            candidate_rank = closest_candidate_rank(validation_metrics, gate)
+            if candidate_rank < closest_rank:
+                closest_rank = candidate_rank
+                closest_epoch = epoch
+                closest_metrics = dict(validation_metrics)
+                closest_gate = dict(gate)
+                atomic_torch_save(
+                    dict(model.state_dict()),
+                    seed_root / "closest_model.pth",
+                )
         atomic_torch_save(dict(model.state_dict()), seed_root / "last_model.pth")
         _write_json(seed_root / "epoch_metrics.json", rows)
         _write_csv(
@@ -1186,6 +1221,13 @@ def train_seed(
         best_metrics = dict(validation_metrics)
         best_gate = None
         atomic_torch_save(dict(model.state_dict()), seed_root / "best_model.pth")
+        closest_epoch = 1
+        closest_metrics = dict(validation_metrics)
+        closest_gate = validation_gate(validation_metrics)
+        atomic_torch_save(
+            dict(model.state_dict()),
+            seed_root / "closest_model.pth",
+        )
         status = "smoke_complete"
         passed = True
     else:
@@ -1218,6 +1260,13 @@ def train_seed(
         "best_model": {
             "path": str(seed_root / "best_model.pth"),
             "sha256": sha256_file(seed_root / "best_model.pth"),
+        },
+        "closest_epoch": closest_epoch,
+        "closest_metrics": closest_metrics,
+        "closest_gate": closest_gate,
+        "closest_model": {
+            "path": str(seed_root / "closest_model.pth"),
+            "sha256": sha256_file(seed_root / "closest_model.pth"),
         },
         "protocol": protocol,
         "provenance": {

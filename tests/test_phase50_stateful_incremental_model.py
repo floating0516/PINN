@@ -18,6 +18,7 @@ from scripts.experiments.run_phase50_stateful_incremental_model import (
     VALIDATION_GATES,
     _assert_backbone_unchanged,
     build_arg_parser,
+    closest_candidate_rank,
     freeze_transition_scope,
     normalizer_training_indices,
     normalized_loss,
@@ -601,6 +602,27 @@ def test_post60_target_overshoot_loss_is_one_sided() -> None:
         target[1:],
         torch.ones(1),
     ) == 0.0
+
+
+def test_closest_candidate_rank_prioritizes_worst_gate_ratio() -> None:
+    event_limit = VALIDATION_GATES["endpoint_event_mae_max"]
+    station_limit = VALIDATION_GATES["endpoint_station_mae_max"]
+    balanced = closest_candidate_rank(
+        {
+            "endpoint_event_mae": event_limit * 1.1,
+            "endpoint_station_mae": station_limit * 1.1,
+        },
+        {"selection_score": 1.1},
+    )
+    one_bad_gate = closest_candidate_rank(
+        {
+            "endpoint_event_mae": event_limit * 1.2,
+            "endpoint_station_mae": station_limit * 0.8,
+        },
+        {"selection_score": 0.8},
+    )
+
+    assert balanced < one_bad_gate
 
 
 def test_asymmetric_moment_update_limits_downward_revision() -> None:
