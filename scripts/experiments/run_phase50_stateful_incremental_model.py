@@ -70,6 +70,7 @@ WEIGHT_DECAY = 1.0e-5
 GRAD_CLIP_NORM = 1.0
 SUPPORT_RAMP_SEC = 6.0
 PROPOSAL_SEMANTICS = "complete_forecast"
+COMPLETE_FORECAST_TARGET_END_SEC = 160
 MAX_PROPOSAL_CORRECTION_LOG10 = 1.0
 MAX_MOMENT_DOWN_FRACTION_PER_STEP = 0.01
 EARLY_MOMENT_DOWN_FRACTION_PER_STEP = 0.1
@@ -302,11 +303,18 @@ def stateful_target_rate(
         )
     )
     if semantics == "complete_forecast":
-        return batch["stf"].unsqueeze(1).expand(
-            -1,
-            len(HORIZONS),
-            -1,
+        horizons = causal_support.new_tensor(HORIZONS).reshape(1, -1, 1)
+        progress = torch.clamp(
+            (horizons - float(HORIZONS[0]))
+            / float(COMPLETE_FORECAST_TARGET_END_SEC - HORIZONS[0]),
+            min=0.0,
+            max=1.0,
         )
+        forecast_confidence = 1.0 - (1.0 - progress).pow(2)
+        target_support = causal_support + forecast_confidence * (
+            1.0 - causal_support
+        )
+        return batch["stf"].unsqueeze(1) * target_support
     if semantics == "causal_released":
         return batch["stf"].unsqueeze(1) * target_support_fraction(
             causal_support
@@ -840,6 +848,11 @@ def _protocol(
         "model_class": "PINNModel",
         "stateful_mode": "released_stf_gru",
         "stateful_output_semantics": PROPOSAL_SEMANTICS,
+        "complete_forecast_target": {
+            "schedule": "quadratic_ease_out",
+            "start_sec": HORIZONS[0],
+            "full_target_sec": COMPLETE_FORECAST_TARGET_END_SEC,
+        },
         "external_adapter": False,
         "source_model": "Phase39 Glehman scalar + global invariant, seed42",
         "source_checkpoint": str(PHASE39_CHECKPOINT),

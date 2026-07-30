@@ -11,6 +11,7 @@ import yaml
 
 from scripts.experiments.run_phase43_streaming_adapter import HORIZONS
 from scripts.experiments.run_phase50_stateful_incremental_model import (
+    COMPLETE_FORECAST_TARGET_END_SEC,
     EPOCHS,
     LOSS_WEIGHTS,
     MAX_MOMENT_DOWN_FRACTION_PER_STEP,
@@ -351,7 +352,7 @@ def test_complete_forecast_keeps_unsupported_stf_content() -> None:
     assert output.released_rate[0, 10] > 0.0
 
 
-def test_complete_forecast_training_target_is_full_stf() -> None:
+def test_complete_forecast_target_grows_then_stays_full() -> None:
     causal = torch.zeros(1, len(HORIZONS), 3)
     stf = torch.tensor([[1.0, 2.0, 3.0]])
     target = stateful_target_rate(
@@ -361,7 +362,16 @@ def test_complete_forecast_training_target_is_full_stf() -> None:
     )
 
     assert target.shape == (1, len(HORIZONS), 3)
-    torch.testing.assert_close(target[:, 0], stf)
+    assert torch.all(target[:, 1:] >= target[:, :-1])
+    assert torch.equal(target[:, HORIZONS.index(20)], torch.zeros_like(stf))
+    torch.testing.assert_close(
+        target[:, HORIZONS.index(90)],
+        0.75 * stf,
+    )
+    torch.testing.assert_close(
+        target[:, HORIZONS.index(COMPLETE_FORECAST_TARGET_END_SEC)],
+        stf,
+    )
     torch.testing.assert_close(target[:, -1], stf)
 
 
