@@ -1,0 +1,473 @@
+{
+  "evaluation_role": "train_validation_only_stateful_streaming_diagnostic",
+  "hidden_data": {
+    "external_eight_events_loaded": false,
+    "grouped_test_loaded": false,
+    "internal_test_loaded": false
+  },
+  "phase": "Phase73",
+  "selected_epoch": 27,
+  "selected_horizon_metrics": [
+    {
+      "horizon_sec": 30,
+      "release_time_sec": 36.0,
+      "train": {
+        "crowell": {
+          "event_mae_mw": 0.6540482274947628,
+          "station_mae_mw": 0.9996864582334856
+        },
+        "melgar": {
+          "event_mae_mw": 1.0322277007564422,
+          "station_mae_mw": 1.4815344946496438
+        },
+        "phase39": {
+          "event_mae_mw": 0.8655455958458685,
+          "station_mae_mw": 0.6420572753453948
+        },
+        "phase73": {
+          "event_mae_mw": 0.6293843023238643,
+          "station_mae_mw": 0.9632068093724432
+        },
+        "ruhl": {
+          "event_mae_mw": 1.2493121393265263,
+          "station_mae_mw": 1.7103793514388252
+        }
+      },
+      "validation": {
+        "crowell": {
+          "event_mae_mw": 0.6878815650939941,
+          "station_mae_mw": 1.0105957130333045
+        },
+        "melgar": {
+          "event_mae_mw": 1.0204244613647462,
+          "station_mae_mw": 1.4895455187017268
+        },
+        "phase39": {
+          "event_mae_mw": 0.8322875340779622,
+          "station_mae_mw": 0.6334098320502739
+        },
+        "phase73": {
+          "event_mae_mw": 0.6596950848897298,
+          "station_mae_mw": 0.973885170825116
+        },
+        "ruhl": {
+          "event_mae_mw": 1.239078156153361,
+          "station_mae_mw": 1.7212108005176892
+        }
+      }
+    },
+    {
+      "horizon_sec": 60,
+      "release_time_sec": 66.0,
+      "train": {
+        "crowell": {
+          "event_mae_mw": 0.44995986261675436,
+          "station_mae_mw": 0.8277996711816297
+        },
+        "melgar": {
+          "event_mae_mw": 0.7624021345569242,
+          "station_mae_mw": 1.2264717958650866
+        },
+        "phase39": {
+          "event_mae_mw": 0.6145264256385065,
+          "station_mae_mw": 0.7967865997779556
+        },
+        "phase73": {
+          "event_mae_mw": 0.396399897913779,
+          "station_mae_mw": 0.736569943310697
+        },
+        "ruhl": {
+          "event_mae_mw": 0.9494857480449062,
+          "station_mae_mw": 1.425877807657724
+        }
+      },
+      "validation": {
+        "crowell": {
+          "event_mae_mw": 0.44918487866719564,
+          "station_mae_mw": 0.8282577143087015
+        },
+        "melgar": {
+          "event_mae_mw": 0.6806507746378581,
+          "station_mae_mw": 1.2220940292655647
+        },
+        "phase39": {
+          "event_mae_mw": 0.7507465680440267,
+          "station_mae_mw": 0.8636246644057237
+        },
+        "phase73": {
+          "event_mae_mw": 0.3971538225809733,
+          "station_mae_mw": 0.7384178632265561
+        },
+        "ruhl": {
+          "event_mae_mw": 0.8644186337788899,
+          "station_mae_mw": 1.4214508205265193
+        }
+      }
+    },
+    {
+      "horizon_sec": 90,
+      "release_time_sec": 96.0,
+      "train": {
+        "crowell": {
+          "event_mae_mw": 0.3171361646344585,
+          "station_mae_mw": 0.6321573001426338
+        },
+        "melgar": {
+          "event_mae_mw": 0.5331894197771626,
+          "station_mae_mw": 0.9202719844160997
+        },
+        "phase39": {
+          "event_mae_mw": 0.5275848142562374,
+          "station_mae_mw": 0.7786924340314246
+        },
+        "phase73": {
+          "event_mae_mw": 0.2505760808144846,
+          "station_mae_mw": 0.5726783267603625
+        },
+        "ruhl": {
+          "event_mae_mw": 0.6915097698088615,
+          "station_mae_mw": 1.083214205650142
+        }
+      },
+      "validation": {
+        "crowell": {
+          "event_mae_mw": 0.3941603819529215,
+          "station_mae_mw": 0.6340802205073369
+        },
+        "melgar": {
+          "event_mae_mw": 0.544920269648234,
+          "station_mae_mw": 0.9193906263871626
+        },
+        "phase39": {
+          "event_mae_mw": 0.6389614582061768,
+          "station_mae_mw": 0.7672698157174247
+        },
+        "phase73": {
+          "event_mae_mw": 0.3080568313598633,
+          "station_mae_mw": 0.5761275675389674
+        },
+        "ruhl": {
+          "event_mae_mw": 0.710156774520874,
+          "station_mae_mw": 1.0828239279908018
+        }
+      }
+    },
+    {
+      "horizon_sec": 120,
+      "release_time_sec": 126.0,
+      "train": {
+        "crowell": {
+          "event_mae_mw": 0.26423063585835116,
+          "station_mae_mw": 0.5016016229420434
+        },
+        "melgar": {
+          "event_mae_mw": 0.4372577667236328,
+          "station_mae_mw": 0.7168633023097745
+        },
+        "phase39": {
+          "event_mae_mw": 0.3917594417448967,
+          "station_mae_mw": 0.645363647399066
+        },
+        "phase73": {
+          "event_mae_mw": 0.18273479707779422,
+          "station_mae_mw": 0.44991797382132853
+        },
+        "ruhl": {
+          "event_mae_mw": 0.5770642065232799,
+          "station_mae_mw": 0.8494818981328534
+        }
+      },
+      "validation": {
+        "crowell": {
+          "event_mae_mw": 0.32818838755289714,
+          "station_mae_mw": 0.48868551997395304
+        },
+        "melgar": {
+          "event_mae_mw": 0.4290096600850423,
+          "station_mae_mw": 0.6965411879799582
+        },
+        "phase39": {
+          "event_mae_mw": 0.465938138961792,
+          "station_mae_mw": 0.6033976406246037
+        },
+        "phase73": {
+          "event_mae_mw": 0.24721188545227052,
+          "station_mae_mw": 0.44425490243094307
+        },
+        "ruhl": {
+          "event_mae_mw": 0.5788270155588786,
+          "station_mae_mw": 0.8326793571571252
+        }
+      }
+    },
+    {
+      "horizon_sec": 200,
+      "release_time_sec": 206.0,
+      "train": {
+        "crowell": {
+          "event_mae_mw": 0.17950887064779958,
+          "station_mae_mw": 0.26978097346005026
+        },
+        "melgar": {
+          "event_mae_mw": 0.27944018763880574,
+          "station_mae_mw": 0.3646490360533098
+        },
+        "phase39": {
+          "event_mae_mw": 0.033940084518924836,
+          "station_mae_mw": 0.09755258645520648
+        },
+        "phase73": {
+          "event_mae_mw": 0.08716095647504253,
+          "station_mae_mw": 0.178298074927106
+        },
+        "ruhl": {
+          "event_mae_mw": 0.38483704290082377,
+          "station_mae_mw": 0.45567130909136744
+        }
+      },
+      "validation": {
+        "crowell": {
+          "event_mae_mw": 0.26750752131144206,
+          "station_mae_mw": 0.2552891508325354
+        },
+        "melgar": {
+          "event_mae_mw": 0.3158542633056641,
+          "station_mae_mw": 0.3387096652736912
+        },
+        "phase39": {
+          "event_mae_mw": 0.11433345476786295,
+          "station_mae_mw": 0.1316996636328759
+        },
+        "phase73": {
+          "event_mae_mw": 0.15822828610738118,
+          "station_mae_mw": 0.17979366129094904
+        },
+        "ruhl": {
+          "event_mae_mw": 0.4465972423553467,
+          "station_mae_mw": 0.43287680737383954
+        }
+      }
+    }
+  ],
+  "selected_seed": 17,
+  "selected_training_row": {
+    "endpoint_event_mae": "0.15822854854406104",
+    "endpoint_station_mae": "0.1797936706142799",
+    "epoch": "27",
+    "event_post160_band_width_p95_mw": "0.27725112438201904",
+    "seed": 17,
+    "selection_score": "1.325935501918979",
+    "train_total_normalized_loss": "3.52767297778887"
+  },
+  "source": {
+    "cache_arrays_sha256": "f726ac4a4628b4bd5e73fe363e3a7e29b984ee906a4db1652c08abefaf280f87",
+    "cache_raw_rates_sha256": "f4587fb1289b90e8a20684cf11644241647203b94e7b6c0c33005afc1a0dd137",
+    "cache_root": "/home/lihe/PINN_Mag/runs/phase43-streaming-prefix-cache-20260728T115851Z-7bc63eb",
+    "campaign_summary_path": "/home/lihe/PINN_Mag/runs/phase73-teacher-weight2-stateful-20260730T154118Z-804bf96/campaign_summary.json",
+    "campaign_summary_sha256": "28f26350d00b21d347b0e2c8042a6a76576afc5c95945e5d0bbe094754e0f78c",
+    "checkpoint_path": "/home/lihe/PINN_Mag/runs/phase73-teacher-weight2-stateful-20260730T154118Z-804bf96/seed_17/closest_model.pth",
+    "checkpoint_sha256": "d41085d63c6510523e408efedb672c884b6e623f2b6d90286f61bd18a655a1fa",
+    "hint_cache_root": "/home/lihe/PINN_Mag/runs/phase67-crowell-hint-cache-20260730T110514Z-7e4f271",
+    "hint_crowell_mw_sha256": "9f59885764ae6ce1d30fb52a7868442bb119ae63d5063105ff92de6d2212a25a",
+    "hint_pgd_3d_sha256": "b77fad54e10894b5b5a8c5d6485e202190bc45310e3efc661a31237dd33515ce",
+    "split_assignment_sha256": "5ac2e07ed186dce737a3592694632775b7bbf603bf922a4a74fa6b86a3d5c240"
+  },
+  "stateful_contract": {
+    "horizons_sec": [
+      20,
+      21,
+      22,
+      23,
+      24,
+      25,
+      26,
+      27,
+      28,
+      29,
+      30,
+      31,
+      32,
+      33,
+      34,
+      35,
+      36,
+      37,
+      38,
+      39,
+      40,
+      41,
+      42,
+      43,
+      44,
+      45,
+      46,
+      47,
+      48,
+      49,
+      50,
+      51,
+      52,
+      53,
+      54,
+      55,
+      56,
+      57,
+      58,
+      59,
+      60,
+      61,
+      62,
+      63,
+      64,
+      65,
+      66,
+      67,
+      68,
+      69,
+      70,
+      71,
+      72,
+      73,
+      74,
+      75,
+      76,
+      77,
+      78,
+      79,
+      80,
+      81,
+      82,
+      83,
+      84,
+      85,
+      86,
+      87,
+      88,
+      89,
+      90,
+      91,
+      92,
+      93,
+      94,
+      95,
+      96,
+      97,
+      98,
+      99,
+      100,
+      101,
+      102,
+      103,
+      104,
+      105,
+      106,
+      107,
+      108,
+      109,
+      110,
+      111,
+      112,
+      113,
+      114,
+      115,
+      116,
+      117,
+      118,
+      119,
+      120,
+      121,
+      122,
+      123,
+      124,
+      125,
+      126,
+      127,
+      128,
+      129,
+      130,
+      131,
+      132,
+      133,
+      134,
+      135,
+      136,
+      137,
+      138,
+      139,
+      140,
+      141,
+      142,
+      143,
+      144,
+      145,
+      146,
+      147,
+      148,
+      149,
+      150,
+      151,
+      152,
+      153,
+      154,
+      155,
+      156,
+      157,
+      158,
+      159,
+      160,
+      161,
+      162,
+      163,
+      164,
+      165,
+      166,
+      167,
+      168,
+      169,
+      170,
+      171,
+      172,
+      173,
+      174,
+      175,
+      176,
+      177,
+      178,
+      179,
+      180,
+      181,
+      182,
+      183,
+      184,
+      185,
+      186,
+      187,
+      188,
+      189,
+      190,
+      191,
+      192,
+      193,
+      194,
+      195,
+      196,
+      197,
+      198,
+      199,
+      200
+    ],
+    "output": "complete STF and final-Mw forecast updated each second",
+    "pgd_hint": "causal Crowell Mw plus P-arrived validity",
+    "processing_delay_sec": 6.0,
+    "state_carried_between_horizons": true,
+    "waveform_backbone": "frozen Phase39 R-only Glehman+GI"
+  },
+  "status": "complete",
+  "trajectory_metrics": {
+    "peak_to_final_p95_mw": 0.10710327625274656,
+    "post160_band_width_p95_mw": 0.27725164890289267,
+    "start_to_end_increase_fraction": 0.9333333333333333,
+    "validation_event_count": 30
+  },
+  "validation_gate_passed": false
+}

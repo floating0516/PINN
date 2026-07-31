@@ -1,0 +1,33 @@
+{
+  "batch_size": 32,
+  "crowell_reproduction": {
+    "train": 9.5367431640625e-07,
+    "validation": 9.5367431640625e-07
+  },
+  "device": "cpu",
+  "generated_at_utc": "2026-07-31T03:05:03.514501+00:00",
+  "generator": "scripts/plotting/plot_phase73_stateful_validation_zh.py",
+  "generator_sha256": "2fcb4d298f3747fc03998e51a7bf81b46349f64e15f4dd46a94eb927b800deec",
+  "git_commit": "55ad8d7e050521b1677c58a4efdf29a65a8f31ee",
+  "git_dirty": true,
+  "hidden_data": {
+    "external_eight_events_loaded": false,
+    "grouped_test_loaded": false,
+    "internal_test_loaded": false
+  },
+  "selected_epoch": 27,
+  "selected_seed": 17,
+  "source": {
+    "cache_arrays_sha256": "f726ac4a4628b4bd5e73fe363e3a7e29b984ee906a4db1652c08abefaf280f87",
+    "cache_raw_rates_sha256": "f4587fb1289b90e8a20684cf11644241647203b94e7b6c0c33005afc1a0dd137",
+    "cache_root": "/home/lihe/PINN_Mag/runs/phase43-streaming-prefix-cache-20260728T115851Z-7bc63eb",
+    "campaign_summary_path": "/home/lihe/PINN_Mag/runs/phase73-teacher-weight2-stateful-20260730T154118Z-804bf96/campaign_summary.json",
+    "campaign_summary_sha256": "28f26350d00b21d347b0e2c8042a6a76576afc5c95945e5d0bbe094754e0f78c",
+    "checkpoint_path": "/home/lihe/PINN_Mag/runs/phase73-teacher-weight2-stateful-20260730T154118Z-804bf96/seed_17/closest_model.pth",
+    "checkpoint_sha256": "d41085d63c6510523e408efedb672c884b6e623f2b6d90286f61bd18a655a1fa",
+    "hint_cache_root": "/home/lihe/PINN_Mag/runs/phase67-crowell-hint-cache-20260730T110514Z-7e4f271",
+    "hint_crowell_mw_sha256": "9f59885764ae6ce1d30fb52a7868442bb119ae63d5063105ff92de6d2212a25a",
+    "hint_pgd_3d_sha256": "b77fad54e10894b5b5a8c5d6485e202190bc45310e3efc661a31237dd33515ce",
+    "split_assignment_sha256": "5ac2e07ed186dce737a3592694632775b7bbf603bf922a4a74fa6b86a3d5c240"
+  }
+}
