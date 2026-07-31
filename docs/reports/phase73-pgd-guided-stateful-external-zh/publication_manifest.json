@@ -1,0 +1,85 @@
+{
+  "evaluator": {
+    "path": "scripts/evaluation/evaluate_phase73_stateful_external.py",
+    "sha256": "ff4c674ee70e54588fb8a991b99ba9b184dec461820db9842132d84e74d111d8"
+  },
+  "files": [
+    {
+      "bytes": 3958,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/README.md",
+      "sha256": "2d1c20297e89f0b6540200a438cd4bacd832cb6f233d3e1b91fff910cf456633"
+    },
+    {
+      "bytes": 11163,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/evaluation_summary.json",
+      "sha256": "5397dc097f6b5d581d8c533df6287cbfc50abff5a4b373215c8ea0951d2c7878"
+    },
+    {
+      "bytes": 71138,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/external_endpoint_station_predictions.csv",
+      "sha256": "f93ccc45916dc02439729d485d8ac4009aad4fa1ea6d7aa7afdca69e92edc106"
+    },
+    {
+      "bytes": 509969,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/external_event_predictions.csv",
+      "sha256": "9cc15274be3398061db9679da1cff8f9ac774cf6fe3992abaefd7d7aa54dd91b"
+    },
+    {
+      "bytes": 257602,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/external_horizon_metrics.csv",
+      "sha256": "e2267f234cc8660f78e09a9a7946e8f5113bf9a2bf6009a76ed9c43877038329"
+    },
+    {
+      "bytes": 2451311,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/external_station_predictions.csv.gz",
+      "sha256": "1f79ddcbe2b1ebfc5da3646845abae45a97b9f692478aaabee74fd7eb25f03ad"
+    },
+    {
+      "bytes": 2288,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/external_trajectory_diagnostics.csv",
+      "sha256": "460a8cdb5d027cb5bc67b5ab7722f79ab3f0dff90e676adc1cdd13195a6a4a6d"
+    },
+    {
+      "bytes": 47687,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/figures/01_external_overall_metrics.pdf",
+      "sha256": "153336ff904f631be3c8682ca0faf0556874565e76dbd3bec11f5645d30e58e9"
+    },
+    {
+      "bytes": 327842,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/figures/01_external_overall_metrics.png",
+      "sha256": "9f573fdc14b1592e770ec7c79c0ed52e265275d3ce0fc18ee96df186bd9f7462"
+    },
+    {
+      "bytes": 70931,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/figures/02_external_event_trajectories.pdf",
+      "sha256": "6e9772e5ba02d8c7578d261052c43cb15f46a104332407fa80e148dabc5cc857"
+    },
+    {
+      "bytes": 645741,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/figures/02_external_event_trajectories.png",
+      "sha256": "8eac0ccb4dfc7733fe1bd6db2a0501f75bd2555024de294940266f78331ae431"
+    },
+    {
+      "bytes": 49731,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/figures/03_external_endpoint_and_stability.pdf",
+      "sha256": "10f79dbbcb8f61a90fbe46fd9e0f35810604d797cfcace17f3711d913f39d039"
+    },
+    {
+      "bytes": 422984,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/figures/03_external_endpoint_and_stability.png",
+      "sha256": "6dbc3058131c18050a64c20fe2e1f1f42e4e06663e56bada5b9243478bde273e"
+    },
+    {
+      "bytes": 17089,
+      "path": "docs/reports/phase73-pgd-guided-stateful-external-zh/summary.json",
+      "sha256": "983944e8ae6d3e65616baf5d9dcb82cd30a2c252ae6d35ccce80ccdde991c998"
+    }
+  ],
+  "generated_at_utc": "2026-07-31T03:53:13.464833+00:00",
+  "generator": {
+    "path": "scripts/plotting/plot_phase73_stateful_external_zh.py",
+    "sha256": "3f9dca2e83452d99294f1cf3339db456ee5a094ee65422da2bffb9dcd7f83d33"
+  },
+  "report_role": "user_authorized_one_time_external_development_validation",
+  "run_root": "/home/lihe/PINN_Mag/runs/phase73-stateful-external-20260731T104500Z-173309b"
+}
