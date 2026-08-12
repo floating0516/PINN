@@ -10,6 +10,7 @@ from src.data.loaders_v2 import get_data_loaders_v2
 from src.data.splits import (
     INVERSE_COUNT_FULL_DATA_ESTIMATOR,
     REPLACEMENT_SAMPLING_ESTIMATOR,
+    EventGroupSplit,
     assert_no_event_overlap,
     make_event_balanced_weights,
     make_event_group_split,
@@ -326,6 +327,107 @@ def test_grouped_loader_uses_balanced_sampler_and_manifest(
         event = train_loader.dataset.dataset.samples[dataset_index]["event"]
         event_weight_sums[event] += float(weight)
     assert len(set(round(value, 12) for value in event_weight_sums.values())) == 1
+
+
+def test_grouped_loader_accepts_explicit_complete_event_split(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dataset(monkeypatch)
+    split = EventGroupSplit(
+        train_indices=[0, 1, 2, 3, 4],
+        validation_indices=[5, 6],
+        test_indices=[7, 8, 9],
+    )
+
+    first = _loader_config("grouped_event")
+    first["training"]["random_seed"] = 17
+    _, _, _, first_manifest = get_data_loaders_v2(
+        first,
+        explicit_split=split,
+    )
+    second = _loader_config("grouped_event")
+    second["training"]["random_seed"] = 73
+    _, _, _, second_manifest = get_data_loaders_v2(
+        second,
+        explicit_split=split,
+    )
+
+    assert first_manifest["train_events"] == ["A", "B"]
+    assert first_manifest["validation_events"] == ["C"]
+    assert first_manifest["test_events"] == ["D", "E"]
+    assert first_manifest["assignment_sha256"] == second_manifest[
+        "assignment_sha256"
+    ]
+    assert first_manifest["seed"] == 17
+    assert second_manifest["seed"] == 73
+
+
+@pytest.mark.parametrize(
+    ("split", "message"),
+    [
+        (
+            EventGroupSplit(
+                train_indices=[0, 1, 2, 3, 4],
+                validation_indices=[5, 6],
+                test_indices=[7, 8],
+            ),
+            "cover every dataset index",
+        ),
+        (
+            EventGroupSplit(
+                train_indices=[0, 1, 2, 3, 4],
+                validation_indices=[4, 5, 6],
+                test_indices=[7, 8, 9],
+            ),
+            "exactly one split",
+        ),
+        (
+            EventGroupSplit(
+                train_indices=[0, 1, 2, 3, 4],
+                validation_indices=[5, 6],
+                test_indices=[7, 8, 10],
+            ),
+            "out-of-range",
+        ),
+        (
+            EventGroupSplit(
+                train_indices=[0, 1, 2, 3],
+                validation_indices=[4, 5, 6],
+                test_indices=[7, 8, 9],
+            ),
+            "events overlap",
+        ),
+    ],
+)
+def test_grouped_loader_rejects_invalid_explicit_split(
+    monkeypatch: pytest.MonkeyPatch,
+    split: EventGroupSplit,
+    message: str,
+) -> None:
+    _patch_dataset(monkeypatch)
+
+    with pytest.raises(ValueError, match=message):
+        get_data_loaders_v2(
+            _loader_config("grouped_event"),
+            explicit_split=split,
+        )
+
+
+def test_explicit_split_requires_grouped_event_protocol(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_dataset(monkeypatch)
+    split = EventGroupSplit(
+        train_indices=[0, 1, 2, 3, 4],
+        validation_indices=[5, 6],
+        test_indices=[7, 8, 9],
+    )
+
+    with pytest.raises(ValueError, match="only supported for grouped_event"):
+        get_data_loaders_v2(
+            _loader_config("within_event_station"),
+            explicit_split=split,
+        )
 
 
 def test_loeo_reserves_named_event_for_test(

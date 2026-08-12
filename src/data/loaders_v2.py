@@ -94,6 +94,50 @@ def _loeo_split(
     return split
 
 
+def _validated_explicit_event_split(
+    events: list[str],
+    split: EventGroupSplit,
+) -> EventGroupSplit:
+    if not isinstance(split, EventGroupSplit):
+        raise TypeError("explicit_split must be an EventGroupSplit")
+
+    split_indices = {
+        "train": list(split.train_indices),
+        "validation": list(split.validation_indices),
+        "test": list(split.test_indices),
+    }
+    flattened: list[int] = []
+    for name, indices in split_indices.items():
+        for index in indices:
+            if isinstance(index, bool) or not isinstance(index, int):
+                raise ValueError(
+                    f"explicit split {name} indices must be integers"
+                )
+            if not 0 <= index < len(events):
+                raise ValueError(
+                    f"explicit split contains out-of-range index: {index}"
+                )
+            flattened.append(index)
+
+    if len(flattened) != len(set(flattened)):
+        raise ValueError(
+            "every dataset index must appear in exactly one split"
+        )
+    if set(flattened) != set(range(len(events))):
+        raise ValueError("explicit split must cover every dataset index")
+
+    validated = EventGroupSplit(
+        train_indices=split_indices["train"],
+        validation_indices=split_indices["validation"],
+        test_indices=split_indices["test"],
+    )
+    try:
+        assert_no_event_overlap(events, validated)
+    except AssertionError as error:
+        raise ValueError(f"explicit split events overlap: {error}") from error
+    return validated
+
+
 def _worker_init(worker_id: int, seed: int) -> None:
     worker_seed = seed + worker_id
     random.seed(worker_seed)
@@ -219,6 +263,7 @@ def get_data_loaders_v2(
     *,
     leave_out_event: str | None = None,
     max_events: int | None = None,
+    explicit_split: EventGroupSplit | None = None,
 ) -> tuple[DataLoader, DataLoader, DataLoader, dict[str, Any]]:
     full_dataset = CorrectedEarthquakeDataset(_runtime_config(config))
     full_samples = list(full_dataset.samples)
@@ -245,7 +290,13 @@ def get_data_loaders_v2(
     validation_fraction = float(training["validation_event_fraction"])
     test_fraction = float(training["test_event_fraction"])
     seed = int(training["random_seed"])
-    if protocol == "grouped_event":
+    if explicit_split is not None and protocol != "grouped_event":
+        raise ValueError(
+            "explicit_split is only supported for grouped_event protocol"
+        )
+    if explicit_split is not None:
+        split = _validated_explicit_event_split(events, explicit_split)
+    elif protocol == "grouped_event":
         split = make_event_group_split(
             events,
             validation_fraction,
