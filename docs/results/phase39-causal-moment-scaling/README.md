@@ -1,7 +1,14 @@
 # Phase 39 Causal Moment-Scaling Validation
 
-This page explains the current Phase 39 causal-prefix model with English-only
-figures. The full method keeps the Phase 39 architecture unchanged and adds:
+This page is the landing page for the complete bilingual paper package.
+
+- [Complete English manuscript](MANUSCRIPT_EN.md)
+- [完整中文论文](MANUSCRIPT_ZH.md)
+- [Concise Chinese validation report](REPORT_ZH.md)
+
+![Method workflow](figures/00_method_workflow.png)
+
+The full method keeps the Phase 39 architecture unchanged and adds:
 
 - second-by-second causal-prefix training;
 - physically consistent moment-scaling augmentation;
@@ -88,9 +95,18 @@ The figure workflow reads only persisted internal-validation predictions and
 the corresponding validation waveform/coordinate records. It does not score
 the test split and does not load the eight external events.
 
-- [Detailed Chinese report](REPORT_ZH.md)
+- [Complete English manuscript](MANUSCRIPT_EN.md)
+- [Complete Chinese manuscript](MANUSCRIPT_ZH.md)
+- [Concise Chinese report](REPORT_ZH.md)
 - [Machine-readable experiment summary](summary.json)
-- [Figure manifest](figures/figure_manifest.json)
+- [English figure manifest](figures/figure_manifest.json)
+- [Chinese figure manifest](figures/zh/figure_manifest.json)
+- [Chinese method figure](figures/zh/00_method_workflow.png)
+- [Chinese result overview](figures/zh/result_overview.png)
+- [Chinese prediction scatter](figures/zh/01_prediction_scatter.png)
+- [Chinese station convergence](figures/zh/02_station_convergence_scatter.png)
+- [Chinese waveform and Mw trajectory](figures/zh/03_parkfield_pgd_and_mw.png)
+- [Chinese selected-event maps](figures/zh/04_selected_event_maps.png)
 - [Reproducible plotting script](../../../scripts/plotting/plot_phase39_moment_scaling_explainer.py)
 
 The result supports the full causal moment-scaling method as a promising
