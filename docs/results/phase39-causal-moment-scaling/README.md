@@ -1,40 +1,99 @@
-# Phase 39 因果前缀矩率缩放验证结果
+# Phase 39 Causal Moment-Scaling Validation
 
-![Phase 39 causal moment-scaling validation overview](figures/result_overview.png)
+This page explains the current Phase 39 causal-prefix model with English-only
+figures. The full method keeps the Phase 39 architecture unchanged and adds:
 
-## 方法
+- second-by-second causal-prefix training;
+- physically consistent moment-scaling augmentation;
+- the required synthesized-waveform constraint, `lambda_synth = 0.5`;
+- a soft error-descent constraint that allows short-term fluctuations.
 
-在 Phase 39 网络结构和参数量不变的前提下，加入：
+Moment scaling samples `delta_Mw in [-0.75, 0.5]` and applies
+`a = 10^(1.5 * delta_Mw)` to both the observed waveform and STF, while changing
+the target to `Mw + delta_Mw`. Geometry and arrival timing remain unchanged.
 
-- 逐秒因果前缀训练；
-- 物理一致矩率缩放增强；
-- `lambda_synth = 0.5` 合成波形约束；
-- 允许小幅波动的误差下降约束。
+## Validation summary
 
-矩率缩放采样 `delta_Mw in [-0.75, 0.5]`，并使用
-`a = 10^(1.5 * delta_Mw)` 同时缩放观测波形和 STF，监督震级改为
-`Mw + delta_Mw`。距离、方位、到时和有效掩码保持不变。
+![Overall internal-validation summary](figures/result_overview.png)
 
-## 内部验证结果
-
-| Fold | Seed | Phase 39 endpoint MAE | 新方法 endpoint MAE | 改善 |
+| Fold | Seed | Phase 39 endpoint MAE | Full-method endpoint MAE | Improvement |
 |---:|---:|---:|---:|---:|
 | 0 | 73 | 0.23808 | **0.13784** | 0.10024 |
 | 0 | 42 | 0.25944 | **0.16000** | 0.09944 |
 | 1 | 73 | 0.19228 | **0.12154** | 0.07073 |
 
-新方法平均 endpoint MAE 为 `0.13979 +/- 0.01930 Mw`，三次运行均低于
-`0.20 Mw` 和 `0.17 Mw`。
+The three-run full-method mean is `0.13979 +/- 0.01930 Mw`. These are internal
+validation results, not test-fold or external-event results.
 
-代表性运行 Fold 0 / Seed 73 在 200 秒时达到 `0.13784 Mw`，最低逐秒
-MAE 为 `0.13349 Mw @ 195 s`。Parkfield2004 改善明显，但 Noto2024 有
-退化，因此正式评估必须同时报告逐事件结果。
+## 1. True versus estimated magnitude
 
-## 结果边界
+![Event and station magnitude scatter](figures/01_prediction_scatter.png)
 
-这些结果仅来自内部验证事件，不是测试折结果，也不是 8 个外部未见事件。
-本轮没有读取或评分测试折和外部事件。当前比较也不能单独证明全部改善都来自
-矩率缩放，后续仍需要固定配置的单变量消融和五折 OOF 验证。
+Panel A uses the primary evaluation rule: one median estimate per event, with
+all six validation events weighted equally. Panels B and C show all 424 station
+estimates. This distinction matters: the full method improves the equal-event
+endpoint MAE, but station-weighted MAE changes from `0.288` to `0.391 Mw` because
+Noto contributes 375 of 424 stations and degrades under the full method.
 
-更完整的说明见 [REPORT_ZH.md](REPORT_ZH.md)，机器可读汇总见
-[summary.json](summary.json)。
+## 2. Station estimates over time
+
+![Selected-event station convergence](figures/02_station_convergence_scatter.png)
+
+- **Parkfield:** the full method substantially reduces the Phase 39
+  overestimate, but still ends about `+0.32 Mw` high.
+- **Noto:** the full method becomes more positively biased, which is the main
+  current failure case.
+- **Maule:** estimates remain low for much of the record and converge near the
+  catalog magnitude at 200 s.
+
+The individual station dots need not improve monotonically. The intended
+behavior is an overall reduction and late-time stabilization of event-level
+error.
+
+## 3. PGD waveform and causal magnitude evolution
+
+![Parkfield waveform, PGD, and causal Mw](figures/03_parkfield_pgd_and_mw.png)
+
+This example uses the validation station `Parkfield2004::HOGS`, located about
+12 km from the epicenter. Panel A is the radial displacement used by the R-only
+model. Panel B shows the three-component displacement norm and cumulative PGD,
+which reaches `11.46 cm`. Panel C shows the event-median estimate recomputed for
+every causal prefix from 1 to 200 s.
+
+The full method moves Parkfield from the Phase 39 endpoint near `Mw 6.93` to
+about `Mw 6.29`, versus catalog `Mw 5.97`. This is a large improvement, but the
+event still remains outside the `+/-0.20 Mw` band.
+
+## 4. Epicenters and station distributions
+
+![Selected-event maps](figures/04_selected_event_maps.png)
+
+Station color is the 200 s residual, `estimated Mw - catalog Mw`, clipped to
+`[-1, +1] Mw` on a shared scale. The maps connect station geometry with the
+prediction behavior:
+
+- Parkfield stations are close to the source and remain consistently high.
+- Noto has a dense Japanese network with widespread positive residuals.
+- Maule stations span a long north-south aperture and have mixed residuals.
+
+Full-resolution maps:
+
+- [Parkfield station map](figures/04_parkfield2004_station_map.png)
+- [Noto station map](figures/04_noto2024_station_map.png)
+- [Maule station map](figures/04_maule2010_station_map.png)
+
+## Scope and reproducibility
+
+The figure workflow reads only persisted internal-validation predictions and
+the corresponding validation waveform/coordinate records. It does not score
+the test split and does not load the eight external events.
+
+- [Detailed Chinese report](REPORT_ZH.md)
+- [Machine-readable experiment summary](summary.json)
+- [Figure manifest](figures/figure_manifest.json)
+- [Reproducible plotting script](../../../scripts/plotting/plot_phase39_moment_scaling_explainer.py)
+
+The result supports the full causal moment-scaling method as a promising
+validation candidate. It does not yet isolate the effect of moment scaling from
+the other causal-training changes, and it does not establish final test or
+external-event performance.

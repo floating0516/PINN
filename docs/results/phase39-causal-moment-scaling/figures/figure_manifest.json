@@ -1,0 +1,33 @@
+{
+  "status": "complete",
+  "figure_language": "English",
+  "role": "internal_validation_explainer",
+  "fold": 0,
+  "seed": 73,
+  "validation_events": [
+    "Anchorage2018",
+    "Maule2010",
+    "Noto2024",
+    "Parkfield2004",
+    "RatIslands2014",
+    "SandPoint2020"
+  ],
+  "validation_station_count": 424,
+  "selected_events": [
+    "Parkfield2004",
+    "Noto2024",
+    "Maule2010"
+  ],
+  "waveform_sample": "Parkfield2004::HOGS",
+  "test_split_scored": false,
+  "external_events_loaded": false,
+  "figures": [
+    "01_prediction_scatter.png",
+    "02_station_convergence_scatter.png",
+    "03_parkfield_pgd_and_mw.png",
+    "04_selected_event_maps.png",
+    "04_parkfield2004_station_map.png",
+    "04_noto2024_station_map.png",
+    "04_maule2010_station_map.png"
+  ]
+}
