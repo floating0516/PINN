@@ -1,0 +1,59 @@
+{
+  "status": "complete",
+  "decision_role": "validation_screen_before_frozen_grouped_oof",
+  "method": "Phase39 direct causal prefix with paired physical moment scaling",
+  "architecture_changed": false,
+  "lambda_synth": 0.5,
+  "moment_scale_delta_min_mw": -0.75,
+  "moment_scale_delta_max_mw": 0.5,
+  "moment_scale_factor": "10 ** (1.5 * delta_mw)",
+  "test_split_iterated": false,
+  "external_events_loaded": false,
+  "runs": [
+    {
+      "fold": 0,
+      "seed": 73,
+      "best_epoch": 139,
+      "phase39_endpoint_event_mae_mw": 0.23807891209920248,
+      "candidate_endpoint_event_mae_mw": 0.13783550262451172,
+      "improvement_mw": 0.10024340947469076,
+      "minimum_event_mae_mw": 0.1334864298502604,
+      "minimum_event_mae_horizon_sec": 195,
+      "post120_event_abs_step_p95_mw": 0.019470453262329095,
+      "run_root": "/home/lihe/PINN_Mag/runs/phase39-causal-direct-moment-scale-20260830-fold0-seed73"
+    },
+    {
+      "fold": 0,
+      "seed": 42,
+      "best_epoch": 187,
+      "phase39_endpoint_event_mae_mw": 0.2594382365544637,
+      "candidate_endpoint_event_mae_mw": 0.15999913215637207,
+      "improvement_mw": 0.09943910439809162,
+      "minimum_event_mae_mw": 0.15982909997304282,
+      "minimum_event_mae_horizon_sec": 194,
+      "post120_event_abs_step_p95_mw": 0.020545506477355934,
+      "run_root": "/home/lihe/PINN_Mag/runs/phase39-causal-direct-moment-scale-20260830-fold0-seed42"
+    },
+    {
+      "fold": 1,
+      "seed": 73,
+      "best_epoch": 54,
+      "phase39_endpoint_event_mae_mw": 0.1922750473022461,
+      "candidate_endpoint_event_mae_mw": 0.12154205640157063,
+      "improvement_mw": 0.07073299090067546,
+      "minimum_event_mae_mw": 0.09284794330596924,
+      "minimum_event_mae_horizon_sec": 159,
+      "post120_event_abs_step_p95_mw": 0.018436813354492168,
+      "run_root": "/home/lihe/PINN_Mag/runs/phase39-causal-direct-moment-scale-20260830-fold1-seed73"
+    }
+  ],
+  "aggregate": {
+    "candidate_endpoint_event_mae_mean_mw": 0.13979223039415148,
+    "candidate_endpoint_event_mae_sample_std_mw": 0.019303063398745643,
+    "phase39_endpoint_event_mae_mean_mw": 0.2299307319853041,
+    "mean_improvement_mw": 0.09013850159115261,
+    "all_runs_below_0p20": true,
+    "all_runs_below_0p17": true
+  },
+  "next_step": "freeze this configuration and implement a five-fold OOF confirmatory campaign without further validation-driven tuning"
+}
