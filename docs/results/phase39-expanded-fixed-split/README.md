@@ -103,6 +103,30 @@ event aggregation. The empirical formulas use three-component PGD, while Phase
 without fitting on this dataset. Crowell has the lowest event MAE on this small
 fixed test cohort; Phase 39 is not the best method under this endpoint metric.
 
+<!-- causal-event-trajectories:start -->
+## Causal Event Magnitude Trajectories
+
+![Causal event magnitude trajectories](figures/en/11_causal_event_magnitude_trajectories.png)
+
+[PDF](figures/en/11_causal_event_magnitude_trajectories.pdf) |
+[Selected event trajectory data](analysis/causal_selected_event_trajectories.csv) |
+[Causal test summary](analysis/causal_test_summary.json)
+
+This separate follow-up experiment uses a validation-frozen causal Phase 39
+checkpoint and reports event-median estimates at every observed prefix from
+1 to 200 seconds for Phase 39, with empirical PGD estimates shown wherever PGD
+is defined. Each panel compares causal Phase 39 with the cumulative-PGD Crowell
+2013, Ruhl 2019, and Melgar 2015 relations; the dotted horizontal line is the
+catalog magnitude. The selected events include the two dominant failures,
+sparse and dense station networks, and both moderate and large earthquakes.
+Figures 1-10 above remain the original endpoint experiment.
+
+该图为单独的逐秒因果前缀实验。每个子图同时绘制因果 Phase 39、Crowell、
+Ruhl 和 Melgar 四条震级估计曲线；经验 PGD 在存在有效值的时刻绘制，水平
+虚线为目录震级。前面的图 1-10 仍然对应原始 200 秒终点实验，数值和图件
+均未改变。
+<!-- causal-event-trajectories:end -->
+
 ## Supplementary Protocol Diagnostics
 
 ![Frozen data split](figures/en/09_split_overview_supplement.png)

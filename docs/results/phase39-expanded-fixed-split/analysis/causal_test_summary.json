@@ -1,0 +1,183 @@
+{
+  "artifacts": {
+    "event_predictions_path": "/home/lihe/PINN_Mag/runs/phase39-causal-expanded-fixed-test-20260831-v1/test_event_predictions.csv",
+    "event_predictions_sha256": "e6fb5df9b468ff4fee7eaeb4f606fdafb1530185e581247d09fbfce5c56b0d59",
+    "horizon_metrics_path": "/home/lihe/PINN_Mag/runs/phase39-causal-expanded-fixed-test-20260831-v1/test_horizon_metrics.csv",
+    "horizon_metrics_sha256": "d9d75364809182f110b82e4c24d9dff8b72afcd3c6d88f4b78c19485bea9ea97",
+    "station_predictions_path": "/home/lihe/PINN_Mag/runs/phase39-causal-expanded-fixed-test-20260831-v1/test_anchor_station_predictions.csv",
+    "station_predictions_sha256": "4e8ff27c520fd8e1ccf01689b5b1aa2d9aad88b099387615b1b7e3085f34e5b7"
+  },
+  "checkpoint_path": "/home/lihe/PINN_Mag/runs/phase39-causal-expanded-fixed-seed73-20260831-v1/best_model.pth",
+  "checkpoint_sha256": "4a2540241fcbd9182edd05fb5fdb24641b1c836fa1ccd2ad12b101f91fa3e1ab",
+  "direct_endpoint_events": [
+    {
+      "error_vs_catalog": 0.3266310691833496,
+      "error_vs_stf_native": 0.28095102310180664,
+      "event": "2016p661332",
+      "method": "direct",
+      "mw_catalog": 7.099999904632568,
+      "mw_pred_median": 7.426630973815918,
+      "mw_stf_native": 7.145679950714111,
+      "n_stations": 7,
+      "observation_horizon_sec": 200,
+      "pred_iqr": 0.20157361030578613,
+      "pred_std": 0.1406480198972831
+    },
+    {
+      "error_vs_catalog": 0.08637356758117676,
+      "error_vs_stf_native": 0.07660603523254395,
+      "event": "Ecuador2016",
+      "method": "direct",
+      "mw_catalog": 7.800000190734863,
+      "mw_pred_median": 7.88637375831604,
+      "mw_stf_native": 7.809767723083496,
+      "n_stations": 20,
+      "observation_horizon_sec": 200,
+      "pred_iqr": 0.5630121231079102,
+      "pred_std": 0.41110841331658493
+    },
+    {
+      "error_vs_catalog": -0.17627334594726562,
+      "error_vs_stf_native": 0.07395410537719727,
+      "event": "Iquique2014",
+      "method": "direct",
+      "mw_catalog": 8.199999809265137,
+      "mw_pred_median": 8.023726463317871,
+      "mw_stf_native": 7.949772357940674,
+      "n_stations": 20,
+      "observation_horizon_sec": 200,
+      "pred_iqr": 0.6225707530975342,
+      "pred_std": 0.3733033614056815
+    },
+    {
+      "error_vs_catalog": 0.6664206981658936,
+      "error_vs_stf_native": 0.5055596828460693,
+      "event": "Napa2014",
+      "method": "direct",
+      "mw_catalog": 6.019999980926514,
+      "mw_pred_median": 6.686420679092407,
+      "mw_stf_native": 6.180860996246338,
+      "n_stations": 28,
+      "observation_horizon_sec": 200,
+      "pred_iqr": 0.6533831357955933,
+      "pred_std": 0.5549256384092671
+    },
+    {
+      "error_vs_catalog": -0.16747474670410156,
+      "error_vs_stf_native": -0.1765885353088379,
+      "event": "Puebla2017",
+      "method": "direct",
+      "mw_catalog": 7.099999904632568,
+      "mw_pred_median": 6.932525157928467,
+      "mw_stf_native": 7.109113693237305,
+      "n_stations": 2,
+      "observation_horizon_sec": 200,
+      "pred_iqr": 0.06813859939575195,
+      "pred_std": 0.06813859939575195
+    },
+    {
+      "error_vs_catalog": -0.08817625045776367,
+      "error_vs_stf_native": -0.07445812225341797,
+      "event": "Ridgecrest2019",
+      "method": "direct",
+      "mw_catalog": 7.099999904632568,
+      "mw_pred_median": 7.011823654174805,
+      "mw_stf_native": 7.086281776428223,
+      "n_stations": 130,
+      "observation_horizon_sec": 200,
+      "pred_iqr": 0.28486132621765137,
+      "pred_std": 0.23120904664948197
+    },
+    {
+      "error_vs_catalog": -0.036956787109375,
+      "error_vs_stf_native": 0.06598758697509766,
+      "event": "Tokachi2003",
+      "method": "direct",
+      "mw_catalog": 8.15999984741211,
+      "mw_pred_median": 8.123043060302734,
+      "mw_stf_native": 8.057055473327637,
+      "n_stations": 228,
+      "observation_horizon_sec": 200,
+      "pred_iqr": 0.478969931602478,
+      "pred_std": 0.30850675036807074
+    },
+    {
+      "error_vs_catalog": 1.272101640701294,
+      "error_vs_stf_native": 1.2058756351470947,
+      "event": "ak014cbigci8",
+      "method": "direct",
+      "mw_catalog": 6.199999809265137,
+      "mw_pred_median": 7.472101449966431,
+      "mw_stf_native": 6.266225814819336,
+      "n_stations": 4,
+      "observation_horizon_sec": 200,
+      "pred_iqr": 0.17677128314971924,
+      "pred_std": 0.227482292062579
+    },
+    {
+      "error_vs_catalog": -0.24012994766235352,
+      "error_vs_stf_native": -0.28183746337890625,
+      "event": "us7000i9bw",
+      "method": "direct",
+      "mw_catalog": 7.599999904632568,
+      "mw_pred_median": 7.359869956970215,
+      "mw_stf_native": 7.641707420349121,
+      "n_stations": 11,
+      "observation_horizon_sec": 200,
+      "pred_iqr": 0.17380094528198242,
+      "pred_std": 0.1560173735338873
+    }
+  ],
+  "evaluated_at_utc": "2026-08-31T13:37:22.893442+00:00",
+  "interpretation_guard": "The method was frozen on fixed validation before this replay. The nine-event cohort had previously been inspected by separate endpoint experiments, so it is an internal fixed test rather than a pristine never-observed external cohort.",
+  "lambda_synth": 0.5,
+  "method_frozen_from_validation": true,
+  "moment_scale_augmentation_weight": 1.0,
+  "split_assignment_sha256": "e4807aa1e6b5b389caf23974f62ff9da6b8add7f7887ec23a59d5d35a455eba7",
+  "status": "complete",
+  "test_event_count": 9,
+  "test_station_count": 450,
+  "test_training_or_selection_performed": false,
+  "trajectory": {
+    "crowell": {
+      "endpoint_band_upper_mw": 0.36104161233689136,
+      "endpoint_event_mae_mw": 0.31104161233689137,
+      "mae_decreasing_step_fraction": 0.864321608040201,
+      "mae_linear_slope_mw_per_sec": -0.002874717378490127,
+      "minimum_event_mae_horizon_sec": 136,
+      "minimum_event_mae_mw": 0.298821362149536,
+      "post120_event_abs_step_p95_mw": 0.0,
+      "stable_horizon_within_endpoint_band_sec": 87
+    },
+    "direct": {
+      "endpoint_band_upper_mw": 0.3900597837236192,
+      "endpoint_event_mae_mw": 0.3400597837236192,
+      "mae_decreasing_step_fraction": 0.6432160804020101,
+      "mae_linear_slope_mw_per_sec": -0.001432699552441418,
+      "minimum_event_mae_horizon_sec": 121,
+      "minimum_event_mae_mw": 0.32017766104804146,
+      "post120_event_abs_step_p95_mw": 0.017827332019805867,
+      "stable_horizon_within_endpoint_band_sec": 77
+    },
+    "melgar": {
+      "endpoint_band_upper_mw": 0.4069705568018607,
+      "endpoint_event_mae_mw": 0.3569705568018607,
+      "mae_decreasing_step_fraction": 0.9095477386934674,
+      "mae_linear_slope_mw_per_sec": -0.004619025104800858,
+      "minimum_event_mae_horizon_sec": 154,
+      "minimum_event_mae_mw": 0.3523569936402295,
+      "post120_event_abs_step_p95_mw": 0.002859186374298681,
+      "stable_horizon_within_endpoint_band_sec": 100
+    },
+    "ruhl": {
+      "endpoint_band_upper_mw": 0.49482227958968084,
+      "endpoint_event_mae_mw": 0.44482227958968085,
+      "mae_decreasing_step_fraction": 0.9346733668341709,
+      "mae_linear_slope_mw_per_sec": -0.005409199230846256,
+      "minimum_event_mae_horizon_sec": 154,
+      "minimum_event_mae_mw": 0.4380550379025552,
+      "post120_event_abs_step_p95_mw": 0.0031827678860913535,
+      "stable_horizon_within_endpoint_band_sec": 101
+    }
+  }
+}

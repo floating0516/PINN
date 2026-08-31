@@ -1,11 +1,21 @@
 {
-  "created_at_utc": "2026-08-31T10:59:25+00:00",
-  "file_count": 36,
+  "created_at_utc": "2026-08-31T14:12:10+00:00",
+  "file_count": 40,
   "files": [
     {
       "path": "README.md",
-      "sha256": "a9601f51ef9acde72fcfe205f0a0d59d8a2f11a7ee812161344b7501c7172c28",
-      "size_bytes": 7322
+      "sha256": "b2ce3c1fb5c7eb8c15abda5880c3333e4ea21d098841a47a96c932979b2164e1",
+      "size_bytes": 8653
+    },
+    {
+      "path": "analysis/causal_selected_event_trajectories.csv",
+      "sha256": "0b4520a101361ca79c6f46d3023e9991abd5ec6f2885c37cc3133945801237ba",
+      "size_bytes": 570780
+    },
+    {
+      "path": "analysis/causal_test_summary.json",
+      "sha256": "bcb1c9f4c06f5e471d0b8144bf85dfddc6f308d84d61712fcc77832efa130b27",
+      "size_bytes": 7277
     },
     {
       "path": "analysis/pgd_event_predictions.csv",
@@ -151,6 +161,16 @@
       "path": "figures/en/10_seed_validation_selection_supplement.png",
       "sha256": "9ec600609b73b6b9e2b1c2f7b95b7a7450e5af4a78a8953251c24c5008d6d61d",
       "size_bytes": 263693
+    },
+    {
+      "path": "figures/en/11_causal_event_magnitude_trajectories.pdf",
+      "sha256": "001ff358ffd42184a520369bcca202d2d44e676bb2f7e4b80a6ac004cd3bfa8d",
+      "size_bytes": 53918
+    },
+    {
+      "path": "figures/en/11_causal_event_magnitude_trajectories.png",
+      "sha256": "efe587770e7cb088a499a606bc380a19eb1464e1306e7e3c06412212586b09af",
+      "size_bytes": 548094
     },
     {
       "path": "fixed_split_manifest.json",
