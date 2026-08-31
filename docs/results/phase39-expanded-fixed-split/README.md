@@ -22,31 +22,26 @@ selected only by the six fixed validation events. The nine-event test cohort
 was evaluated once after seed 73 had been selected; test results were not
 averaged across seeds and were not used for model selection.
 
-![Frozen data split](figures/en/01_split_overview.png)
+## Event-Level Test Estimates
 
-[PDF](figures/en/01_split_overview.pdf) |
-[Fixed split manifest](fixed_split_manifest.json)
+![Test event estimates](figures/en/01_test_event_scatter.png)
 
-## Validation-Only Seed Selection
-
-![Seed validation selection](figures/en/02_seed_validation_selection.png)
-
-[PDF](figures/en/02_seed_validation_selection.pdf) |
-[Seed selection table](analysis/seed_selection.csv)
-
-Seed 73 reached the lowest validation event MAE, `0.171305 Mw`,
-at epoch 61. This validation number is not the independent test result.
-
-## Held-Out Test Events
-
-![Test event estimates](figures/en/03_test_event_scatter.png)
-
-[PDF](figures/en/03_test_event_scatter.pdf) |
+[PDF](figures/en/01_test_event_scatter.pdf) |
 [Event prediction table](selected_test_event_predictions.csv)
 
-![Signed test event errors](figures/en/04_test_event_signed_errors.png)
+## Station-Level Test Estimates
 
-[PDF](figures/en/04_test_event_signed_errors.pdf) |
+![Station-level test estimates](figures/en/02_test_station_scatter.png)
+
+[PDF](figures/en/02_test_station_scatter.pdf) |
+[Station predictions](selected_test_station_predictions.csv) |
+[Per-event station summary](analysis/test_event_station_summary.csv)
+
+## Event Errors
+
+![Absolute test event errors](figures/en/03_test_event_absolute_errors.png)
+
+[PDF](figures/en/03_test_event_absolute_errors.pdf) |
 [Event error analysis](analysis/test_event_error_analysis.csv)
 
 The six legacy test events have MAE `0.295774 Mw`; the three newly
@@ -54,20 +49,48 @@ added test events have MAE `0.457381 Mw`. The two largest failures
 are Napa2014 and `ak014cbigci8`. Excluding them only for diagnosis, the remaining
 seven-event MAE is `0.189102 Mw`; this is not the headline metric.
 
-## Station-Level Test Results
-
-![Station-level test estimates](figures/en/05_test_station_predictions.png)
-
-[PDF](figures/en/05_test_station_predictions.pdf) |
-[Station predictions](selected_test_station_predictions.csv) |
-[Per-event station summary](analysis/test_event_station_summary.csv)
-
 ## Selected Training Run
 
-![Selected seed training history](figures/en/06_selected_seed_training.png)
+![Selected seed training history](figures/en/04_selected_seed_training_curves.png)
 
-[PDF](figures/en/06_selected_seed_training.pdf) |
+[PDF](figures/en/04_selected_seed_training_curves.pdf) |
 [Seed 73 training log](analysis/training_logs/seed_73.csv)
+
+## Selected Test-Event Maps
+
+![Selected test-event maps](figures/en/05_selected_test_event_maps.png)
+
+[PDF](figures/en/05_selected_test_event_maps.pdf)
+
+The maps show Napa2014, `us7000i9bw`, and Ridgecrest2019. Station color is the
+seed-73 endpoint residual relative to catalog magnitude; the star is the
+catalog epicenter.
+
+## Representative Waveform And PGD
+
+![Representative waveform and PGD](figures/en/06_ridgecrest_waveform_and_predictions.png)
+
+[PDF](figures/en/06_ridgecrest_waveform_and_predictions.pdf)
+
+This figure shows one Ridgecrest2019 station waveform, the three-component norm
+and cumulative PGD, and the selected model's station/event endpoint estimates.
+It does not show a second-by-second magnitude prediction.
+
+## Supplementary Protocol Diagnostics
+
+![Frozen data split](figures/en/07_split_overview_supplement.png)
+
+[PDF](figures/en/07_split_overview_supplement.pdf) |
+[Fixed split manifest](fixed_split_manifest.json)
+
+![Seed validation selection](figures/en/08_seed_validation_selection_supplement.png)
+
+[PDF](figures/en/08_seed_validation_selection_supplement.pdf) |
+[Seed selection table](analysis/seed_selection.csv)
+
+Seed 73 reached the lowest validation event MAE,
+`0.171305 Mw`, at epoch 61. This
+validation number is not the independent test result.
 
 ## Interpretation
 
@@ -112,3 +135,8 @@ Reproduction code:
 测试误差主要由 Napa2014 和 `ak014cbigci8` 拉高，因此目前不能用验证集的
 `0.1713 Mw` 代替独立测试结果。正式测试结论仍然是九事件 MAE
 `0.349643 Mw`。
+
+本页主图已经恢复为前一版论文式图鉴：事件散点、台站密度与事件中位数、
+事件绝对误差、训练曲线、事件地图以及代表性波形/PGD。数据划分和随机种子
+选择图保留为补充诊断图。所有震级结果均为固定 200 秒输入后的终点估计，
+不是逐秒因果预测。

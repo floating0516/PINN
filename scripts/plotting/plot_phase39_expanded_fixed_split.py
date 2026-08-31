@@ -2,15 +2,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import shutil
+import subprocess
 import sys
+import tempfile
 from typing import Any, Sequence
 
 import matplotlib.pyplot as plt
+from matplotlib.colors import TwoSlopeNorm
 from matplotlib.lines import Line2D
 import numpy as np
 import pandas as pd
+import yaml
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -30,10 +35,16 @@ EXPECTED_ROLE_COUNTS = {
     "test": (9, 450),
 }
 EXPECTED_SEEDS = (17, 42, 73)
+MAP_EVENTS = ("Napa2014", "us7000i9bw", "Ridgecrest2019")
+WAVEFORM_EVENT = "Ridgecrest2019"
 
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from scripts.experiments import run_phase39_confirmatory_grouped_cv as grouped
+from scripts.plotting.plot_phase39_moment_scaling_explainer import (
+    iter_selected_records,
+)
 from src.utils.provenance import sha256_file, utc_now_iso
 
 
@@ -49,6 +60,7 @@ COLORS = {
     "truth": "#202124",
     "grid": "#D7DCE2",
     "target": "#E9A23B",
+    "station": "#6C757D",
 }
 SEED_COLORS = {
     17: "#4C78A8",
@@ -97,6 +109,11 @@ def save_figure(figure: plt.Figure, output_stem: Path) -> list[Path]:
         generated.append(path)
     plt.close(figure)
     return generated
+
+
+def identity_limits(*series: pd.Series, padding: float = 0.16) -> tuple[float, float]:
+    values = np.concatenate([item.to_numpy(dtype=float) for item in series])
+    return float(np.nanmin(values) - padding), float(np.nanmax(values) + padding)
 
 
 def _candidate_inputs(run_root: Path) -> tuple[pd.DataFrame, dict[int, pd.DataFrame]]:
@@ -422,41 +439,35 @@ def plot_test_event_scatter(events: pd.DataFrame, output_stem: Path) -> list[Pat
 
 
 def plot_event_errors(events: pd.DataFrame, output_stem: Path) -> list[Path]:
-    rows = events.sort_values("error_vs_catalog")
-    figure, axis = plt.subplots(figsize=(10.2, 6.2), constrained_layout=True)
+    rows = events.sort_values("absolute_error", ascending=True).reset_index(drop=True)
+    figure, axis = plt.subplots(figsize=(10.5, 6.4), constrained_layout=True)
     y = np.arange(len(rows))
-    errors = rows["error_vs_catalog"].to_numpy(dtype=float)
-    colors = [
-        COLORS["positive"] if value >= 0 else COLORS["negative"]
-        for value in errors
-    ]
-    axis.axvspan(-0.2, 0.2, color=COLORS["target"], alpha=0.13)
-    axis.axvline(0.0, color=COLORS["truth"], linewidth=1.0)
-    for y_value, error, color in zip(y, errors, colors):
-        axis.plot([0.0, error], [y_value, y_value], color=color, linewidth=2.2)
-    axis.scatter(errors, y, color=colors, s=58, edgecolor="white", linewidth=0.7, zorder=3)
+    colors = [COLORS[value] for value in rows["test_class"]]
+    bars = axis.barh(y, rows["absolute_error"], color=colors, alpha=0.92)
+    axis.axvline(0.2, color=COLORS["target"], linewidth=1.5, linestyle="--")
     axis.set_yticks(y, rows["event"])
-    for y_value, row in zip(y, rows.itertuples(index=False)):
+    label_limit = max(0.45, float(rows["absolute_error"].max()) * 1.18)
+    axis.set_xlim(0.0, label_limit)
+    for bar, row in zip(bars, rows.itertuples(index=False)):
         axis.text(
-            float(row.error_vs_catalog) + 0.025,
-            y_value + 0.18,
-            f"{row.error_vs_catalog:+.3f}  (n={row.n_stations})",
-            va="bottom",
+            float(row.absolute_error) + label_limit * 0.012,
+            bar.get_y() + bar.get_height() / 2,
+            f"{row.absolute_error:.3f} (signed {row.error_vs_catalog:+.3f})",
+            va="center",
             ha="left",
             fontsize=8.2,
         )
-    axis.set_xlim(min(-0.42, errors.min() - 0.16), max(1.14, errors.max() + 0.16))
-    axis.set_xlabel("Estimated minus catalog magnitude (Mw)")
+    axis.set_xlabel("Absolute endpoint magnitude error (Mw)")
     axis.set_title(
-        "Signed test-event errors; labels show error and station count",
+        "Absolute error for the nine held-out test earthquakes",
         loc="left",
         fontweight="bold",
     )
     axis.grid(axis="x", color=COLORS["grid"], linewidth=0.6)
     legend = [
-        Line2D([0], [0], color=COLORS["positive"], marker="o", label="Overestimate"),
-        Line2D([0], [0], color=COLORS["negative"], marker="o", label="Underestimate"),
-        Line2D([0], [0], color=COLORS["target"], linewidth=8, alpha=0.25, label="+/-0.20 Mw"),
+        Line2D([0], [0], color=COLORS["legacy"], linewidth=7, label="Legacy test event"),
+        Line2D([0], [0], color=COLORS["new"], linewidth=7, label="New test event"),
+        Line2D([0], [0], color=COLORS["target"], linestyle="--", label="0.20 Mw target"),
     ]
     axis.legend(handles=legend, frameon=False, loc="lower right")
     return save_figure(figure, output_stem)
@@ -467,76 +478,59 @@ def plot_station_predictions(
     events: pd.DataFrame,
     output_stem: Path,
 ) -> list[Path]:
-    figure, axes = plt.subplots(1, 2, figsize=(14.5, 6.0), constrained_layout=True)
-    lower = float(min(stations["mw_catalog"].min(), stations["mw_pred"].min()) - 0.2)
-    upper = float(max(stations["mw_catalog"].max(), stations["mw_pred"].max()) + 0.2)
-    line = np.linspace(lower, upper, 200)
-    axes[0].fill_between(line, line - 0.2, line + 0.2, color=COLORS["target"], alpha=0.12)
-    axes[0].plot(line, line, color=COLORS["truth"], linewidth=1.1)
+    figure, axes = plt.subplots(1, 2, figsize=(13.0, 5.7), constrained_layout=True)
+    lower, upper = identity_limits(stations["mw_catalog"], stations["mw_pred"])
+    for axis in axes:
+        axis.plot([lower, upper], [lower, upper], color=COLORS["truth"], linewidth=1.1)
+        axis.set_xlim(lower, upper)
+        axis.set_ylim(lower, upper)
+        axis.set_xlabel("Catalog magnitude (Mw)")
+        axis.set_ylabel("Endpoint estimated magnitude (Mw)")
+        axis.grid(True, color=COLORS["grid"], linewidth=0.55)
     density = axes[0].hexbin(
         stations["mw_catalog"],
         stations["mw_pred"],
-        gridsize=38,
+        gridsize=42,
         mincnt=1,
         cmap="viridis",
         linewidths=0.0,
     )
     figure.colorbar(density, ax=axes[0], pad=0.02, label="Station count")
-    for category, marker in (("legacy", "o"), ("new", "^")):
+    axes[0].set_title("A. All 450 station estimates", loc="left", fontweight="bold")
+    axes[1].scatter(
+        stations["mw_catalog"],
+        stations["mw_pred"],
+        s=9,
+        color=COLORS["station"],
+        alpha=0.16,
+        linewidth=0,
+        rasterized=True,
+        label="Stations",
+    )
+    for category, marker, size, label in (
+        ("legacy", "o", 52, "Legacy event median"),
+        ("new", "^", 78, "New event median"),
+    ):
         rows = events[events["test_class"] == category]
-        axes[0].scatter(
+        axes[1].scatter(
             rows["mw_catalog"],
             rows["mw_pred_median"],
             marker=marker,
-            s=72,
+            s=size,
             color=COLORS[category],
             edgecolor="white",
             linewidth=0.7,
-            label=f"{category.title()} event median",
+            label=label,
             zorder=3,
         )
-    axes[0].set_xlim(lower, upper)
-    axes[0].set_ylim(lower, upper)
-    axes[0].set_xlabel("Catalog magnitude (Mw)")
-    axes[0].set_ylabel("Station estimate (Mw)")
-    axes[0].set_title("A. All 450 station estimates", loc="left", fontweight="bold")
-    axes[0].grid(True, color=COLORS["grid"], linewidth=0.55)
-    axes[0].legend(frameon=False, loc="lower right", fontsize=8.5)
-
-    event_order = events.sort_values("absolute_error")["event"].tolist()
-    arrays = [
-        stations.loc[stations["event"] == event, "error_vs_catalog"].to_numpy()
-        for event in event_order
-    ]
-    labels = [
-        f"{event} (n={len(values)})" for event, values in zip(event_order, arrays)
-    ]
-    box = axes[1].boxplot(
-        arrays,
-        orientation="horizontal",
-        tick_labels=labels,
-        patch_artist=True,
-        showfliers=True,
-        widths=0.62,
-        flierprops={"markersize": 2.5, "alpha": 0.35},
-        medianprops={"color": COLORS["truth"], "linewidth": 1.2},
-    )
-    class_by_event = events.set_index("event")["test_class"].to_dict()
-    for patch, event in zip(box["boxes"], event_order):
-        patch.set_facecolor(COLORS[class_by_event[event]])
-        patch.set_alpha(0.65)
-        patch.set_edgecolor("none")
-    axes[1].axvspan(-0.2, 0.2, color=COLORS["target"], alpha=0.12)
-    axes[1].axvline(0.0, color=COLORS["truth"], linewidth=1.0)
-    axes[1].set_xlabel("Station estimate minus catalog magnitude (Mw)")
     axes[1].set_title(
-        "B. Station-error distribution by event",
+        "B. Station estimates with event medians",
         loc="left",
         fontweight="bold",
     )
-    axes[1].grid(axis="x", color=COLORS["grid"], linewidth=0.55)
+    axes[1].legend(frameon=False, loc="lower right", fontsize=8.5)
     figure.suptitle(
-        "Selected seed 73: station-level held-out test predictions",
+        "Station-level endpoint magnitude estimates on the held-out test cohort",
         fontweight="bold",
     )
     return save_figure(figure, output_stem)
@@ -581,9 +575,11 @@ def plot_selected_training(
     axes[1].annotate(
         f"selected epoch {best_epoch}\n{best_mae:.3f} Mw",
         (best_epoch, best_mae),
-        xytext=(8, 12),
+        xytext=(14, 34),
         textcoords="offset points",
         fontsize=8.5,
+        bbox={"facecolor": "white", "edgecolor": COLORS["grid"], "alpha": 0.92},
+        arrowprops={"arrowstyle": "-", "color": COLORS["selected"], "linewidth": 0.8},
     )
     axes[1].set_ylim(0.14, 0.85)
     axes[1].set_xlabel("Epoch")
@@ -600,6 +596,299 @@ def plot_selected_training(
     axes[2].grid(True, color=COLORS["grid"], linewidth=0.55)
     figure.suptitle(
         "Selected seed 73 training history (lambda_synth = 0.5)",
+        fontweight="bold",
+    )
+    return save_figure(figure, output_stem)
+
+
+def coordinate_frame(
+    data_path: Path,
+    station_keys: set[tuple[str, str]],
+    selected_events: set[str],
+) -> pd.DataFrame:
+    rows = []
+    with np.load(data_path, allow_pickle=True) as data:
+        for record in iter_selected_records(data, selected_events):
+            key = (record.event, record.station)
+            if key not in station_keys:
+                continue
+            rows.append(
+                {
+                    "event": record.event,
+                    "station": record.station,
+                    "event_lon": record.event_lon,
+                    "event_lat": record.event_lat,
+                    "station_lon": record.station_lon,
+                    "station_lat": record.station_lat,
+                }
+            )
+    result = pd.DataFrame(rows).drop_duplicates(["event", "station"])
+    expected = sum(event in selected_events for event, _station in station_keys)
+    if len(result) != expected:
+        raise ValueError(
+            f"coordinate join changed: expected={expected}, actual={len(result)}"
+        )
+    return result
+
+
+def map_region(frame: pd.DataFrame) -> tuple[float, float, float, float]:
+    longitudes = np.concatenate(
+        [frame["station_lon"].to_numpy(), frame["event_lon"].to_numpy()]
+    )
+    latitudes = np.concatenate(
+        [frame["station_lat"].to_numpy(), frame["event_lat"].to_numpy()]
+    )
+    lon_span = max(float(np.ptp(longitudes)), 0.1)
+    lat_span = max(float(np.ptp(latitudes)), 0.1)
+    return (
+        float(np.min(longitudes) - max(0.08, 0.10 * lon_span)),
+        float(np.max(longitudes) + max(0.08, 0.10 * lon_span)),
+        float(np.min(latitudes) - max(0.08, 0.10 * lat_span)),
+        float(np.max(latitudes) + max(0.08, 0.10 * lat_span)),
+    )
+
+
+def coastline_segments(region: tuple[float, float, float, float]) -> list[np.ndarray]:
+    west, east, south, north = region
+    with tempfile.TemporaryDirectory(prefix="phase39-fixed-map-") as temp_name:
+        result = subprocess.run(
+            [
+                "gmt",
+                "coast",
+                f"-R{west:.6f}/{east:.6f}/{south:.6f}/{north:.6f}",
+                "-M",
+                "-W0.5p",
+                "-Dh",
+            ],
+            cwd=temp_name,
+            check=True,
+            text=True,
+            capture_output=True,
+        )
+    segments: list[np.ndarray] = []
+    current: list[tuple[float, float]] = []
+    for line in result.stdout.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith(">"):
+            if len(current) >= 2:
+                segments.append(np.asarray(current, dtype=float))
+            current = []
+            continue
+        tokens = stripped.split()
+        if len(tokens) >= 2:
+            current.append((float(tokens[0]), float(tokens[1])))
+    if len(current) >= 2:
+        segments.append(np.asarray(current, dtype=float))
+    return segments
+
+
+def plot_selected_maps(
+    station_predictions: pd.DataFrame,
+    data_path: Path,
+    output_stem: Path,
+) -> list[Path]:
+    if subprocess.run(["gmt", "--version"], capture_output=True).returncode != 0:
+        raise RuntimeError("GMT is required for station maps")
+    selected = station_predictions[
+        station_predictions["event"].isin(MAP_EVENTS)
+    ].copy()
+    selected["residual_mw"] = selected["mw_pred"] - selected["mw_catalog"]
+    keys = set(zip(selected["event"], selected["station"]))
+    coordinates = coordinate_frame(data_path, keys, set(MAP_EVENTS))
+    joined = selected.merge(
+        coordinates, on=["event", "station"], validate="one_to_one"
+    )
+    figure, axes = plt.subplots(1, 3, figsize=(17.0, 5.7), constrained_layout=True)
+    norm = TwoSlopeNorm(vmin=-0.8, vcenter=0.0, vmax=0.8)
+    station_marks = None
+    for axis, event in zip(axes, MAP_EVENTS):
+        frame = joined[joined["event"] == event]
+        if frame.empty:
+            raise ValueError(f"selected map event has no stations: {event}")
+        west, east, south, north = map_region(frame)
+        axis.set_facecolor("#EAF4FB")
+        for segment in coastline_segments((west, east, south, north)):
+            axis.plot(segment[:, 0], segment[:, 1], color="#59636E", linewidth=0.75)
+        size = 11 if len(frame) > 200 else 23 if len(frame) > 50 else 48
+        station_marks = axis.scatter(
+            frame["station_lon"],
+            frame["station_lat"],
+            c=frame["residual_mw"].clip(-0.8, 0.8),
+            cmap="coolwarm",
+            norm=norm,
+            s=size,
+            edgecolor="#263238",
+            linewidth=0.25,
+            alpha=0.88,
+            rasterized=True,
+            zorder=3,
+        )
+        axis.scatter(
+            [float(frame["event_lon"].iloc[0])],
+            [float(frame["event_lat"].iloc[0])],
+            marker="*",
+            s=220,
+            color="#F2C94C",
+            edgecolor="#202124",
+            linewidth=0.8,
+            zorder=4,
+        )
+        axis.set_xlim(west, east)
+        axis.set_ylim(south, north)
+        mean_latitude = 0.5 * (south + north)
+        axis.set_aspect(1.0 / max(math.cos(math.radians(mean_latitude)), 0.2))
+        axis.set_xlabel("Longitude (deg)")
+        axis.set_ylabel("Latitude (deg)")
+        event_error = abs(
+            float(frame["mw_pred"].median()) - float(frame["mw_catalog"].iloc[0])
+        )
+        axis.set_title(
+            f"{event}\n{len(frame)} stations | event error {event_error:.3f} Mw",
+            fontweight="bold",
+        )
+        axis.grid(True, color="#C9D3DC", linewidth=0.5, alpha=0.75)
+    if station_marks is None:
+        raise ValueError("selected map cohort is empty")
+    colorbar = figure.colorbar(
+        station_marks, ax=axes, orientation="horizontal", pad=0.08
+    )
+    colorbar.set_label(
+        "Station residual: endpoint estimated Mw - catalog Mw (clipped at +/-0.8)"
+    )
+    figure.suptitle(
+        "Epicenters, GNSS stations, and endpoint residuals for selected test events",
+        fontsize=14,
+        fontweight="bold",
+    )
+    return save_figure(figure, output_stem)
+
+
+def load_waveform_sample(
+    config_path: Path,
+    station_predictions: pd.DataFrame,
+) -> tuple[dict[str, Any], str]:
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    arm = grouped.build_arm_configs(config)["phase39"]
+    event_rows = station_predictions[
+        station_predictions["event"] == WAVEFORM_EVENT
+    ].copy()
+    if event_rows.empty:
+        raise ValueError(f"waveform event is absent from test predictions: {WAVEFORM_EVENT}")
+    event_rows["absolute_error"] = event_rows["error_vs_catalog"].abs()
+    target_error = float(event_rows["absolute_error"].median())
+    event_rows["selection_distance"] = (
+        event_rows["absolute_error"] - target_error
+    ).abs()
+    selected_station = str(
+        event_rows.sort_values(["selection_distance", "station"]).iloc[0]["station"]
+    )
+    for sample in grouped._load_dataset_samples(arm):
+        if sample["event"] == WAVEFORM_EVENT and sample["station"] == selected_station:
+            return sample, selected_station
+    raise ValueError(f"waveform sample not found: {WAVEFORM_EVENT}/{selected_station}")
+
+
+def plot_waveform_example(
+    sample: dict[str, Any],
+    selected_station: str,
+    stations: pd.DataFrame,
+    events: pd.DataFrame,
+    output_stem: Path,
+) -> list[Path]:
+    event_stations = stations[stations["event"] == WAVEFORM_EVENT].sort_values(
+        "epicentral_distance_km"
+    )
+    event_row = events[events["event"] == WAVEFORM_EVENT].iloc[0]
+    radial_cm = np.asarray(sample["radial"], dtype=float) * 100.0
+    tangential_cm = np.asarray(sample["tangential"], dtype=float) * 100.0
+    vertical_cm = np.asarray(sample["vertical"], dtype=float) * 100.0
+    time_sec = float(sample["waveform_start_sec"]) + np.arange(radial_cm.size) * float(
+        sample["waveform_dt_sec"]
+    )
+    norm_cm = np.sqrt(radial_cm**2 + tangential_cm**2 + vertical_cm**2)
+    pgd_cm = np.maximum.accumulate(norm_cm)
+    catalog = float(event_row["mw_catalog"])
+
+    figure, axes = plt.subplots(3, 1, figsize=(12.5, 9.3), constrained_layout=True)
+    axes[0].plot(time_sec, radial_cm, color=COLORS["legacy"], linewidth=1.2)
+    axes[0].axhline(0.0, color=COLORS["grid"], linewidth=0.8)
+    axes[0].set_ylabel("Radial displacement (cm)")
+    axes[0].set_title(
+        "A. Radial waveform used by the R-only model",
+        loc="left",
+        fontweight="bold",
+    )
+
+    axes[1].plot(
+        time_sec,
+        norm_cm,
+        color="#8D99A6",
+        linewidth=1.0,
+        label="3-component norm",
+    )
+    axes[1].plot(
+        time_sec,
+        pgd_cm,
+        color=COLORS["new"],
+        linewidth=2.0,
+        label="Cumulative PGD",
+    )
+    axes[1].set_ylabel("Displacement / PGD (cm)")
+    axes[1].set_xlabel("Time since origin (s)")
+    axes[1].set_title("B. Peak ground displacement", loc="left", fontweight="bold")
+    axes[1].legend(frameon=False)
+
+    axes[2].scatter(
+        event_stations["epicentral_distance_km"],
+        event_stations["mw_pred"],
+        s=15,
+        color=COLORS["station"],
+        alpha=0.42,
+        linewidth=0,
+        rasterized=True,
+        label="Station endpoint estimates",
+    )
+    selected = event_stations[event_stations["station"] == selected_station].iloc[0]
+    axes[2].scatter(
+        [float(selected["epicentral_distance_km"])],
+        [float(selected["mw_pred"])],
+        marker="D",
+        s=75,
+        color=COLORS["new"],
+        edgecolor="white",
+        linewidth=0.7,
+        label="Waveform station",
+        zorder=4,
+    )
+    axes[2].axhline(
+        catalog,
+        color=COLORS["truth"],
+        linewidth=1.4,
+        label=f"Catalog Mw {catalog:.2f}",
+    )
+    axes[2].axhline(
+        float(event_row["mw_pred_median"]),
+        color=COLORS["selected"],
+        linewidth=1.5,
+        linestyle="--",
+        label=f"Test event endpoint estimate {float(event_row['mw_pred_median']):.2f}",
+    )
+    axes[2].set_xlabel("Epicentral distance (km)")
+    axes[2].set_ylabel("Endpoint estimated magnitude (Mw)")
+    axes[2].set_title(
+        f"C. Seed-73 endpoint estimates; station {selected_station} = {float(selected['mw_pred']):.2f} Mw",
+        loc="left",
+        fontweight="bold",
+    )
+    axes[2].legend(frameon=False, fontsize=8, ncol=2)
+
+    for axis in axes:
+        axis.grid(True, color=COLORS["grid"], linewidth=0.6, alpha=0.7)
+    figure.suptitle(
+        f"{WAVEFORM_EVENT} representative station {selected_station}: waveform, PGD, and endpoint estimates",
+        fontsize=14,
         fontweight="bold",
     )
     return save_figure(figure, output_stem)
@@ -698,31 +987,26 @@ selected only by the six fixed validation events. The nine-event test cohort
 was evaluated once after seed 73 had been selected; test results were not
 averaged across seeds and were not used for model selection.
 
-![Frozen data split](figures/en/01_split_overview.png)
+## Event-Level Test Estimates
 
-[PDF](figures/en/01_split_overview.pdf) |
-[Fixed split manifest](fixed_split_manifest.json)
+![Test event estimates](figures/en/01_test_event_scatter.png)
 
-## Validation-Only Seed Selection
-
-![Seed validation selection](figures/en/02_seed_validation_selection.png)
-
-[PDF](figures/en/02_seed_validation_selection.pdf) |
-[Seed selection table](analysis/seed_selection.csv)
-
-Seed 73 reached the lowest validation event MAE, `{selection['selected_validation_event_mae_mw']:.6f} Mw`,
-at epoch 61. This validation number is not the independent test result.
-
-## Held-Out Test Events
-
-![Test event estimates](figures/en/03_test_event_scatter.png)
-
-[PDF](figures/en/03_test_event_scatter.pdf) |
+[PDF](figures/en/01_test_event_scatter.pdf) |
 [Event prediction table](selected_test_event_predictions.csv)
 
-![Signed test event errors](figures/en/04_test_event_signed_errors.png)
+## Station-Level Test Estimates
 
-[PDF](figures/en/04_test_event_signed_errors.pdf) |
+![Station-level test estimates](figures/en/02_test_station_scatter.png)
+
+[PDF](figures/en/02_test_station_scatter.pdf) |
+[Station predictions](selected_test_station_predictions.csv) |
+[Per-event station summary](analysis/test_event_station_summary.csv)
+
+## Event Errors
+
+![Absolute test event errors](figures/en/03_test_event_absolute_errors.png)
+
+[PDF](figures/en/03_test_event_absolute_errors.pdf) |
 [Event error analysis](analysis/test_event_error_analysis.csv)
 
 The six legacy test events have MAE `{legacy['mae_mw']:.6f} Mw`; the three newly
@@ -730,20 +1014,48 @@ added test events have MAE `{new['mae_mw']:.6f} Mw`. The two largest failures
 are Napa2014 and `ak014cbigci8`. Excluding them only for diagnosis, the remaining
 seven-event MAE is `{diagnostic['event_mae_mw']:.6f} Mw`; this is not the headline metric.
 
-## Station-Level Test Results
-
-![Station-level test estimates](figures/en/05_test_station_predictions.png)
-
-[PDF](figures/en/05_test_station_predictions.pdf) |
-[Station predictions](selected_test_station_predictions.csv) |
-[Per-event station summary](analysis/test_event_station_summary.csv)
-
 ## Selected Training Run
 
-![Selected seed training history](figures/en/06_selected_seed_training.png)
+![Selected seed training history](figures/en/04_selected_seed_training_curves.png)
 
-[PDF](figures/en/06_selected_seed_training.pdf) |
+[PDF](figures/en/04_selected_seed_training_curves.pdf) |
 [Seed 73 training log](analysis/training_logs/seed_73.csv)
+
+## Selected Test-Event Maps
+
+![Selected test-event maps](figures/en/05_selected_test_event_maps.png)
+
+[PDF](figures/en/05_selected_test_event_maps.pdf)
+
+The maps show Napa2014, `us7000i9bw`, and Ridgecrest2019. Station color is the
+seed-73 endpoint residual relative to catalog magnitude; the star is the
+catalog epicenter.
+
+## Representative Waveform And PGD
+
+![Representative waveform and PGD](figures/en/06_ridgecrest_waveform_and_predictions.png)
+
+[PDF](figures/en/06_ridgecrest_waveform_and_predictions.pdf)
+
+This figure shows one Ridgecrest2019 station waveform, the three-component norm
+and cumulative PGD, and the selected model's station/event endpoint estimates.
+It does not show a second-by-second magnitude prediction.
+
+## Supplementary Protocol Diagnostics
+
+![Frozen data split](figures/en/07_split_overview_supplement.png)
+
+[PDF](figures/en/07_split_overview_supplement.pdf) |
+[Fixed split manifest](fixed_split_manifest.json)
+
+![Seed validation selection](figures/en/08_seed_validation_selection_supplement.png)
+
+[PDF](figures/en/08_seed_validation_selection_supplement.pdf) |
+[Seed selection table](analysis/seed_selection.csv)
+
+Seed 73 reached the lowest validation event MAE,
+`{selection['selected_validation_event_mae_mw']:.6f} Mw`, at epoch 61. This
+validation number is not the independent test result.
 
 ## Interpretation
 
@@ -788,6 +1100,11 @@ Reproduction code:
 测试误差主要由 Napa2014 和 `ak014cbigci8` 拉高，因此目前不能用验证集的
 `0.1713 Mw` 代替独立测试结果。正式测试结论仍然是九事件 MAE
 `{test['event_mae']:.6f} Mw`。
+
+本页主图已经恢复为前一版论文式图鉴：事件散点、台站密度与事件中位数、
+事件绝对误差、训练曲线、事件地图以及代表性波形/PGD。数据划分和随机种子
+选择图保留为补充诊断图。所有震级结果均为固定 200 秒输入后的终点估计，
+不是逐秒因果预测。
 """
     (output_dir / "README.md").write_text(content, encoding="utf-8")
 
@@ -847,6 +1164,9 @@ def generate_publication(run_root: Path, output_dir: Path) -> dict[str, Any]:
     ) = load_inputs(run_root)
     output_dir.mkdir(parents=True, exist_ok=True)
     figures_dir = output_dir / "figures/en"
+    if figures_dir.exists():
+        shutil.rmtree(figures_dir)
+    figures_dir.mkdir(parents=True, exist_ok=True)
     analysis_dir = output_dir / "analysis"
     training_logs_dir = analysis_dir / "training_logs"
     training_logs_dir.mkdir(parents=True, exist_ok=True)
@@ -863,38 +1183,59 @@ def generate_publication(run_root: Path, output_dir: Path) -> dict[str, Any]:
 
     selected_seed = int(campaign["selection"]["selected_seed"])
     selected = candidates[candidates["seed"] == selected_seed].iloc[0]
+    data_path = Path(str(protocol["dataset_path"]))
+    config_path = Path(str(protocol["config_path"]))
+    waveform_sample, waveform_station = load_waveform_sample(config_path, stations)
     generated = []
-    generated.extend(plot_split_overview(split, figures_dir / "01_split_overview"))
     generated.extend(
-        plot_seed_selection(
-            candidates,
-            logs,
-            selected_seed,
-            figures_dir / "02_seed_validation_selection",
-        )
-    )
-    generated.extend(
-        plot_test_event_scatter(events, figures_dir / "03_test_event_scatter")
-    )
-    generated.extend(
-        plot_event_errors(events, figures_dir / "04_test_event_signed_errors")
+        plot_test_event_scatter(events, figures_dir / "01_test_event_scatter")
     )
     generated.extend(
         plot_station_predictions(
             stations,
             events,
-            figures_dir / "05_test_station_predictions",
+            figures_dir / "02_test_station_scatter",
         )
+    )
+    generated.extend(
+        plot_event_errors(events, figures_dir / "03_test_event_absolute_errors")
     )
     generated.extend(
         plot_selected_training(
             logs[selected_seed],
             int(selected["best_epoch"]),
             float(selected["best_validation_event_mae_mw"]),
-            figures_dir / "06_selected_seed_training",
+            figures_dir / "04_selected_seed_training_curves",
         )
     )
-    if len(generated) != 12:
+    generated.extend(
+        plot_selected_maps(
+            stations,
+            data_path,
+            figures_dir / "05_selected_test_event_maps",
+        )
+    )
+    generated.extend(
+        plot_waveform_example(
+            waveform_sample,
+            waveform_station,
+            stations,
+            events,
+            figures_dir / "06_ridgecrest_waveform_and_predictions",
+        )
+    )
+    generated.extend(
+        plot_split_overview(split, figures_dir / "07_split_overview_supplement")
+    )
+    generated.extend(
+        plot_seed_selection(
+            candidates,
+            logs,
+            selected_seed,
+            figures_dir / "08_seed_validation_selection_supplement",
+        )
+    )
+    if len(generated) != 16:
         raise ValueError(f"unexpected generated figure count: {len(generated)}")
 
     summary = build_public_summary(
