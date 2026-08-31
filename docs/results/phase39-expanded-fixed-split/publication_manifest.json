@@ -1,11 +1,26 @@
 {
-  "created_at_utc": "2026-08-31T09:05:11+00:00",
-  "file_count": 29,
+  "created_at_utc": "2026-08-31T10:59:25+00:00",
+  "file_count": 36,
   "files": [
     {
       "path": "README.md",
-      "sha256": "2026d92ecbd160b76a30e8133c5ba6d3c923da0f02563065aa08aa3cd8c8ff6d",
-      "size_bytes": 5642
+      "sha256": "a9601f51ef9acde72fcfe205f0a0d59d8a2f11a7ee812161344b7501c7172c28",
+      "size_bytes": 7322
+    },
+    {
+      "path": "analysis/pgd_event_predictions.csv",
+      "sha256": "f7ce0f5b699d5e558efd80d9cf8fb2b68c14af5544268ef0db5854905caef734",
+      "size_bytes": 4785
+    },
+    {
+      "path": "analysis/pgd_method_summary.csv",
+      "sha256": "73aa061d1eb2f2136a92268726917c1778ba9dca57f0a62a4f5e75720e6dbfbe",
+      "size_bytes": 884
+    },
+    {
+      "path": "analysis/pgd_station_predictions.csv",
+      "sha256": "b45364654e0f95224562fc0ed91bd3a80065b275f6fe3998f0e5e9179613110e",
+      "size_bytes": 211160
     },
     {
       "path": "analysis/seed_selection.csv",
@@ -39,8 +54,8 @@
     },
     {
       "path": "figures/en/01_test_event_scatter.pdf",
-      "sha256": "59a70b9524d190cf85e359217ce287649d3ee462aecdbb76188f15f84b7b8fb4",
-      "size_bytes": 28576
+      "sha256": "0b0ce1e50e978de27872a0f9319c4fe8df6d67becc3dcfb7406d91b4b86f3363",
+      "size_bytes": 28536
     },
     {
       "path": "figures/en/01_test_event_scatter.png",
@@ -49,8 +64,8 @@
     },
     {
       "path": "figures/en/02_test_station_scatter.pdf",
-      "sha256": "c9d89d87630fd10d77aeb316067ea20abf2bb9be70fb60f79be69396054bf29a",
-      "size_bytes": 49040
+      "sha256": "279e96a00cd76eb82acd5e2e225191aa8e89561c910301e3f5420521dc05cd51",
+      "size_bytes": 49000
     },
     {
       "path": "figures/en/02_test_station_scatter.png",
@@ -59,8 +74,8 @@
     },
     {
       "path": "figures/en/03_test_event_absolute_errors.pdf",
-      "sha256": "935ae488eb1257779dfed455f7fc67f3d8725214952dcbc80a23e5019883f4e1",
-      "size_bytes": 22198
+      "sha256": "032824e93eec359592e95a8a38a82e3988a2dc8364805b44a24ee80f02276c7a",
+      "size_bytes": 22158
     },
     {
       "path": "figures/en/03_test_event_absolute_errors.png",
@@ -69,8 +84,8 @@
     },
     {
       "path": "figures/en/04_selected_seed_training_curves.pdf",
-      "sha256": "c253db6241cdd5e59ccfbbae3a5f886fd19cb9c5eebed8a0d806b83e11698547",
-      "size_bytes": 31415
+      "sha256": "1ac163ac2cf7644fa4b20965eb2270ebf585eb75b640be5d3e6fb51aeebf3d70",
+      "size_bytes": 31375
     },
     {
       "path": "figures/en/04_selected_seed_training_curves.png",
@@ -79,8 +94,8 @@
     },
     {
       "path": "figures/en/05_selected_test_event_maps.pdf",
-      "sha256": "fab9ccb60f1c125cfdcc13c9c6d159cfbd74bb51241b53a8a52b2fcc9637d4cb",
-      "size_bytes": 225114
+      "sha256": "b29104b057f41776c8c0bd6a8791dd83a9bb6f7850152f0cdb1a897cf0c7a83d",
+      "size_bytes": 225074
     },
     {
       "path": "figures/en/05_selected_test_event_maps.png",
@@ -89,8 +104,8 @@
     },
     {
       "path": "figures/en/06_ridgecrest_waveform_and_predictions.pdf",
-      "sha256": "75bd519d4195a8d140ee6840b690b39582d34952dabfca3359f541b0c502a216",
-      "size_bytes": 54638
+      "sha256": "c698bf0685c6a014d5f9d34fd6a98c49181f6482dbc96f766d8f7a938921abc1",
+      "size_bytes": 54598
     },
     {
       "path": "figures/en/06_ridgecrest_waveform_and_predictions.png",
@@ -98,22 +113,42 @@
       "size_bytes": 328830
     },
     {
-      "path": "figures/en/07_split_overview_supplement.pdf",
-      "sha256": "b7a123c35bb34fc99175a3a7f3751c64c00b02399c9a2a94578888c6b0a74285",
-      "size_bytes": 32420
+      "path": "figures/en/07_phase39_vs_pgd_method_scatter.pdf",
+      "sha256": "a75d555d1766edfc840889ed869062b3594c1cc9643e67013243071353b2edd1",
+      "size_bytes": 44234
     },
     {
-      "path": "figures/en/07_split_overview_supplement.png",
+      "path": "figures/en/07_phase39_vs_pgd_method_scatter.png",
+      "sha256": "1fba351457a3adc0eebd489810eb74203218dc7929ffeb52a122f6549ce9646e",
+      "size_bytes": 311650
+    },
+    {
+      "path": "figures/en/08_phase39_vs_pgd_method_errors.pdf",
+      "sha256": "16efc1fecb631b02df7fbcf7fa757a7213245a4f6ea2b72da622d52049bfb2ef",
+      "size_bytes": 51756
+    },
+    {
+      "path": "figures/en/08_phase39_vs_pgd_method_errors.png",
+      "sha256": "5b0fd80903291cb134ec3d080bf0076b7be8d3b62bbd005cc15272ca92210edd",
+      "size_bytes": 283837
+    },
+    {
+      "path": "figures/en/09_split_overview_supplement.pdf",
+      "sha256": "13281bf5096d99fa7df6fa3e3835894c15715ae0714ec522958c53ad5329434c",
+      "size_bytes": 32380
+    },
+    {
+      "path": "figures/en/09_split_overview_supplement.png",
       "sha256": "2734efe26184d1f640aa8fd22b34fc0fb928adbfd3bb435f3d1c1df23e1f0e26",
       "size_bytes": 163066
     },
     {
-      "path": "figures/en/08_seed_validation_selection_supplement.pdf",
-      "sha256": "368e66caf94ece89f91cd94d1762ca72b5f8b70f869fbf0fd5834afd3c2ea1e9",
-      "size_bytes": 27374
+      "path": "figures/en/10_seed_validation_selection_supplement.pdf",
+      "sha256": "94336e6dafa4e4acd70d388c48cc953a8e2ddb1af4e6f330bed383cd5450e2c3",
+      "size_bytes": 27334
     },
     {
-      "path": "figures/en/08_seed_validation_selection_supplement.png",
+      "path": "figures/en/10_seed_validation_selection_supplement.png",
       "sha256": "9ec600609b73b6b9e2b1c2f7b95b7a7450e5af4a78a8953251c24c5008d6d61d",
       "size_bytes": 263693
     },
@@ -144,8 +179,8 @@
     },
     {
       "path": "summary.json",
-      "sha256": "a410efabab8cd135cf3faecd0d435407ee6d4e4c942eaa59b05070bb51b2534c",
-      "size_bytes": 2614
+      "sha256": "a7560c0138ff0a7dbe66e678f2f17774dd73988992d9fe71914ec2be493d674f",
+      "size_bytes": 5488
     }
   ],
   "selected_checkpoint_sha256": "5905ccaabcbcfc151d6f2dfa8aea277725d409fb62bd16c437ac5288bcafb4fe",

@@ -76,16 +76,43 @@ This figure shows one Ridgecrest2019 station waveform, the three-component norm
 and cumulative PGD, and the selected model's station/event endpoint estimates.
 It does not show a second-by-second magnitude prediction.
 
+## Comparison With Three Empirical PGD Relations
+
+![Phase 39 and PGD method scatter comparison](figures/en/07_phase39_vs_pgd_method_scatter.png)
+
+[PDF](figures/en/07_phase39_vs_pgd_method_scatter.pdf) |
+[PGD event predictions](analysis/pgd_event_predictions.csv)
+
+![Phase 39 and PGD error comparison](figures/en/08_phase39_vs_pgd_method_errors.png)
+
+[PDF](figures/en/08_phase39_vs_pgd_method_errors.pdf) |
+[PGD method summary](analysis/pgd_method_summary.csv) |
+[PGD station predictions](analysis/pgd_station_predictions.csv)
+
+| Method | Event MAE | Event RMSE | Event bias | Station MAE |
+|---|---:|---:|---:|---:|
+| Phase 39 | 0.349643 | 0.466958 | +0.105470 | 0.314650 |
+| Crowell 2013 | 0.311042 | 0.444800 | +0.127474 | 0.273915 |
+| Ruhl 2019 | 0.444822 | 0.474602 | -0.284112 | 0.431426 |
+| Melgar 2015 | 0.356971 | 0.406605 | -0.094630 | 0.345448 |
+
+The comparison uses the same nine test events, all 450 accepted stations, the
+same 200-second preprocessed waveforms, hypocentral distance, and station-median
+event aggregation. The empirical formulas use three-component PGD, while Phase
+39 remains an R-only waveform model. Their published coefficients are applied
+without fitting on this dataset. Crowell has the lowest event MAE on this small
+fixed test cohort; Phase 39 is not the best method under this endpoint metric.
+
 ## Supplementary Protocol Diagnostics
 
-![Frozen data split](figures/en/07_split_overview_supplement.png)
+![Frozen data split](figures/en/09_split_overview_supplement.png)
 
-[PDF](figures/en/07_split_overview_supplement.pdf) |
+[PDF](figures/en/09_split_overview_supplement.pdf) |
 [Fixed split manifest](fixed_split_manifest.json)
 
-![Seed validation selection](figures/en/08_seed_validation_selection_supplement.png)
+![Seed validation selection](figures/en/10_seed_validation_selection_supplement.png)
 
-[PDF](figures/en/08_seed_validation_selection_supplement.pdf) |
+[PDF](figures/en/10_seed_validation_selection_supplement.pdf) |
 [Seed selection table](analysis/seed_selection.csv)
 
 Seed 73 reached the lowest validation event MAE,
@@ -140,3 +167,9 @@ Reproduction code:
 事件绝对误差、训练曲线、事件地图以及代表性波形/PGD。数据划分和随机种子
 选择图保留为补充诊断图。所有震级结果均为固定 200 秒输入后的终点估计，
 不是逐秒因果预测。
+
+新增的经验公式比较严格使用同一批 9 个测试事件、450 个台站和 200 秒窗口。
+Crowell 2013、Ruhl 2019 和 Melgar 2015 使用三分量 PGD 与震源距，Phase 39
+仍使用径向波形。本测试集上 Crowell 的事件 MAE 为
+`0.311042 Mw`，低于 Phase 39 的
+`0.349643 Mw`；该结果在图表中按原值报告。

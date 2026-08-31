@@ -1,5 +1,5 @@
 {
-  "created_at_utc": "2026-08-31T09:05:11+00:00",
+  "created_at_utc": "2026-08-31T10:59:25+00:00",
   "diagnostic_excluding_two_largest_outliers": {
     "event_count": 7,
     "event_mae_mw": 0.18910200255257736,
@@ -11,6 +11,98 @@
   },
   "lambda_synth": 0.5,
   "method": "Phase 39 expanded fixed split with synthesized-waveform loss",
+  "pgd_comparison": {
+    "contract": {
+      "distance": "hypocentral",
+      "empirical_input": "3-component PGD",
+      "event_aggregation": "station_prediction_median",
+      "events": 9,
+      "phase39_input": "radial waveform",
+      "stations": 450,
+      "window_seconds": 200
+    },
+    "methods": [
+      {
+        "event_bias_mw": 0.10547033945719403,
+        "event_count": 9,
+        "event_mae_mw": 0.3496432304382324,
+        "event_rmse_mw": 0.4669581667938597,
+        "event_within_0_2_fraction": 0.3333333333333333,
+        "input_channels": "radial waveform",
+        "method": "phase39",
+        "method_label": "Phase 39",
+        "station_bias_mw": -0.13780144585503473,
+        "station_count": 450,
+        "station_mae_mw": 0.3146495034959581,
+        "station_rmse_mw": 0.4366908185825911
+      },
+      {
+        "event_bias_mw": 0.12747366260779736,
+        "event_count": 9,
+        "event_mae_mw": 0.3110416398874827,
+        "event_rmse_mw": 0.4447997777826814,
+        "event_within_0_2_fraction": 0.5555555555555556,
+        "input_channels": "3-component PGD",
+        "method": "crowell",
+        "method_label": "Crowell 2013",
+        "station_bias_mw": 0.03632854260738389,
+        "station_count": 450,
+        "station_mae_mw": 0.2739150643817287,
+        "station_rmse_mw": 0.3892590809444403
+      },
+      {
+        "event_bias_mw": -0.28411214370260357,
+        "event_count": 9,
+        "event_mae_mw": 0.4448222435619847,
+        "event_rmse_mw": 0.4746017485509961,
+        "event_within_0_2_fraction": 0.1111111111111111,
+        "input_channels": "3-component PGD",
+        "method": "ruhl",
+        "method_label": "Ruhl 2019",
+        "station_bias_mw": -0.30654550162755023,
+        "station_count": 450,
+        "station_mae_mw": 0.43142596993113597,
+        "station_rmse_mw": 0.5217946974555905
+      },
+      {
+        "event_bias_mw": -0.09463017158303691,
+        "event_count": 9,
+        "event_mae_mw": 0.35697052077416447,
+        "event_rmse_mw": 0.40660535482280535,
+        "event_within_0_2_fraction": 0.3333333333333333,
+        "input_channels": "3-component PGD",
+        "method": "melgar",
+        "method_label": "Melgar 2015",
+        "station_bias_mw": -0.14909258592752697,
+        "station_count": 450,
+        "station_mae_mw": 0.34544756369507906,
+        "station_rmse_mw": 0.4375284520289455
+      }
+    ],
+    "scaling_laws": {
+      "crowell": {
+        "a": -6.687,
+        "b": 1.5,
+        "c": -0.214,
+        "citation_key": "crowell_2013",
+        "pgd_unit": "cm"
+      },
+      "melgar": {
+        "a": -4.434,
+        "b": 1.047,
+        "c": -0.138,
+        "citation_key": "melgar_2015",
+        "pgd_unit": "cm"
+      },
+      "ruhl": {
+        "a": -5.919,
+        "b": 1.009,
+        "c": -0.145,
+        "citation_key": "ruhl_2019",
+        "pgd_unit": "m"
+      }
+    }
+  },
   "role_counts": {
     "test": {
       "events": 9,

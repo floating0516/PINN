@@ -45,6 +45,7 @@ from scripts.experiments import run_phase39_confirmatory_grouped_cv as grouped
 from scripts.plotting.plot_phase39_moment_scaling_explainer import (
     iter_selected_records,
 )
+from src.baseline.scaling_laws import AVAILABLE_SCALING_LAWS, predict_mw
 from src.utils.provenance import sha256_file, utc_now_iso
 
 
@@ -66,6 +67,20 @@ SEED_COLORS = {
     17: "#4C78A8",
     42: "#7A6F9B",
     73: "#D1495B",
+}
+PGD_LAWS = ("crowell", "ruhl", "melgar")
+METHOD_ORDER = ("phase39", *PGD_LAWS)
+METHOD_LABELS = {
+    "phase39": "Phase 39",
+    "crowell": "Crowell 2013",
+    "ruhl": "Ruhl 2019",
+    "melgar": "Melgar 2015",
+}
+METHOD_COLORS = {
+    "phase39": "#D1495B",
+    "crowell": "#4C78A8",
+    "ruhl": "#59A14F",
+    "melgar": "#B279A2",
 }
 
 
@@ -105,7 +120,8 @@ def save_figure(figure: plt.Figure, output_stem: Path) -> list[Path]:
     generated = []
     for suffix, dpi in ((".png", 220), (".pdf", 300)):
         path = output_stem.with_suffix(suffix)
-        figure.savefig(path, dpi=dpi, bbox_inches="tight")
+        metadata = {"CreationDate": None, "ModDate": None} if suffix == ".pdf" else None
+        figure.savefig(path, dpi=dpi, bbox_inches="tight", metadata=metadata)
         generated.append(path)
     plt.close(figure)
     return generated
@@ -222,6 +238,132 @@ def load_inputs(
     ] != selected_seed:
         raise ValueError("selected seed is not the validation minimum")
     return campaign, split, protocol, events, stations, candidates, logs
+
+
+def load_phase39_samples(config_path: Path) -> list[dict[str, Any]]:
+    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    arm = grouped.build_arm_configs(config)["phase39"]
+    return grouped._load_dataset_samples(arm)
+
+
+def compute_pgd_baselines(
+    samples: Sequence[dict[str, Any]],
+    stations: pd.DataFrame,
+    events: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    if stations.duplicated(["event", "station"]).any():
+        raise ValueError("fixed-test station keys are not unique")
+    station_lookup = stations.set_index(["event", "station"])
+    station_keys = set(station_lookup.index)
+    found_keys: set[tuple[str, str]] = set()
+    rows: list[dict[str, Any]] = []
+    for sample in samples:
+        key = (str(sample["event"]), str(sample["station"]))
+        if key not in station_keys:
+            continue
+        found_keys.add(key)
+        metadata = station_lookup.loc[key]
+        radial = np.asarray(sample["radial"], dtype=float)
+        tangential = np.asarray(sample["tangential"], dtype=float)
+        vertical = np.asarray(sample["vertical"], dtype=float)
+        pgd_3d_m = float(
+            np.max(np.sqrt(radial**2 + tangential**2 + vertical**2))
+        )
+        source_distance_km = float(sample["source_distance_m"]) / 1000.0
+        if not np.isfinite(pgd_3d_m) or pgd_3d_m <= 0.0:
+            raise ValueError(f"invalid 3-component PGD for {key}")
+        if not np.isfinite(source_distance_km) or source_distance_km <= 0.0:
+            raise ValueError(f"invalid source distance for {key}")
+        for method in PGD_LAWS:
+            mw_pred = predict_mw(
+                law_name=method,
+                pgd_m=pgd_3d_m,
+                source_distance_km=source_distance_km,
+            )
+            rows.append(
+                {
+                    "event": key[0],
+                    "station": key[1],
+                    "test_class": str(metadata["test_class"]),
+                    "method": method,
+                    "method_label": METHOD_LABELS[method],
+                    "mw_catalog": float(metadata["mw_catalog"]),
+                    "mw_pred": float(mw_pred),
+                    "error_vs_catalog": float(mw_pred - metadata["mw_catalog"]),
+                    "absolute_error": float(abs(mw_pred - metadata["mw_catalog"])),
+                    "pgd_3d_m": pgd_3d_m,
+                    "source_distance_km": source_distance_km,
+                }
+            )
+    if found_keys != station_keys:
+        missing = sorted(station_keys - found_keys)
+        raise ValueError(f"PGD baseline sample coverage changed: missing={missing[:5]}")
+    station_baselines = pd.DataFrame(rows).sort_values(
+        ["method", "event", "station"]
+    ).reset_index(drop=True)
+    if len(station_baselines) != len(stations) * len(PGD_LAWS):
+        raise ValueError("PGD station prediction count changed")
+
+    event_baselines = (
+        station_baselines.groupby(["method", "method_label", "event"], as_index=False)
+        .agg(
+            test_class=("test_class", "first"),
+            mw_catalog=("mw_catalog", "median"),
+            mw_pred_median=("mw_pred", "median"),
+            prediction_iqr_mw=(
+                "mw_pred",
+                lambda values: float(
+                    np.percentile(values, 75) - np.percentile(values, 25)
+                ),
+            ),
+            prediction_std_mw=("mw_pred", "std"),
+            n_stations=("station", "size"),
+            pgd_median_cm=("pgd_3d_m", lambda values: float(np.median(values) * 100.0)),
+        )
+    )
+    event_baselines["error_vs_catalog"] = (
+        event_baselines["mw_pred_median"] - event_baselines["mw_catalog"]
+    )
+    event_baselines["absolute_error"] = event_baselines[
+        "error_vs_catalog"
+    ].abs()
+    if len(event_baselines) != len(events) * len(PGD_LAWS):
+        raise ValueError("PGD event prediction count changed")
+
+    summary_rows = []
+    for method in METHOD_ORDER:
+        if method == "phase39":
+            event_errors = events["error_vs_catalog"].to_numpy(dtype=float)
+            station_errors = stations["error_vs_catalog"].to_numpy(dtype=float)
+            input_channels = "radial waveform"
+        else:
+            event_errors = event_baselines.loc[
+                event_baselines["method"] == method, "error_vs_catalog"
+            ].to_numpy(dtype=float)
+            station_errors = station_baselines.loc[
+                station_baselines["method"] == method, "error_vs_catalog"
+            ].to_numpy(dtype=float)
+            input_channels = "3-component PGD"
+        summary_rows.append(
+            {
+                "method": method,
+                "method_label": METHOD_LABELS[method],
+                "input_channels": input_channels,
+                "event_count": int(event_errors.size),
+                "station_count": int(station_errors.size),
+                "event_mae_mw": float(np.mean(np.abs(event_errors))),
+                "event_rmse_mw": float(np.sqrt(np.mean(np.square(event_errors)))),
+                "event_bias_mw": float(np.mean(event_errors)),
+                "event_within_0_2_fraction": float(
+                    np.mean(np.abs(event_errors) <= 0.2)
+                ),
+                "station_mae_mw": float(np.mean(np.abs(station_errors))),
+                "station_rmse_mw": float(np.sqrt(np.mean(np.square(station_errors)))),
+                "station_bias_mw": float(np.mean(station_errors)),
+            }
+        )
+    method_summary = pd.DataFrame(summary_rows)
+    return station_baselines, event_baselines, method_summary
 
 
 def split_event_frame(split: dict[str, Any]) -> pd.DataFrame:
@@ -766,11 +908,9 @@ def plot_selected_maps(
 
 
 def load_waveform_sample(
-    config_path: Path,
+    samples: Sequence[dict[str, Any]],
     station_predictions: pd.DataFrame,
 ) -> tuple[dict[str, Any], str]:
-    config = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-    arm = grouped.build_arm_configs(config)["phase39"]
     event_rows = station_predictions[
         station_predictions["event"] == WAVEFORM_EVENT
     ].copy()
@@ -784,7 +924,7 @@ def load_waveform_sample(
     selected_station = str(
         event_rows.sort_values(["selection_distance", "station"]).iloc[0]["station"]
     )
-    for sample in grouped._load_dataset_samples(arm):
+    for sample in samples:
         if sample["event"] == WAVEFORM_EVENT and sample["station"] == selected_station:
             return sample, selected_station
     raise ValueError(f"waveform sample not found: {WAVEFORM_EVENT}/{selected_station}")
@@ -894,6 +1034,246 @@ def plot_waveform_example(
     return save_figure(figure, output_stem)
 
 
+def method_event_frame(
+    events: pd.DataFrame,
+    pgd_events: pd.DataFrame,
+) -> pd.DataFrame:
+    phase39 = events[
+        [
+            "event",
+            "test_class",
+            "mw_catalog",
+            "mw_pred_median",
+            "n_stations",
+            "error_vs_catalog",
+            "absolute_error",
+        ]
+    ].copy()
+    phase39["method"] = "phase39"
+    phase39["method_label"] = METHOD_LABELS["phase39"]
+    return pd.concat([phase39, pgd_events], ignore_index=True, sort=False)
+
+
+def plot_pgd_method_scatter(
+    events: pd.DataFrame,
+    pgd_events: pd.DataFrame,
+    method_summary: pd.DataFrame,
+    output_stem: Path,
+) -> list[Path]:
+    comparison = method_event_frame(events, pgd_events)
+    lower, upper = identity_limits(
+        comparison["mw_catalog"], comparison["mw_pred_median"], padding=0.20
+    )
+    identity = np.linspace(lower, upper, 200)
+    summary_lookup = method_summary.set_index("method")
+    figure, axes = plt.subplots(
+        2,
+        2,
+        figsize=(11.8, 10.0),
+        sharex=True,
+        sharey=True,
+        constrained_layout=True,
+    )
+    panel_labels = ("A", "B", "C", "D")
+    for axis, panel, method in zip(axes.flat, panel_labels, METHOD_ORDER):
+        rows = comparison[comparison["method"] == method]
+        axis.fill_between(
+            identity,
+            identity - 0.2,
+            identity + 0.2,
+            color=COLORS["target"],
+            alpha=0.12,
+        )
+        axis.plot(identity, identity, color=COLORS["truth"], linewidth=1.15)
+        for test_class, marker in (("legacy", "o"), ("new", "^")):
+            subset = rows[rows["test_class"] == test_class]
+            sizes = 48 + 110 * np.sqrt(
+                subset["n_stations"] / comparison["n_stations"].max()
+            )
+            axis.scatter(
+                subset["mw_catalog"],
+                subset["mw_pred_median"],
+                s=sizes,
+                marker=marker,
+                color=METHOD_COLORS[method],
+                edgecolor="white",
+                linewidth=0.7,
+                alpha=0.92,
+                zorder=3,
+            )
+        metrics = summary_lookup.loc[method]
+        axis.text(
+            0.04,
+            0.96,
+            f"Event MAE = {float(metrics['event_mae_mw']):.3f} Mw\n"
+            f"Within +/-0.20 = {float(metrics['event_within_0_2_fraction']):.0%}",
+            transform=axis.transAxes,
+            ha="left",
+            va="top",
+            fontsize=9,
+            bbox={
+                "facecolor": "white",
+                "edgecolor": COLORS["grid"],
+                "alpha": 0.90,
+            },
+        )
+        axis.set_xlim(lower, upper)
+        axis.set_ylim(lower, upper)
+        axis.set_aspect("equal", adjustable="box")
+        axis.set_title(
+            f"{panel}. {METHOD_LABELS[method]}", loc="left", fontweight="bold"
+        )
+        axis.grid(True, color=COLORS["grid"], linewidth=0.55)
+        axis.set_xlabel("Catalog magnitude (Mw)")
+        axis.set_ylabel("Endpoint estimated magnitude (Mw)")
+    axes[0, 0].legend(
+        handles=[
+            Line2D(
+                [0],
+                [0],
+                marker="o",
+                color="none",
+                markerfacecolor=METHOD_COLORS["phase39"],
+                markeredgecolor="white",
+                markersize=8,
+                label="Legacy test event",
+            ),
+            Line2D(
+                [0],
+                [0],
+                marker="^",
+                color="none",
+                markerfacecolor=METHOD_COLORS["phase39"],
+                markeredgecolor="white",
+                markersize=9,
+                label="New test event",
+            ),
+            Line2D(
+                [0],
+                [0],
+                color=COLORS["target"],
+                linewidth=7,
+                alpha=0.35,
+                label="+/-0.20 Mw",
+            ),
+        ],
+        frameon=False,
+        loc="lower right",
+        fontsize=8,
+    )
+    figure.suptitle(
+        "Phase 39 versus three empirical PGD magnitude relations\n"
+        "Same nine held-out events and 450 accepted stations",
+        fontsize=14,
+        fontweight="bold",
+    )
+    return save_figure(figure, output_stem)
+
+
+def plot_pgd_method_errors(
+    events: pd.DataFrame,
+    pgd_events: pd.DataFrame,
+    method_summary: pd.DataFrame,
+    output_stem: Path,
+) -> list[Path]:
+    summary = method_summary.set_index("method").loc[list(METHOD_ORDER)].reset_index()
+    comparison = method_event_frame(events, pgd_events)
+    figure, axes = plt.subplots(
+        1,
+        2,
+        figsize=(15.0, 6.5),
+        constrained_layout=True,
+        gridspec_kw={"width_ratios": [0.9, 1.45]},
+    )
+
+    x = np.arange(len(summary))
+    width = 0.34
+    event_bars = axes[0].bar(
+        x - width / 2,
+        summary["event_mae_mw"],
+        width,
+        color=[METHOD_COLORS[method] for method in summary["method"]],
+        alpha=0.95,
+        label="Event MAE",
+    )
+    station_bars = axes[0].bar(
+        x + width / 2,
+        summary["station_mae_mw"],
+        width,
+        color=[METHOD_COLORS[method] for method in summary["method"]],
+        alpha=0.45,
+        hatch="//",
+        label="Station MAE",
+    )
+    axes[0].axhline(
+        0.2,
+        color=COLORS["target"],
+        linewidth=1.4,
+        linestyle="--",
+        label="0.20 Mw target",
+    )
+    axes[0].set_xticks(x, summary["method_label"], rotation=18, ha="right")
+    axes[0].set_ylabel("Mean absolute error (Mw)")
+    axes[0].set_title("A. Overall test errors", loc="left", fontweight="bold")
+    axes[0].grid(axis="y", color=COLORS["grid"], linewidth=0.55)
+    axes[0].legend(frameon=False, fontsize=8.5)
+    upper = max(
+        float(summary["event_mae_mw"].max()),
+        float(summary["station_mae_mw"].max()),
+    ) * 1.25
+    axes[0].set_ylim(0.0, upper)
+    for bars in (event_bars, station_bars):
+        for bar in bars:
+            value = float(bar.get_height())
+            axes[0].text(
+                bar.get_x() + bar.get_width() / 2,
+                value + upper * 0.015,
+                f"{value:.3f}",
+                ha="center",
+                va="bottom",
+                fontsize=7.8,
+            )
+
+    phase_order = events.sort_values("absolute_error", ascending=False)["event"].tolist()
+    matrix = (
+        comparison.pivot(index="event", columns="method", values="absolute_error")
+        .loc[phase_order, list(METHOD_ORDER)]
+        .to_numpy(dtype=float)
+    )
+    image = axes[1].imshow(matrix, cmap="YlOrRd", aspect="auto", vmin=0.0)
+    axes[1].set_xticks(
+        np.arange(len(METHOD_ORDER)),
+        [METHOD_LABELS[method] for method in METHOD_ORDER],
+        rotation=18,
+        ha="right",
+    )
+    axes[1].set_yticks(np.arange(len(phase_order)), phase_order)
+    axes[1].set_title(
+        "B. Absolute error by held-out event", loc="left", fontweight="bold"
+    )
+    threshold = float(np.nanmax(matrix)) * 0.58
+    for row_index in range(matrix.shape[0]):
+        for column_index in range(matrix.shape[1]):
+            value = float(matrix[row_index, column_index])
+            axes[1].text(
+                column_index,
+                row_index,
+                f"{value:.2f}",
+                ha="center",
+                va="center",
+                color="white" if value >= threshold else COLORS["truth"],
+                fontsize=8.5,
+            )
+    colorbar = figure.colorbar(image, ax=axes[1], pad=0.02)
+    colorbar.set_label("Absolute event error (Mw)")
+    figure.suptitle(
+        "Fixed-test error comparison: Phase 39 and empirical PGD baselines",
+        fontsize=14,
+        fontweight="bold",
+    )
+    return save_figure(figure, output_stem)
+
+
 def event_station_summary(stations: pd.DataFrame, events: pd.DataFrame) -> pd.DataFrame:
     station_summary = (
         stations.groupby("event", as_index=False)
@@ -917,6 +1297,7 @@ def build_public_summary(
     protocol: dict[str, Any],
     events: pd.DataFrame,
     candidates: pd.DataFrame,
+    method_summary: pd.DataFrame,
 ) -> dict[str, Any]:
     diagnostic_rows = events[~events["event"].isin(["Napa2014", "ak014cbigci8"])]
     return {
@@ -954,6 +1335,28 @@ def build_public_summary(
             "event_mae_mw": float(diagnostic_rows["absolute_error"].mean()),
             "headline_metric": False,
         },
+        "pgd_comparison": {
+            "contract": {
+                "events": 9,
+                "stations": 450,
+                "window_seconds": 200,
+                "event_aggregation": "station_prediction_median",
+                "phase39_input": "radial waveform",
+                "empirical_input": "3-component PGD",
+                "distance": "hypocentral",
+            },
+            "methods": method_summary.to_dict(orient="records"),
+            "scaling_laws": {
+                method: {
+                    "citation_key": AVAILABLE_SCALING_LAWS[method].citation_key,
+                    "pgd_unit": AVAILABLE_SCALING_LAWS[method].pgd_unit,
+                    "a": AVAILABLE_SCALING_LAWS[method].a,
+                    "b": AVAILABLE_SCALING_LAWS[method].b,
+                    "c": AVAILABLE_SCALING_LAWS[method].c,
+                }
+                for method in PGD_LAWS
+            },
+        },
     }
 
 
@@ -963,6 +1366,9 @@ def write_readme(output_dir: Path, summary: dict[str, Any]) -> None:
     legacy = summary["test_subgroups"]["legacy"]
     new = summary["test_subgroups"]["new"]
     diagnostic = summary["diagnostic_excluding_two_largest_outliers"]
+    pgd_methods = {
+        row["method"]: row for row in summary["pgd_comparison"]["methods"]
+    }
     content = f"""# Phase 39 Expanded Dataset: Fixed-Split Evaluation
 
 This page publishes the validation-selected, one-time held-out test result for
@@ -1041,16 +1447,43 @@ This figure shows one Ridgecrest2019 station waveform, the three-component norm
 and cumulative PGD, and the selected model's station/event endpoint estimates.
 It does not show a second-by-second magnitude prediction.
 
+## Comparison With Three Empirical PGD Relations
+
+![Phase 39 and PGD method scatter comparison](figures/en/07_phase39_vs_pgd_method_scatter.png)
+
+[PDF](figures/en/07_phase39_vs_pgd_method_scatter.pdf) |
+[PGD event predictions](analysis/pgd_event_predictions.csv)
+
+![Phase 39 and PGD error comparison](figures/en/08_phase39_vs_pgd_method_errors.png)
+
+[PDF](figures/en/08_phase39_vs_pgd_method_errors.pdf) |
+[PGD method summary](analysis/pgd_method_summary.csv) |
+[PGD station predictions](analysis/pgd_station_predictions.csv)
+
+| Method | Event MAE | Event RMSE | Event bias | Station MAE |
+|---|---:|---:|---:|---:|
+| Phase 39 | {pgd_methods['phase39']['event_mae_mw']:.6f} | {pgd_methods['phase39']['event_rmse_mw']:.6f} | {pgd_methods['phase39']['event_bias_mw']:+.6f} | {pgd_methods['phase39']['station_mae_mw']:.6f} |
+| Crowell 2013 | {pgd_methods['crowell']['event_mae_mw']:.6f} | {pgd_methods['crowell']['event_rmse_mw']:.6f} | {pgd_methods['crowell']['event_bias_mw']:+.6f} | {pgd_methods['crowell']['station_mae_mw']:.6f} |
+| Ruhl 2019 | {pgd_methods['ruhl']['event_mae_mw']:.6f} | {pgd_methods['ruhl']['event_rmse_mw']:.6f} | {pgd_methods['ruhl']['event_bias_mw']:+.6f} | {pgd_methods['ruhl']['station_mae_mw']:.6f} |
+| Melgar 2015 | {pgd_methods['melgar']['event_mae_mw']:.6f} | {pgd_methods['melgar']['event_rmse_mw']:.6f} | {pgd_methods['melgar']['event_bias_mw']:+.6f} | {pgd_methods['melgar']['station_mae_mw']:.6f} |
+
+The comparison uses the same nine test events, all 450 accepted stations, the
+same 200-second preprocessed waveforms, hypocentral distance, and station-median
+event aggregation. The empirical formulas use three-component PGD, while Phase
+39 remains an R-only waveform model. Their published coefficients are applied
+without fitting on this dataset. Crowell has the lowest event MAE on this small
+fixed test cohort; Phase 39 is not the best method under this endpoint metric.
+
 ## Supplementary Protocol Diagnostics
 
-![Frozen data split](figures/en/07_split_overview_supplement.png)
+![Frozen data split](figures/en/09_split_overview_supplement.png)
 
-[PDF](figures/en/07_split_overview_supplement.pdf) |
+[PDF](figures/en/09_split_overview_supplement.pdf) |
 [Fixed split manifest](fixed_split_manifest.json)
 
-![Seed validation selection](figures/en/08_seed_validation_selection_supplement.png)
+![Seed validation selection](figures/en/10_seed_validation_selection_supplement.png)
 
-[PDF](figures/en/08_seed_validation_selection_supplement.pdf) |
+[PDF](figures/en/10_seed_validation_selection_supplement.pdf) |
 [Seed selection table](analysis/seed_selection.csv)
 
 Seed 73 reached the lowest validation event MAE,
@@ -1105,6 +1538,12 @@ Reproduction code:
 事件绝对误差、训练曲线、事件地图以及代表性波形/PGD。数据划分和随机种子
 选择图保留为补充诊断图。所有震级结果均为固定 200 秒输入后的终点估计，
 不是逐秒因果预测。
+
+新增的经验公式比较严格使用同一批 9 个测试事件、450 个台站和 200 秒窗口。
+Crowell 2013、Ruhl 2019 和 Melgar 2015 使用三分量 PGD 与震源距，Phase 39
+仍使用径向波形。本测试集上 Crowell 的事件 MAE 为
+`{pgd_methods['crowell']['event_mae_mw']:.6f} Mw`，低于 Phase 39 的
+`{pgd_methods['phase39']['event_mae_mw']:.6f} Mw`；该结果在图表中按原值报告。
 """
     (output_dir / "README.md").write_text(content, encoding="utf-8")
 
@@ -1185,7 +1624,14 @@ def generate_publication(run_root: Path, output_dir: Path) -> dict[str, Any]:
     selected = candidates[candidates["seed"] == selected_seed].iloc[0]
     data_path = Path(str(protocol["dataset_path"]))
     config_path = Path(str(protocol["config_path"]))
-    waveform_sample, waveform_station = load_waveform_sample(config_path, stations)
+    samples = load_phase39_samples(config_path)
+    pgd_stations, pgd_events, pgd_summary = compute_pgd_baselines(
+        samples, stations, events
+    )
+    pgd_stations.to_csv(analysis_dir / "pgd_station_predictions.csv", index=False)
+    pgd_events.to_csv(analysis_dir / "pgd_event_predictions.csv", index=False)
+    pgd_summary.to_csv(analysis_dir / "pgd_method_summary.csv", index=False)
+    waveform_sample, waveform_station = load_waveform_sample(samples, stations)
     generated = []
     generated.extend(
         plot_test_event_scatter(events, figures_dir / "01_test_event_scatter")
@@ -1225,21 +1671,37 @@ def generate_publication(run_root: Path, output_dir: Path) -> dict[str, Any]:
         )
     )
     generated.extend(
-        plot_split_overview(split, figures_dir / "07_split_overview_supplement")
+        plot_pgd_method_scatter(
+            events,
+            pgd_events,
+            pgd_summary,
+            figures_dir / "07_phase39_vs_pgd_method_scatter",
+        )
+    )
+    generated.extend(
+        plot_pgd_method_errors(
+            events,
+            pgd_events,
+            pgd_summary,
+            figures_dir / "08_phase39_vs_pgd_method_errors",
+        )
+    )
+    generated.extend(
+        plot_split_overview(split, figures_dir / "09_split_overview_supplement")
     )
     generated.extend(
         plot_seed_selection(
             candidates,
             logs,
             selected_seed,
-            figures_dir / "08_seed_validation_selection_supplement",
+            figures_dir / "10_seed_validation_selection_supplement",
         )
     )
-    if len(generated) != 16:
+    if len(generated) != 20:
         raise ValueError(f"unexpected generated figure count: {len(generated)}")
 
     summary = build_public_summary(
-        campaign, split, protocol, events, candidates
+        campaign, split, protocol, events, candidates, pgd_summary
     )
     write_json(output_dir / "summary.json", summary)
     copy_public_artifacts(run_root, output_dir)
