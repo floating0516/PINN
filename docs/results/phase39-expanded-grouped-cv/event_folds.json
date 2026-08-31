@@ -1,0 +1,372 @@
+{
+  "assignment_sha256": "614153f55bd8e1208f6ea2d8b5b20cbe23c32902a3a67d0a1028675f82cc1f6d",
+  "events": [
+    {
+      "event": "Parkfield2004",
+      "fold": 1,
+      "magnitude_catalog": 5.97,
+      "n_stations": 11,
+      "stratum": 0
+    },
+    {
+      "event": "Napa2014",
+      "fold": 0,
+      "magnitude_catalog": 6.02,
+      "n_stations": 28,
+      "stratum": 0
+    },
+    {
+      "event": "ak014cbigci8",
+      "fold": 4,
+      "magnitude_catalog": 6.2,
+      "n_stations": 4,
+      "stratum": 0
+    },
+    {
+      "event": "nc73821036",
+      "fold": 2,
+      "magnitude_catalog": 6.4,
+      "n_stations": 9,
+      "stratum": 0
+    },
+    {
+      "event": "2013p543824",
+      "fold": 3,
+      "magnitude_catalog": 6.5,
+      "n_stations": 8,
+      "stratum": 0
+    },
+    {
+      "event": "2013p613797",
+      "fold": 2,
+      "magnitude_catalog": 6.5,
+      "n_stations": 10,
+      "stratum": 1
+    },
+    {
+      "event": "Lefkada2015",
+      "fold": 0,
+      "magnitude_catalog": 6.5,
+      "n_stations": 3,
+      "stratum": 1
+    },
+    {
+      "event": "Eureka2014",
+      "fold": 4,
+      "magnitude_catalog": 6.8,
+      "n_stations": 15,
+      "stratum": 1
+    },
+    {
+      "event": "Aegean2014",
+      "fold": 1,
+      "magnitude_catalog": 6.9,
+      "n_stations": 4,
+      "stratum": 1
+    },
+    {
+      "event": "Kilauea2018",
+      "fold": 3,
+      "magnitude_catalog": 6.9,
+      "n_stations": 15,
+      "stratum": 1
+    },
+    {
+      "event": "Kumamoto2016",
+      "fold": 1,
+      "magnitude_catalog": 7.0,
+      "n_stations": 161,
+      "stratum": 2
+    },
+    {
+      "event": "2016p661332",
+      "fold": 3,
+      "magnitude_catalog": 7.1,
+      "n_stations": 7,
+      "stratum": 2
+    },
+    {
+      "event": "Anchorage2018",
+      "fold": 4,
+      "magnitude_catalog": 7.1,
+      "n_stations": 8,
+      "stratum": 2
+    },
+    {
+      "event": "Miyagi2011B",
+      "fold": 2,
+      "magnitude_catalog": 7.1,
+      "n_stations": 46,
+      "stratum": 2
+    },
+    {
+      "event": "Puebla2017",
+      "fold": 0,
+      "magnitude_catalog": 7.1,
+      "n_stations": 2,
+      "stratum": 2
+    },
+    {
+      "event": "Ridgecrest2019",
+      "fold": 4,
+      "magnitude_catalog": 7.1,
+      "n_stations": 130,
+      "stratum": 3
+    },
+    {
+      "event": "2021p169083",
+      "fold": 2,
+      "magnitude_catalog": 7.2,
+      "n_stations": 10,
+      "stratum": 3
+    },
+    {
+      "event": "ElMayor2010",
+      "fold": 3,
+      "magnitude_catalog": 7.2,
+      "n_stations": 84,
+      "stratum": 3
+    },
+    {
+      "event": "Miyagi2011A",
+      "fold": 0,
+      "magnitude_catalog": 7.3,
+      "n_stations": 84,
+      "stratum": 3
+    },
+    {
+      "event": "us6000ah9t",
+      "fold": 1,
+      "magnitude_catalog": 7.4,
+      "n_stations": 5,
+      "stratum": 3
+    },
+    {
+      "event": "Noto2024",
+      "fold": 2,
+      "magnitude_catalog": 7.5,
+      "n_stations": 397,
+      "stratum": 4
+    },
+    {
+      "event": "Melinka2016",
+      "fold": 1,
+      "magnitude_catalog": 7.6,
+      "n_stations": 5,
+      "stratum": 4
+    },
+    {
+      "event": "Nicoya2012",
+      "fold": 0,
+      "magnitude_catalog": 7.6,
+      "n_stations": 9,
+      "stratum": 4
+    },
+    {
+      "event": "SandPoint2020",
+      "fold": 4,
+      "magnitude_catalog": 7.6,
+      "n_stations": 9,
+      "stratum": 4
+    },
+    {
+      "event": "us7000i9bw",
+      "fold": 3,
+      "magnitude_catalog": 7.6,
+      "n_stations": 11,
+      "stratum": 4
+    },
+    {
+      "event": "Ecuador2016",
+      "fold": 0,
+      "magnitude_catalog": 7.8,
+      "n_stations": 20,
+      "stratum": 5
+    },
+    {
+      "event": "Kaikoura2016",
+      "fold": 3,
+      "magnitude_catalog": 7.8,
+      "n_stations": 32,
+      "stratum": 5
+    },
+    {
+      "event": "Mentawai2010",
+      "fold": 1,
+      "magnitude_catalog": 7.8,
+      "n_stations": 9,
+      "stratum": 5
+    },
+    {
+      "event": "Nepal2015",
+      "fold": 2,
+      "magnitude_catalog": 7.8,
+      "n_stations": 6,
+      "stratum": 5
+    },
+    {
+      "event": "Simeonof2020",
+      "fold": 4,
+      "magnitude_catalog": 7.8,
+      "n_stations": 19,
+      "stratum": 5
+    },
+    {
+      "event": "Ibaraki2011",
+      "fold": 0,
+      "magnitude_catalog": 7.9,
+      "n_stations": 507,
+      "stratum": 6
+    },
+    {
+      "event": "RatIslands2014",
+      "fold": 2,
+      "magnitude_catalog": 7.9,
+      "n_stations": 3,
+      "stratum": 6
+    },
+    {
+      "event": "Tokachi2003",
+      "fold": 3,
+      "magnitude_catalog": 8.16,
+      "n_stations": 228,
+      "stratum": 6
+    },
+    {
+      "event": "Chignic2021",
+      "fold": 4,
+      "magnitude_catalog": 8.2,
+      "n_stations": 41,
+      "stratum": 6
+    },
+    {
+      "event": "Iquique2014",
+      "fold": 1,
+      "magnitude_catalog": 8.2,
+      "n_stations": 20,
+      "stratum": 6
+    },
+    {
+      "event": "Tehuantepec2017",
+      "fold": 2,
+      "magnitude_catalog": 8.2,
+      "n_stations": 4,
+      "stratum": 7
+    },
+    {
+      "event": "Illapel2015",
+      "fold": 4,
+      "magnitude_catalog": 8.3,
+      "n_stations": 24,
+      "stratum": 7
+    },
+    {
+      "event": "Maule2010",
+      "fold": 3,
+      "magnitude_catalog": 8.8,
+      "n_stations": 18,
+      "stratum": 7
+    },
+    {
+      "event": "Tohoku2011",
+      "fold": 1,
+      "magnitude_catalog": 9.1,
+      "n_stations": 688,
+      "stratum": 7
+    }
+  ],
+  "folds": [
+    {
+      "events": [
+        "Ecuador2016",
+        "Ibaraki2011",
+        "Lefkada2015",
+        "Miyagi2011A",
+        "Napa2014",
+        "Nicoya2012",
+        "Puebla2017"
+      ],
+      "fold": 0,
+      "magnitude_maximum": 7.9,
+      "magnitude_mean": 7.1742857142857135,
+      "magnitude_minimum": 6.02,
+      "n_events": 7,
+      "n_stations": 653
+    },
+    {
+      "events": [
+        "Aegean2014",
+        "Iquique2014",
+        "Kumamoto2016",
+        "Melinka2016",
+        "Mentawai2010",
+        "Parkfield2004",
+        "Tohoku2011",
+        "us6000ah9t"
+      ],
+      "fold": 1,
+      "magnitude_maximum": 9.1,
+      "magnitude_mean": 7.49625,
+      "magnitude_minimum": 5.97,
+      "n_events": 8,
+      "n_stations": 903
+    },
+    {
+      "events": [
+        "2013p613797",
+        "2021p169083",
+        "Miyagi2011B",
+        "Nepal2015",
+        "Noto2024",
+        "RatIslands2014",
+        "Tehuantepec2017",
+        "nc73821036"
+      ],
+      "fold": 2,
+      "magnitude_maximum": 8.2,
+      "magnitude_mean": 7.325000000000001,
+      "magnitude_minimum": 6.4,
+      "n_events": 8,
+      "n_stations": 485
+    },
+    {
+      "events": [
+        "2013p543824",
+        "2016p661332",
+        "ElMayor2010",
+        "Kaikoura2016",
+        "Kilauea2018",
+        "Maule2010",
+        "Tokachi2003",
+        "us7000i9bw"
+      ],
+      "fold": 3,
+      "magnitude_maximum": 8.8,
+      "magnitude_mean": 7.5075,
+      "magnitude_minimum": 6.5,
+      "n_events": 8,
+      "n_stations": 403
+    },
+    {
+      "events": [
+        "Anchorage2018",
+        "Chignic2021",
+        "Eureka2014",
+        "Illapel2015",
+        "Ridgecrest2019",
+        "SandPoint2020",
+        "Simeonof2020",
+        "ak014cbigci8"
+      ],
+      "fold": 4,
+      "magnitude_maximum": 8.3,
+      "magnitude_mean": 7.387499999999999,
+      "magnitude_minimum": 6.2,
+      "n_events": 8,
+      "n_stations": 250
+    }
+  ],
+  "n_events": 39,
+  "n_folds": 5,
+  "n_records": 2694
+}

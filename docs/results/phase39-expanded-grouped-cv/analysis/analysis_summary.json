@@ -1,0 +1,405 @@
+{
+  "campaign_metrics": {
+    "artifacts": {
+      "event_oof_all_seeds": "../oof_event_predictions_all_seeds.csv",
+      "event_oof_seed_ensemble": "../oof_event_predictions_seed_ensemble.csv",
+      "station_oof_all_seeds": "not_published_due_to_size",
+      "station_oof_seed_ensemble": "../oof_station_predictions_seed_ensemble.csv"
+    },
+    "completed_at_utc": "2026-08-31T04:47:45+00:00",
+    "completed_runs": 15,
+    "event_count": 39,
+    "event_metrics_by_seed": {
+      "17": {
+        "bias_mw": 0.06276924793536846,
+        "mae_mw": 0.2477092559521015,
+        "rmse_mw": 0.3344530533949001,
+        "within_0_2_fraction": 0.5641025641025641,
+        "within_0_3_fraction": 0.6923076923076923
+      },
+      "42": {
+        "bias_mw": 0.02438212052369729,
+        "mae_mw": 0.24500710536272097,
+        "rmse_mw": 0.3502219173981591,
+        "within_0_2_fraction": 0.5641025641025641,
+        "within_0_3_fraction": 0.717948717948718
+      },
+      "73": {
+        "bias_mw": -0.005271948300875151,
+        "mae_mw": 0.240445124797332,
+        "rmse_mw": 0.3813377708560453,
+        "within_0_2_fraction": 0.5897435897435898,
+        "within_0_3_fraction": 0.717948717948718
+      }
+    },
+    "event_metrics_seed_ensemble": {
+      "bias_mw": 0.02879051061776968,
+      "mae_mw": 0.23838266959557167,
+      "rmse_mw": 0.3420755409615227,
+      "within_0_2_fraction": 0.5897435897435898,
+      "within_0_3_fraction": 0.7435897435897436
+    },
+    "mode": "expanded_grouped_cv",
+    "station_count": 2694,
+    "station_metrics_seed_ensemble": {
+      "bias_mw": -0.09067127911709996,
+      "mae_mw": 0.2927745629348132,
+      "rmse_mw": 0.3857854164361153,
+      "within_0_2_fraction": 0.41870824053452116,
+      "within_0_3_fraction": 0.6410541945063103
+    },
+    "status": "complete",
+    "total_runs": 15
+  },
+  "created_at_utc": "2026-08-31T06:40:56+00:00",
+  "event_subgroups": {
+    "existing_phase39_excluding_noto": {
+      "event_count": 30,
+      "mae_mw": 0.21382156213124592
+    },
+    "new_events": {
+      "event_count": 8,
+      "mae_mw": 0.3477098047733307,
+      "within_0_2_fraction": 0.5
+    },
+    "noto2024": {
+      "absolute_error_mw": 0.1005988121032714,
+      "catalog_mw": 7.5,
+      "prediction_mw": 7.600598812103271,
+      "seed_std_mw": 0.2123004368822878
+    }
+  },
+  "fold_seed_event_mae": {
+    "max_mw": 0.3408932089805603,
+    "mean_mw": 0.24465598520778473,
+    "min_mw": 0.18828022480010986,
+    "std_mw": 0.03894961020550039
+  },
+  "original_vs_expanded_common_events": {
+    "event_count": 31,
+    "expanded_mae_mw": 0.21016921535615,
+    "improved_event_count": 19,
+    "mean_absolute_error_improvement_mw": 0.06217942699309327,
+    "original_mae_mw": 0.2723486423492432
+  },
+  "station_event_summary": [
+    {
+      "event": "2013p543824",
+      "station_bias": 0.20019608736038202,
+      "station_count": 8,
+      "station_mae": 0.20019608736038202
+    },
+    {
+      "event": "2013p613797",
+      "station_bias": 0.1268756866455078,
+      "station_count": 10,
+      "station_mae": 0.19864330291748042
+    },
+    {
+      "event": "2016p661332",
+      "station_bias": 0.5221558298383441,
+      "station_count": 7,
+      "station_mae": 0.5221558298383441
+    },
+    {
+      "event": "2021p169083",
+      "station_bias": 0.16881628036499022,
+      "station_count": 10,
+      "station_mae": 0.23190736770629877
+    },
+    {
+      "event": "Aegean2014",
+      "station_bias": -0.021437644958496076,
+      "station_count": 4,
+      "station_mae": 0.26362609863281244
+    },
+    {
+      "event": "Anchorage2018",
+      "station_bias": 0.026706218719482394,
+      "station_count": 8,
+      "station_mae": 0.24351584911346433
+    },
+    {
+      "event": "Chignic2021",
+      "station_bias": -0.4492454296205102,
+      "station_count": 41,
+      "station_mae": 0.48472885969208507
+    },
+    {
+      "event": "Ecuador2016",
+      "station_bias": -0.06565303802490235,
+      "station_count": 20,
+      "station_mae": 0.2904299259185791
+    },
+    {
+      "event": "ElMayor2010",
+      "station_bias": -0.0043759289241972485,
+      "station_count": 84,
+      "station_mae": 0.21456549848828993
+    },
+    {
+      "event": "Eureka2014",
+      "station_bias": -0.0535531997680664,
+      "station_count": 15,
+      "station_mae": 0.17085323333740232
+    },
+    {
+      "event": "Ibaraki2011",
+      "station_bias": 0.015157805862276262,
+      "station_count": 507,
+      "station_mae": 0.13719358105631263
+    },
+    {
+      "event": "Illapel2015",
+      "station_bias": -0.6420172452926636,
+      "station_count": 24,
+      "station_mae": 0.6420172452926636
+    },
+    {
+      "event": "Iquique2014",
+      "station_bias": -0.17983646392822267,
+      "station_count": 20,
+      "station_mae": 0.3027891159057617
+    },
+    {
+      "event": "Kaikoura2016",
+      "station_bias": 0.25036342442035675,
+      "station_count": 32,
+      "station_mae": 0.4216993898153305
+    },
+    {
+      "event": "Kilauea2018",
+      "station_bias": 0.4863469441731771,
+      "station_count": 15,
+      "station_mae": 0.5189586003621419
+    },
+    {
+      "event": "Kumamoto2016",
+      "station_bias": 0.16908477107930628,
+      "station_count": 161,
+      "station_mae": 0.2793161943092109
+    },
+    {
+      "event": "Lefkada2015",
+      "station_bias": 0.189860979715983,
+      "station_count": 3,
+      "station_mae": 0.189860979715983
+    },
+    {
+      "event": "Maule2010",
+      "station_bias": -0.23394529024759927,
+      "station_count": 18,
+      "station_mae": 0.295212189356486
+    },
+    {
+      "event": "Melinka2016",
+      "station_bias": -0.19008150100708013,
+      "station_count": 5,
+      "station_mae": 0.29917936325073236
+    },
+    {
+      "event": "Mentawai2010",
+      "station_bias": -0.302595403459337,
+      "station_count": 9,
+      "station_mae": 0.4214346673753526
+    },
+    {
+      "event": "Miyagi2011A",
+      "station_bias": 0.20779655660901747,
+      "station_count": 84,
+      "station_mae": 0.21530906927017934
+    },
+    {
+      "event": "Miyagi2011B",
+      "station_bias": -0.2098585211712381,
+      "station_count": 46,
+      "station_mae": 0.3249713026958963
+    },
+    {
+      "event": "Napa2014",
+      "station_bias": 0.9114465032305036,
+      "station_count": 28,
+      "station_mae": 0.9114465032305036
+    },
+    {
+      "event": "Nepal2015",
+      "station_bias": -0.022357543309529618,
+      "station_count": 6,
+      "station_mae": 0.10113294919331865
+    },
+    {
+      "event": "Nicoya2012",
+      "station_bias": -0.23944600423177084,
+      "station_count": 9,
+      "station_mae": 0.2709228727552626
+    },
+    {
+      "event": "Noto2024",
+      "station_bias": 0.08457633770382973,
+      "station_count": 397,
+      "station_mae": 0.24350019306019507
+    },
+    {
+      "event": "Parkfield2004",
+      "station_bias": 0.36497913707386365,
+      "station_count": 11,
+      "station_mae": 0.36497913707386365
+    },
+    {
+      "event": "Puebla2017",
+      "station_bias": -0.22317171096801758,
+      "station_count": 2,
+      "station_mae": 0.22317171096801758
+    },
+    {
+      "event": "RatIslands2014",
+      "station_bias": -0.6489783922831218,
+      "station_count": 3,
+      "station_mae": 0.6489783922831218
+    },
+    {
+      "event": "Ridgecrest2019",
+      "station_bias": -0.04180116286644568,
+      "station_count": 130,
+      "station_mae": 0.15579857826232907
+    },
+    {
+      "event": "SandPoint2020",
+      "station_bias": -0.05508857303195529,
+      "station_count": 9,
+      "station_mae": 0.21129364437527123
+    },
+    {
+      "event": "Simeonof2020",
+      "station_bias": -0.07472030740035208,
+      "station_count": 19,
+      "station_mae": 0.22289067820498812
+    },
+    {
+      "event": "Tehuantepec2017",
+      "station_bias": -0.3122934103012085,
+      "station_count": 4,
+      "station_mae": 0.3122934103012085
+    },
+    {
+      "event": "Tohoku2011",
+      "station_bias": -0.4443919083406759,
+      "station_count": 688,
+      "station_mae": 0.4443919083406759
+    },
+    {
+      "event": "Tokachi2003",
+      "station_bias": -0.04392041239822122,
+      "station_count": 228,
+      "station_mae": 0.2330909402746903
+    },
+    {
+      "event": "ak014cbigci8",
+      "station_bias": 1.2657984495162964,
+      "station_count": 4,
+      "station_mae": 1.2657984495162964
+    },
+    {
+      "event": "nc73821036",
+      "station_bias": -0.19005764855278862,
+      "station_count": 9,
+      "station_mae": 0.19704935285780162
+    },
+    {
+      "event": "us6000ah9t",
+      "station_bias": -0.14427690505981444,
+      "station_count": 5,
+      "station_mae": 0.2703991889953613
+    },
+    {
+      "event": "us7000i9bw",
+      "station_bias": -0.009918906471946052,
+      "station_count": 11,
+      "station_mae": 0.18785858154296872
+    }
+  ],
+  "status": "complete",
+  "waveform_example": "Noto2024::0957",
+  "worst_events": [
+    {
+      "absolute_error": 1.1402897834777832,
+      "event": "ak014cbigci8",
+      "event_class": "new",
+      "fold": 4,
+      "mw_catalog": 6.199999809265137,
+      "mw_pred_median": 7.34028959274292
+    },
+    {
+      "absolute_error": 0.8937339782714844,
+      "event": "Napa2014",
+      "event_class": "existing",
+      "fold": 0,
+      "mw_catalog": 6.019999980926514,
+      "mw_pred_median": 6.913733959197998
+    },
+    {
+      "absolute_error": 0.6154060363769531,
+      "event": "2016p661332",
+      "event_class": "new",
+      "fold": 3,
+      "mw_catalog": 7.099999904632568,
+      "mw_pred_median": 7.7154059410095215
+    },
+    {
+      "absolute_error": 0.5570120811462402,
+      "event": "Illapel2015",
+      "event_class": "existing",
+      "fold": 4,
+      "mw_catalog": 8.300000190734863,
+      "mw_pred_median": 7.742988109588623
+    },
+    {
+      "absolute_error": 0.5166902542114258,
+      "event": "RatIslands2014",
+      "event_class": "existing",
+      "fold": 2,
+      "mw_catalog": 7.900000095367432,
+      "mw_pred_median": 7.383309841156006
+    },
+    {
+      "absolute_error": 0.5071287155151367,
+      "event": "Kilauea2018",
+      "event_class": "existing",
+      "fold": 3,
+      "mw_catalog": 6.900000095367432,
+      "mw_pred_median": 7.407128810882568
+    },
+    {
+      "absolute_error": 0.4846372604370117,
+      "event": "Chignic2021",
+      "event_class": "existing",
+      "fold": 4,
+      "mw_catalog": 8.199999809265137,
+      "mw_pred_median": 7.715362548828125
+    },
+    {
+      "absolute_error": 0.3599185943603515,
+      "event": "Tohoku2011",
+      "event_class": "existing",
+      "fold": 1,
+      "mw_catalog": 9.100000381469728,
+      "mw_pred_median": 8.740081787109375
+    },
+    {
+      "absolute_error": 0.3358311653137207,
+      "event": "Parkfield2004",
+      "event_class": "existing",
+      "fold": 1,
+      "mw_catalog": 5.96999979019165,
+      "mw_pred_median": 6.305830955505371
+    },
+    {
+      "absolute_error": 0.3167071342468261,
+      "event": "Kaikoura2016",
+      "event_class": "existing",
+      "fold": 3,
+      "mw_catalog": 7.800000190734863,
+      "mw_pred_median": 8.11670732498169
+    }
+  ]
+}

@@ -193,6 +193,7 @@ class NormalizedStationRecord:
     north: np.ndarray
     vertical: np.ndarray
     origin_sec: float | None
+    waveform_start_sec: float | None = None
 
 
 def _iter_normalized_station_records(
@@ -259,6 +260,10 @@ def _iter_normalized_station_records(
                     "origin_sec",
                 ),
             )
+            waveform_start_sec = _get_field(
+                payload,
+                ("waveform_start_sec", "sample_phase_start_sec"),
+            )
             if any(
                 value is None
                 for value in (time_sec, east, north, vertical)
@@ -283,4 +288,5 @@ def _iter_normalized_station_records(
                 north=np.asarray(north),
                 vertical=np.asarray(vertical),
                 origin_sec=_optional_float(origin_sec),
+                waveform_start_sec=_optional_float(waveform_start_sec),
             )

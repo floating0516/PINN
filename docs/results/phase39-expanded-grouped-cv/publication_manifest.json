@@ -1,0 +1,226 @@
+{
+  "created_at_utc": "2026-08-31T06:54:12.055091+00:00",
+  "dataset_npz_sha256": "934dd65a9f704ef49e89fd9b241fb408372075439ce3b78038c06f86119bf5bc",
+  "file_count": 43,
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "568bd3c5b1ecd1a03671b8ab2b08d10dd58097349f4c40cb995dd456535f680d",
+      "size_bytes": 5682
+    },
+    {
+      "path": "analysis/analysis_summary.json",
+      "sha256": "1573217059f3c4e31aead28b30ce3d1fd0a4078e74f191a8b1712849bb5c8270",
+      "size_bytes": 11018
+    },
+    {
+      "path": "analysis/event_error_analysis.csv",
+      "sha256": "19fa1e6bc61c64390a665e97026c130848d48f49c0a4fb73aa951bb327bad39e",
+      "size_bytes": 6849
+    },
+    {
+      "path": "analysis/fold_seed_metrics.csv",
+      "sha256": "2741671fcde72b8a417a68f6ad2de1a6dfecc202b5980fc5452658d1ab714021",
+      "size_bytes": 2418
+    },
+    {
+      "path": "analysis/original_vs_expanded_common_events.csv",
+      "sha256": "cbed972b1af0c267186b923e62b3e02e25ee1c951d8cf59bbc4a1a806141950f",
+      "size_bytes": 8010
+    },
+    {
+      "path": "analysis/training_curve_summary.csv",
+      "sha256": "4876812283e5a97b0806060b246f762f18b20ef1cf55c0ff95bff90eb87941e8",
+      "size_bytes": 72418
+    },
+    {
+      "path": "event_folds.json",
+      "sha256": "dc8e87ae1d6e11601108ee9c042f0c70360c7678f35e9d70390154c0b32d9ddd",
+      "size_bytes": 7367
+    },
+    {
+      "path": "figures/en/01_oof_event_scatter.pdf",
+      "sha256": "a39adb238d51c630a34709c1a1a55194883100c0af5ea20a0e464a4ce635002e",
+      "size_bytes": 32057
+    },
+    {
+      "path": "figures/en/01_oof_event_scatter.png",
+      "sha256": "e25b1c0aaf0f0122b98c310d0015b15b38d9909ff89a0e7a6d408c3de7c1cfec",
+      "size_bytes": 172960
+    },
+    {
+      "path": "figures/en/02_oof_station_scatter.pdf",
+      "sha256": "895b0eca5a60205bea3e29f64bd0ea3aa9d358697494be09a394c575be8b4de2",
+      "size_bytes": 90827
+    },
+    {
+      "path": "figures/en/02_oof_station_scatter.png",
+      "sha256": "a731fd787aac0bc37dd7abca940dd017c13f0f994443ccc0406ac4237e5b594a",
+      "size_bytes": 419050
+    },
+    {
+      "path": "figures/en/03_event_absolute_errors.pdf",
+      "sha256": "6d0296544e47cb7f83c284ca538af5806e313b1eec6aae5a824232f777ab529b",
+      "size_bytes": 30641
+    },
+    {
+      "path": "figures/en/03_event_absolute_errors.png",
+      "sha256": "7969eef322e9d570e1fa3a29bce4980d3e7387cafd43687f0aad4b0cc0e28b69",
+      "size_bytes": 331495
+    },
+    {
+      "path": "figures/en/04_fold_seed_metrics.pdf",
+      "sha256": "db396dbb1d55324dfa0a227042ab493a92ae37ca61c4038e383f4d8c96f84cd7",
+      "size_bytes": 31791
+    },
+    {
+      "path": "figures/en/04_fold_seed_metrics.png",
+      "sha256": "4c5c3c18fb360c89bbe73845de759ddb7bc365bea5d05d28e4fb02259f1b342f",
+      "size_bytes": 168566
+    },
+    {
+      "path": "figures/en/05_training_curves.pdf",
+      "sha256": "478d82283dbadff816d3fd8f4592337a8d30a183421fb00ded631b3ee8d289c2",
+      "size_bytes": 52885
+    },
+    {
+      "path": "figures/en/05_training_curves.png",
+      "sha256": "2bf5e9295bb9c29dfcf32a4a3f27142bc72ba17f8e0e0deb295755d9e8e676b8",
+      "size_bytes": 576154
+    },
+    {
+      "path": "figures/en/06_selected_event_maps.pdf",
+      "sha256": "a446d2e08df0846fc889b40a95df61b0ac9df3e654740b4fb93a1ecd01896507",
+      "size_bytes": 489693
+    },
+    {
+      "path": "figures/en/06_selected_event_maps.png",
+      "sha256": "11d6177e25db3499b95f7433701fdcfac4a07ae22408bc7d5036db9deb3b310d",
+      "size_bytes": 480901
+    },
+    {
+      "path": "figures/en/07_noto_waveform_and_predictions.pdf",
+      "sha256": "193293f103d51fa272d3e327c1fdf95c955a971679c7589eeae76cbfcb744277",
+      "size_bytes": 75277
+    },
+    {
+      "path": "figures/en/07_noto_waveform_and_predictions.png",
+      "sha256": "10ed4183a09c88197ececa5841f4cb7aee4f24dea119e6f36075aa209ff2d463",
+      "size_bytes": 354884
+    },
+    {
+      "path": "figures/en/08_original_vs_expanded_snapshot.pdf",
+      "sha256": "77c4e7661994c453a8ef4c5a6b4578b5db2e1178b9917a1e40205f4db86c0462",
+      "size_bytes": 34322
+    },
+    {
+      "path": "figures/en/08_original_vs_expanded_snapshot.png",
+      "sha256": "572869ec70409ae3ac161d238e8b1f157382c42db029d68183f57af43c02b06a",
+      "size_bytes": 285024
+    },
+    {
+      "path": "figures/zh/01_oof_event_scatter.pdf",
+      "sha256": "0c3eef2c71f6041e3427cbd4f6a897daf6d410b68cb94a979d71ec0d82309ffc",
+      "size_bytes": 39472
+    },
+    {
+      "path": "figures/zh/01_oof_event_scatter.png",
+      "sha256": "76ad4a913d836dbfb94d7e3afe0c9270354699fe6c6e2b76f3a65fe87dded40c",
+      "size_bytes": 176713
+    },
+    {
+      "path": "figures/zh/02_oof_station_scatter.pdf",
+      "sha256": "ba907ed9a7cc95cf81b94643a76065ee867cb1d0253b13cb276727411a4fe0ac",
+      "size_bytes": 98659
+    },
+    {
+      "path": "figures/zh/02_oof_station_scatter.png",
+      "sha256": "2edcec4b4572a130b5729e6fa33c5467388d15f20875a4ad75d08b88515c56a6",
+      "size_bytes": 414736
+    },
+    {
+      "path": "figures/zh/03_event_absolute_errors.pdf",
+      "sha256": "aa03b65448a4cbe40685286b5d1c22214defae8fbe26347df20d18a00b6882fa",
+      "size_bytes": 34629
+    },
+    {
+      "path": "figures/zh/03_event_absolute_errors.png",
+      "sha256": "f8f45192ced3206af9a3ae7adc5a79f854cb893615178a0bec3a399241c688cc",
+      "size_bytes": 338061
+    },
+    {
+      "path": "figures/zh/04_fold_seed_metrics.pdf",
+      "sha256": "2170bf8b27bf2e56b95ca6d31b4a2c2ed1031953fe9733730a7b54afb40dd102",
+      "size_bytes": 34804
+    },
+    {
+      "path": "figures/zh/04_fold_seed_metrics.png",
+      "sha256": "fae181a15e46d7a79518d55ce82d40d1169b80bb7f9f20d4bcd4df7f24a13b21",
+      "size_bytes": 181843
+    },
+    {
+      "path": "figures/zh/05_training_curves.pdf",
+      "sha256": "6731a58a08343b9801e768c783d1e0a50c52e33a33fd77ace5115b634d84abf0",
+      "size_bytes": 64849
+    },
+    {
+      "path": "figures/zh/05_training_curves.png",
+      "sha256": "03cdbe79f232c6dec66678d2d2d6380b9ea517c7c85de1e25c1a2663ac72f379",
+      "size_bytes": 618567
+    },
+    {
+      "path": "figures/zh/06_selected_event_maps.pdf",
+      "sha256": "013eb5aa835626a1891b3096ea6523001b51c8a7bb963b7a22a9ac5347c8f5a9",
+      "size_bytes": 494698
+    },
+    {
+      "path": "figures/zh/06_selected_event_maps.png",
+      "sha256": "01e92ffec1816655cc51fc3bb4dcdfdcf75abb1bac301035bf39ef239bb614b6",
+      "size_bytes": 487935
+    },
+    {
+      "path": "figures/zh/07_noto_waveform_and_predictions.pdf",
+      "sha256": "2854e086f3608d336a427e790180c284d1e55b94eb16ac4add85783ba3ab282d",
+      "size_bytes": 88897
+    },
+    {
+      "path": "figures/zh/07_noto_waveform_and_predictions.png",
+      "sha256": "adc7af63b2834c9917bef936fbc8466ebc76f3145152629aced6abe8e8aec377",
+      "size_bytes": 365006
+    },
+    {
+      "path": "figures/zh/08_original_vs_expanded_snapshot.pdf",
+      "sha256": "32392f5eb6b229c1f5f8d1380e7738ccde9e193bd35906550753945ae147dac8",
+      "size_bytes": 44414
+    },
+    {
+      "path": "figures/zh/08_original_vs_expanded_snapshot.png",
+      "sha256": "8dee46b18d39406f5947f74ea5312d26fc8e9fe158cd0b2124b38a648eeca5c9",
+      "size_bytes": 302006
+    },
+    {
+      "path": "oof_event_predictions_all_seeds.csv",
+      "sha256": "ee989cb1a3af867f5deb526a796436d93eafc37ae7d6f86b6cf5192c888ab717",
+      "size_bytes": 18745
+    },
+    {
+      "path": "oof_event_predictions_seed_ensemble.csv",
+      "sha256": "43e9b3ede9a84d761e79b7d2709c6a4d39dd18491a9205c376fbf8cf3596bfd4",
+      "size_bytes": 4175
+    },
+    {
+      "path": "oof_station_predictions_seed_ensemble.csv",
+      "sha256": "a2899b58d20dbf60a8c98537d74c14cce694da7c9b0a5a2fe5590f4d138b28ed",
+      "size_bytes": 289677
+    },
+    {
+      "path": "summary.json",
+      "sha256": "f7fb8beb51e4f341d32938f0fc4a42a03af044c09ed4e3aefd873fc944c3a1b3",
+      "size_bytes": 2770
+    }
+  ],
+  "schema_version": "phase39-expanded-publication-manifest/v1",
+  "source_training_commit": "10249dd080b74b6ba6b1cc93f1ea09a755d7283b",
+  "source_training_git_dirty": true,
+  "status": "complete"
+}

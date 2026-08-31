@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 import math
 from typing import Any
 
@@ -104,6 +105,25 @@ def build_station_sample(
     if record.origin_sec is not None:
         time_rel = time_rel - record.origin_sec
 
+    effective_waveform_config = waveform_config
+    if record.waveform_start_sec is not None:
+        phase_start = float(record.waveform_start_sec)
+        target_dt = 1.0 / waveform_config.sample_rate_hz
+        phase_offset = phase_start - waveform_config.start_sec
+        if (
+            not math.isfinite(phase_start)
+            or phase_offset < -1.0e-8
+            or phase_offset >= target_dt
+        ):
+            raise SampleRejected(
+                "invalid_waveform",
+                "waveform_start_sec must fall within the first target interval",
+            )
+        effective_waveform_config = replace(
+            waveform_config,
+            start_sec=phase_start,
+        )
+
     east = np.asarray(record.east, dtype=np.float64)
     north = np.asarray(record.north, dtype=np.float64)
     vertical_raw = np.asarray(record.vertical, dtype=np.float64)
@@ -128,14 +148,14 @@ def build_station_sample(
             radial_raw,
             units=units,
             p_arrival_sec=p_arrival_sec,
-            config=waveform_config,
+            config=effective_waveform_config,
         )
         vertical = preprocess_waveform(
             time_rel,
             vertical_raw,
             units=units,
             p_arrival_sec=p_arrival_sec,
-            config=waveform_config,
+            config=effective_waveform_config,
         )
     except ValueError as exc:
         detail = str(exc)
@@ -161,6 +181,7 @@ def build_station_sample(
         "raw_dt_sec": radial.raw_dt_sec,
         "valid_fraction": radial.valid_fraction,
         "baseline_source": radial.baseline_source,
+        "waveform_start_sec": effective_waveform_config.start_sec,
         "radial_peak_cm": radial_peak_cm,
         "epicentral_distance_m": geometry.epicentral_distance_m,
         "source_distance_m": geometry.source_distance_m,
@@ -185,7 +206,7 @@ def build_station_sample(
             tangential_raw,
             units=units,
             p_arrival_sec=p_arrival_sec,
-            config=waveform_config,
+            config=effective_waveform_config,
         )
     except ValueError as exc:
         raise ValueError(

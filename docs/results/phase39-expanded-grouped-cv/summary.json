@@ -1,0 +1,76 @@
+{
+  "schema_version": "phase39-expanded-publication/v1",
+  "status": "complete",
+  "dataset": {
+    "event_count": 39,
+    "accepted_station_count": 2694,
+    "existing_event_count": 31,
+    "new_event_count": 8,
+    "new_event_station_count": 64,
+    "same_event_station_additions": 50,
+    "noto_station_additions": 22,
+    "npz_sha256": "934dd65a9f704ef49e89fd9b241fb408372075439ce3b78038c06f86119bf5bc",
+    "original_npz_sha256": "2e1fa4c12fc1eb03ffc8bf9235491f0886d4b0d360ebcb3486baca4d948cfd6a"
+  },
+  "protocol": {
+    "split": "grouped_event_5fold",
+    "folds": 5,
+    "seeds": [17, 42, 73],
+    "model_count": 15,
+    "maximum_epochs": 200,
+    "lambda_synth": 0.5,
+    "radiation_coefficient_contract": "glehman_scalar",
+    "synth_polarity_mode": "global_invariant",
+    "config_sha256": "7f593e418ba52ade682b8d8bb2cfd3c8a2503982e53857b03bb7de1894c9d60e",
+    "fold_assignment_sha256": "614153f55bd8e1208f6ea2d8b5b20cbe23c32902a3a67d0a1028675f82cc1f6d"
+  },
+  "event_metrics_seed_ensemble": {
+    "mae_mw": 0.23838266959557167,
+    "rmse_mw": 0.3420755409615227,
+    "bias_mw": 0.02879051061776968,
+    "within_0_2_fraction": 0.5897435897435898,
+    "within_0_3_fraction": 0.7435897435897436
+  },
+  "station_metrics_seed_ensemble": {
+    "mae_mw": 0.2927745629348132,
+    "rmse_mw": 0.3857854164361153,
+    "bias_mw": -0.09067127911709996,
+    "within_0_2_fraction": 0.41870824053452116,
+    "within_0_3_fraction": 0.6410541945063103
+  },
+  "subgroups": {
+    "existing_non_noto_event_mae_mw": 0.21382156213124592,
+    "new_event_mae_mw": 0.3477098047733307,
+    "new_events_within_0_2_fraction": 0.5,
+    "noto_prediction_mw": 7.600598812103271,
+    "noto_absolute_error_mw": 0.1005988121032714,
+    "noto_seed_std_mw": 0.2123004368822878
+  },
+  "original_vs_expanded_common_events": {
+    "event_count": 31,
+    "original_mae_mw": 0.2723486423492432,
+    "expanded_mae_mw": 0.21016921535615,
+    "improved_event_count": 19,
+    "degraded_event_count": 12
+  },
+  "principal_new_event_failures": [
+    {
+      "event": "ak014cbigci8",
+      "catalog_mw": 6.2,
+      "prediction_mw": 7.340290069580078,
+      "absolute_error_mw": 1.140290069580078
+    },
+    {
+      "event": "2016p661332",
+      "catalog_mw": 7.1,
+      "prediction_mw": 7.71540641784668,
+      "absolute_error_mw": 0.6154064178466797
+    }
+  ],
+  "source_artifacts": {
+    "campaign_summary_sha256": "c83f305d7b771c058743a77053a252c1f1a11faf17c3a9f4cc01cd608c7bafbb",
+    "event_oof_all_seeds_sha256": "a95bf8e90c7146a13c835b62582d82b4a5c742daae400c52a4638a68a6324c46",
+    "event_oof_seed_ensemble_sha256": "2f4caed288dd98e6717b8a05efb903d0ab626a274b1de82f93d31a3ff3f8053a",
+    "station_oof_seed_ensemble_sha256": "25b839f4ee8dc2e77c586d6c40e951690ee55b093eca03f16cbe80047eb61dc9"
+  }
+}
