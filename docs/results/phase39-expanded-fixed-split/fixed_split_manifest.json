@@ -1,0 +1,241 @@
+{
+  "assignment_sha256": "e4807aa1e6b5b389caf23974f62ff9da6b8add7f7887ec23a59d5d35a455eba7",
+  "legacy_test_events": [
+    "Ecuador2016",
+    "Iquique2014",
+    "Napa2014",
+    "Puebla2017",
+    "Ridgecrest2019",
+    "Tokachi2003"
+  ],
+  "new_test_events": [
+    "2016p661332",
+    "ak014cbigci8",
+    "us7000i9bw"
+  ],
+  "roles": {
+    "test": {
+      "event_count": 9,
+      "events": [
+        {
+          "event": "2016p661332",
+          "magnitude_catalog": 7.1,
+          "n_stations": 7
+        },
+        {
+          "event": "Ecuador2016",
+          "magnitude_catalog": 7.8,
+          "n_stations": 20
+        },
+        {
+          "event": "Iquique2014",
+          "magnitude_catalog": 8.2,
+          "n_stations": 20
+        },
+        {
+          "event": "Napa2014",
+          "magnitude_catalog": 6.02,
+          "n_stations": 28
+        },
+        {
+          "event": "Puebla2017",
+          "magnitude_catalog": 7.1,
+          "n_stations": 2
+        },
+        {
+          "event": "Ridgecrest2019",
+          "magnitude_catalog": 7.1,
+          "n_stations": 130
+        },
+        {
+          "event": "Tokachi2003",
+          "magnitude_catalog": 8.16,
+          "n_stations": 228
+        },
+        {
+          "event": "ak014cbigci8",
+          "magnitude_catalog": 6.2,
+          "n_stations": 4
+        },
+        {
+          "event": "us7000i9bw",
+          "magnitude_catalog": 7.6,
+          "n_stations": 11
+        }
+      ],
+      "magnitude_maximum": 8.2,
+      "magnitude_minimum": 6.02,
+      "record_count": 450
+    },
+    "train": {
+      "event_count": 24,
+      "events": [
+        {
+          "event": "2013p543824",
+          "magnitude_catalog": 6.5,
+          "n_stations": 8
+        },
+        {
+          "event": "2013p613797",
+          "magnitude_catalog": 6.5,
+          "n_stations": 10
+        },
+        {
+          "event": "2021p169083",
+          "magnitude_catalog": 7.2,
+          "n_stations": 10
+        },
+        {
+          "event": "Aegean2014",
+          "magnitude_catalog": 6.9,
+          "n_stations": 4
+        },
+        {
+          "event": "Chignic2021",
+          "magnitude_catalog": 8.2,
+          "n_stations": 41
+        },
+        {
+          "event": "ElMayor2010",
+          "magnitude_catalog": 7.2,
+          "n_stations": 84
+        },
+        {
+          "event": "Eureka2014",
+          "magnitude_catalog": 6.8,
+          "n_stations": 15
+        },
+        {
+          "event": "Ibaraki2011",
+          "magnitude_catalog": 7.9,
+          "n_stations": 507
+        },
+        {
+          "event": "Illapel2015",
+          "magnitude_catalog": 8.3,
+          "n_stations": 24
+        },
+        {
+          "event": "Kaikoura2016",
+          "magnitude_catalog": 7.8,
+          "n_stations": 32
+        },
+        {
+          "event": "Kilauea2018",
+          "magnitude_catalog": 6.9,
+          "n_stations": 15
+        },
+        {
+          "event": "Kumamoto2016",
+          "magnitude_catalog": 7.0,
+          "n_stations": 161
+        },
+        {
+          "event": "Lefkada2015",
+          "magnitude_catalog": 6.5,
+          "n_stations": 3
+        },
+        {
+          "event": "Melinka2016",
+          "magnitude_catalog": 7.6,
+          "n_stations": 5
+        },
+        {
+          "event": "Mentawai2010",
+          "magnitude_catalog": 7.8,
+          "n_stations": 9
+        },
+        {
+          "event": "Miyagi2011A",
+          "magnitude_catalog": 7.3,
+          "n_stations": 84
+        },
+        {
+          "event": "Miyagi2011B",
+          "magnitude_catalog": 7.1,
+          "n_stations": 46
+        },
+        {
+          "event": "Nepal2015",
+          "magnitude_catalog": 7.8,
+          "n_stations": 6
+        },
+        {
+          "event": "Nicoya2012",
+          "magnitude_catalog": 7.6,
+          "n_stations": 9
+        },
+        {
+          "event": "Simeonof2020",
+          "magnitude_catalog": 7.8,
+          "n_stations": 19
+        },
+        {
+          "event": "Tehuantepec2017",
+          "magnitude_catalog": 8.2,
+          "n_stations": 4
+        },
+        {
+          "event": "Tohoku2011",
+          "magnitude_catalog": 9.1,
+          "n_stations": 688
+        },
+        {
+          "event": "nc73821036",
+          "magnitude_catalog": 6.4,
+          "n_stations": 9
+        },
+        {
+          "event": "us6000ah9t",
+          "magnitude_catalog": 7.4,
+          "n_stations": 5
+        }
+      ],
+      "magnitude_maximum": 9.1,
+      "magnitude_minimum": 6.4,
+      "record_count": 1798
+    },
+    "validation": {
+      "event_count": 6,
+      "events": [
+        {
+          "event": "Anchorage2018",
+          "magnitude_catalog": 7.1,
+          "n_stations": 8
+        },
+        {
+          "event": "Maule2010",
+          "magnitude_catalog": 8.8,
+          "n_stations": 18
+        },
+        {
+          "event": "Noto2024",
+          "magnitude_catalog": 7.5,
+          "n_stations": 397
+        },
+        {
+          "event": "Parkfield2004",
+          "magnitude_catalog": 5.97,
+          "n_stations": 11
+        },
+        {
+          "event": "RatIslands2014",
+          "magnitude_catalog": 7.9,
+          "n_stations": 3
+        },
+        {
+          "event": "SandPoint2020",
+          "magnitude_catalog": 7.6,
+          "n_stations": 9
+        }
+      ],
+      "magnitude_maximum": 8.8,
+      "magnitude_minimum": 5.97,
+      "record_count": 446
+    }
+  },
+  "schema_version": "phase39-expanded-fixed-split/v1",
+  "status": "frozen",
+  "total_event_count": 39,
+  "total_record_count": 2694
+}

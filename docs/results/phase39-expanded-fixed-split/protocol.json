@@ -1,0 +1,23 @@
+{
+  "config_path": "/home/lihe/PINN_Mag/worktrees/run-phase39-confirmatory-121197d/configs/experiments/phase39_expanded_grouped_cv.yaml",
+  "config_sha256": "7f593e418ba52ade682b8d8bb2cfd3c8a2503982e53857b03bb7de1894c9d60e",
+  "created_at_utc": "2026-08-31T07:40:56+00:00",
+  "dataset_path": "/home/lihe/PINN_Mag/data/magnitude-label-snapshots/phase39-expanded-20260831T035810Z-2e1fa4c1/gnss_events_matched.phase39_expanded.npz",
+  "dataset_sha256": "934dd65a9f704ef49e89fd9b241fb408372075439ce3b78038c06f86119bf5bc",
+  "epochs": 200,
+  "fixed_split_manifest_sha256": "f25c040811b4a5e0f08f33dbf138c599d07964d41bc93df52be2ba60fbaead1b",
+  "git_commit": "6716bbf5333981afa3c9016b6b90590b211cc06b",
+  "git_dirty": true,
+  "lambda_synth": 0.5,
+  "mode": "formal",
+  "schema_version": "phase39-expanded-fixed-split-campaign/v1",
+  "seeds": [
+    17,
+    42,
+    73
+  ],
+  "selection_metric": "fixed_validation_event_mae_catalog",
+  "split_assignment_sha256": "e4807aa1e6b5b389caf23974f62ff9da6b8add7f7887ec23a59d5d35a455eba7",
+  "status": "frozen",
+  "test_policy": "evaluate_selected_seed_once"
+}

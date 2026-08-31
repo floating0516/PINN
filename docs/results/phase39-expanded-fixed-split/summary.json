@@ -1,0 +1,88 @@
+{
+  "created_at_utc": "2026-08-31T08:23:00+00:00",
+  "diagnostic_excluding_two_largest_outliers": {
+    "event_count": 7,
+    "event_mae_mw": 0.18910200255257736,
+    "excluded_events": [
+      "Napa2014",
+      "ak014cbigci8"
+    ],
+    "headline_metric": false
+  },
+  "lambda_synth": 0.5,
+  "method": "Phase 39 expanded fixed split with synthesized-waveform loss",
+  "role_counts": {
+    "test": {
+      "events": 9,
+      "stations": 450
+    },
+    "train": {
+      "events": 24,
+      "stations": 1798
+    },
+    "validation": {
+      "events": 6,
+      "stations": 446
+    }
+  },
+  "selection": {
+    "candidates": [
+      {
+        "best_epoch": 29,
+        "best_validation_event_mae_mw": 0.19107679526011148,
+        "checkpoint_sha256": "cddf58d26c604be7d12fdad494e3b68e64ae15069194f7f511e0393806c831ce",
+        "epochs_completed": 79,
+        "seed": 17
+      },
+      {
+        "best_epoch": 115,
+        "best_validation_event_mae_mw": 0.18197627862294516,
+        "checkpoint_sha256": "3d0dfb6a26afda65288db66906eb3afcf8a70cd3690ada36a9839b5cf1a5789f",
+        "epochs_completed": 165,
+        "seed": 42
+      },
+      {
+        "best_epoch": 61,
+        "best_validation_event_mae_mw": 0.17130513985951742,
+        "checkpoint_sha256": "5905ccaabcbcfc151d6f2dfa8aea277725d409fb62bd16c437ac5288bcafb4fe",
+        "epochs_completed": 111,
+        "seed": 73
+      }
+    ],
+    "metric": "fixed_validation_event_mae_catalog",
+    "selected_checkpoint_sha256": "5905ccaabcbcfc151d6f2dfa8aea277725d409fb62bd16c437ac5288bcafb4fe",
+    "selected_seed": 73,
+    "selected_validation_event_mae_mw": 0.17130513985951742
+  },
+  "split_assignment_sha256": "e4807aa1e6b5b389caf23974f62ff9da6b8add7f7887ec23a59d5d35a455eba7",
+  "status": "complete",
+  "test": {
+    "event_bias": 0.10547033945719402,
+    "event_count": 9,
+    "event_mae": 0.3496432304382324,
+    "event_rmse": 0.4669581667938597,
+    "reference": "catalog",
+    "station_bias": -0.13780144585503473,
+    "station_count": 450,
+    "station_mae": 0.3146495034959581,
+    "station_rmse": 0.4366908185825911
+  },
+  "test_subgroups": {
+    "legacy": {
+      "bias_mw": -0.0168307622273763,
+      "event_count": 6,
+      "mae_mw": 0.2957743803660075,
+      "rmse_mw": 0.39014240560887414,
+      "within_0_2_fraction": 0.3333333333333333,
+      "within_0_3_fraction": 0.8333333333333334
+    },
+    "new": {
+      "bias_mw": 0.35007254282633465,
+      "event_count": 3,
+      "mae_mw": 0.4573809305826823,
+      "rmse_mw": 0.5913777095037381,
+      "within_0_2_fraction": 0.3333333333333333,
+      "within_0_3_fraction": 0.6666666666666666
+    }
+  }
+}

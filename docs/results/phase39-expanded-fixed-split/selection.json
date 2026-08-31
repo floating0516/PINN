@@ -1,0 +1,28 @@
+{
+  "candidates": [
+    {
+      "best_epoch": 61,
+      "best_validation_event_mae_mw": 0.17130513985951742,
+      "checkpoint_sha256": "5905ccaabcbcfc151d6f2dfa8aea277725d409fb62bd16c437ac5288bcafb4fe",
+      "seed": 73
+    },
+    {
+      "best_epoch": 115,
+      "best_validation_event_mae_mw": 0.18197627862294516,
+      "checkpoint_sha256": "3d0dfb6a26afda65288db66906eb3afcf8a70cd3690ada36a9839b5cf1a5789f",
+      "seed": 42
+    },
+    {
+      "best_epoch": 29,
+      "best_validation_event_mae_mw": 0.19107679526011148,
+      "checkpoint_sha256": "cddf58d26c604be7d12fdad494e3b68e64ae15069194f7f511e0393806c831ce",
+      "seed": 17
+    }
+  ],
+  "selected_at_utc": "2026-08-31T07:48:49+00:00",
+  "selected_checkpoint_path": "/home/lihe/PINN_Mag/runs/phase39-expanded-fixed-split-20260831T0740Z/candidates/seed_73/models/20260831_154624/best_model.pth",
+  "selected_checkpoint_sha256": "5905ccaabcbcfc151d6f2dfa8aea277725d409fb62bd16c437ac5288bcafb4fe",
+  "selected_seed": 73,
+  "selected_validation_event_mae_mw": 0.17130513985951742,
+  "selection_metric": "fixed_validation_event_mae_catalog"
+}

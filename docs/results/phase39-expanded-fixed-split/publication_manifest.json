@@ -1,0 +1,134 @@
+{
+  "created_at_utc": "2026-08-31T08:23:00+00:00",
+  "file_count": 25,
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "814699bb8408daff3fc843b353e7bdaa36ec3d42211b313e16e19e9db6117d50",
+      "size_bytes": 4487
+    },
+    {
+      "path": "analysis/seed_selection.csv",
+      "sha256": "b7ecea530d173f15b9f31101384388b35e302a082876a49fa2223aa2f288e88e",
+      "size_bytes": 365
+    },
+    {
+      "path": "analysis/test_event_error_analysis.csv",
+      "sha256": "b5c379449dd175d191224ff58234734a684298a3f3e5d624cee8bffdc32ffd5c",
+      "size_bytes": 1674
+    },
+    {
+      "path": "analysis/test_event_station_summary.csv",
+      "sha256": "c9f52294059c46fd28f9e827b9836bb6051fc85bd60348b90fa55c184929abd6",
+      "size_bytes": 2488
+    },
+    {
+      "path": "analysis/training_logs/seed_17.csv",
+      "sha256": "caae77fc18baab7f87a8c63237b84b09b2bbd7f362ab3ba8f7276c4ff465da6c",
+      "size_bytes": 15832
+    },
+    {
+      "path": "analysis/training_logs/seed_42.csv",
+      "sha256": "6446a45a65b17a69509e4713e0c3fb9ac1397124cc357fe4c5c69e8ec0e7bb81",
+      "size_bytes": 33125
+    },
+    {
+      "path": "analysis/training_logs/seed_73.csv",
+      "sha256": "569ddbe835bc302f5cd4ffa2825d397fbaad7486709e0dbab2138f95a7c1aaa2",
+      "size_bytes": 22258
+    },
+    {
+      "path": "figures/en/01_split_overview.pdf",
+      "sha256": "3e375de66bb4ec10a10250761b15c747d052f1eb8d565a920e1f68ab6dbd3be5",
+      "size_bytes": 32420
+    },
+    {
+      "path": "figures/en/01_split_overview.png",
+      "sha256": "2734efe26184d1f640aa8fd22b34fc0fb928adbfd3bb435f3d1c1df23e1f0e26",
+      "size_bytes": 163066
+    },
+    {
+      "path": "figures/en/02_seed_validation_selection.pdf",
+      "sha256": "10d440b2d04ad769a5226acf5b712e3df4c9adb21559ab9193687033a4ec4499",
+      "size_bytes": 27374
+    },
+    {
+      "path": "figures/en/02_seed_validation_selection.png",
+      "sha256": "9ec600609b73b6b9e2b1c2f7b95b7a7450e5af4a78a8953251c24c5008d6d61d",
+      "size_bytes": 263693
+    },
+    {
+      "path": "figures/en/03_test_event_scatter.pdf",
+      "sha256": "535bd18a3ebad3d43499fa388a271f1571f3e53e0160d7e7b095d221e612d573",
+      "size_bytes": 28576
+    },
+    {
+      "path": "figures/en/03_test_event_scatter.png",
+      "sha256": "d79a741e45afb06253026d4193cc910eabcb8053787f7befb7bf5794f2bd9ad6",
+      "size_bytes": 145820
+    },
+    {
+      "path": "figures/en/04_test_event_signed_errors.pdf",
+      "sha256": "fbfd99e746381f214503debab8529a0dfab84556933100d6872eca272e97c3cb",
+      "size_bytes": 22462
+    },
+    {
+      "path": "figures/en/04_test_event_signed_errors.png",
+      "sha256": "ed9de372360849fb1001f7d462d2f63e45c610b8c1752fb27e3fb7c0dff5f3a1",
+      "size_bytes": 147416
+    },
+    {
+      "path": "figures/en/05_test_station_predictions.pdf",
+      "sha256": "9d3aeaf5a64506570b2018aded475a61916b7064a4000ac3ca910cf376450d44",
+      "size_bytes": 34086
+    },
+    {
+      "path": "figures/en/05_test_station_predictions.png",
+      "sha256": "2eea1efe5516e2a2e661676c2ad719a6a63d24fb177555b083d5399ea97d48ea",
+      "size_bytes": 302987
+    },
+    {
+      "path": "figures/en/06_selected_seed_training.pdf",
+      "sha256": "d6ffdff34d60dc36d06816bc26d5de394f79030d982de6c35cba4c97f4143361",
+      "size_bytes": 31257
+    },
+    {
+      "path": "figures/en/06_selected_seed_training.png",
+      "sha256": "ece4f4a700338cf2fd1fd1ab1471092137edc8e8b825617b87adc80210d75724",
+      "size_bytes": 367521
+    },
+    {
+      "path": "fixed_split_manifest.json",
+      "sha256": "f25c040811b4a5e0f08f33dbf138c599d07964d41bc93df52be2ba60fbaead1b",
+      "size_bytes": 5564
+    },
+    {
+      "path": "protocol.json",
+      "sha256": "edc04165abafbfed43533a658e705696730bf38476ae3a1a9b6527427b35e2d0",
+      "size_bytes": 1093
+    },
+    {
+      "path": "selected_test_event_predictions.csv",
+      "sha256": "8a76784a5b5467363e84eaf06f9560f5e9a4d1d1b8a8220e2cb59d1326c7dac6",
+      "size_bytes": 1448
+    },
+    {
+      "path": "selected_test_station_predictions.csv",
+      "sha256": "4d8af40fd837d1d3379a0af6c37c9351af21d75f5635a3a473a8a59629410f96",
+      "size_bytes": 88027
+    },
+    {
+      "path": "selection.json",
+      "sha256": "1d248cb1900da3b479c6425122c56aede903ac535f33c1b67abde26e25f5311f",
+      "size_bytes": 1101
+    },
+    {
+      "path": "summary.json",
+      "sha256": "5f594fc57590e1fe0041bf7c2952284090fda78af54f29cc9970a44e4893f562",
+      "size_bytes": 2614
+    }
+  ],
+  "selected_checkpoint_sha256": "5905ccaabcbcfc151d6f2dfa8aea277725d409fb62bd16c437ac5288bcafb4fe",
+  "split_assignment_sha256": "e4807aa1e6b5b389caf23974f62ff9da6b8add7f7887ec23a59d5d35a455eba7",
+  "status": "complete"
+}
