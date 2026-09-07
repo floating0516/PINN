@@ -1,0 +1,133 @@
+{
+  "status": "complete",
+  "cohort": "validation",
+  "split_assignment_sha256": "e4807aa1e6b5b389caf23974f62ff9da6b8add7f7887ec23a59d5d35a455eba7",
+  "variants": {
+    "old": {
+      "short": "OLD",
+      "label": "Causal Phase 39 (final-Mw target)",
+      "replay": "/home/lihe/PINN_Mag/runs/phase39-causal-4a25-released-replay-validation-20260907-v2",
+      "checkpoint_sha256": "4a2540241fcbd9182edd05fb5fdb24641b1c836fa1ccd2ad12b101f91fa3e1ab"
+    },
+    "new1": {
+      "short": "NEW-1",
+      "label": "Released-moment target",
+      "replay": "/home/lihe/PINN_Mag/runs/phase39-causal-released-moment-seed73-20260907-v1-replay-validation-v2",
+      "checkpoint_sha256": "2206b94b5407460978d9d3e5fb9a4fa1a8d2055f61fc5a91893810f4d1048cb1"
+    },
+    "new2": {
+      "short": "NEW-2",
+      "label": "+ monotone pair term",
+      "replay": "/home/lihe/PINN_Mag/runs/phase39-causal-released-moment-monotone-seed73-20260907-v1-replay-validation",
+      "checkpoint_sha256": "662714db28cd14e78e5e888d0f37c05a943cad62f854d4f11a30e085c2dc145c"
+    },
+    "new3": {
+      "short": "NEW-3",
+      "label": "+ scaling floor -1.0 Mw",
+      "replay": "/home/lihe/PINN_Mag/runs/phase39-causal-released-moment-scale1p0-seed73-20260907-v1-replay-validation",
+      "checkpoint_sha256": "56d55b1ad65388ae5924c4d0504211adf2aa724bc7873c49eea7cddca1f02d31"
+    }
+  },
+  "files": [
+    {
+      "path": "README.md",
+      "sha256": "34a6c9f418bccc6454c69843a29bc3640ed5874a8ef41afb7c6980172866dfa4",
+      "size_bytes": 9089
+    },
+    {
+      "path": "analysis/event_trajectories_new-1.csv",
+      "sha256": "1f7899cb04b6031735456ac2ca1994936f780f98ab4f17a3d4f8a34820dffe3e",
+      "size_bytes": 1284886
+    },
+    {
+      "path": "analysis/event_trajectories_new-2.csv",
+      "sha256": "37c6e53bf33381e7c7547efa4faa85363fb551c658d7f66523a7455c736f5e4c",
+      "size_bytes": 1284648
+    },
+    {
+      "path": "analysis/event_trajectories_new-3.csv",
+      "sha256": "6158296c4fe421e7b96e37e6b3e45ced2a080fa0e72403554c902b02a0646188",
+      "size_bytes": 1284843
+    },
+    {
+      "path": "analysis/event_trajectories_old.csv",
+      "sha256": "374656eb1cb6892e928bd1ff7e6023cf26ab90e1b76ab59024b30fbab4997ea0",
+      "size_bytes": 1284355
+    },
+    {
+      "path": "analysis/replay_summary_new-1.json",
+      "sha256": "6655e6b5009b1586917a261cb671ffc03faa4cd0e1f3df3670c6da6c1cc05415",
+      "size_bytes": 13235
+    },
+    {
+      "path": "analysis/replay_summary_new-2.json",
+      "sha256": "aa362f9d34b97e526185cc1a26fcc3dc3941d05ea341993496b716c66cc34681",
+      "size_bytes": 13284
+    },
+    {
+      "path": "analysis/replay_summary_new-3.json",
+      "sha256": "495d47138de61202237e8ad7db290882c8f2b2dd42f80f18ca8b52999f34277e",
+      "size_bytes": 13282
+    },
+    {
+      "path": "analysis/replay_summary_old.json",
+      "sha256": "865d91f668d66dc1119d23d20d983a820cc6c59f07c5651bd13031124485cb2d",
+      "size_bytes": 13057
+    },
+    {
+      "path": "analysis/validation_gates.csv",
+      "sha256": "fee1e89ff07f6ef4288765bcaade6f2bb4b9e3e9ec07eebb1225d8379d7eb9fe",
+      "size_bytes": 1237
+    },
+    {
+      "path": "analysis/validation_objective_by_variant.csv",
+      "sha256": "ecd24a61d84df5da0c5a223095a8f9d3925b4c11854df1db9393af1b543e5b46",
+      "size_bytes": 4149
+    },
+    {
+      "path": "analysis/validation_objective_per_event_all_variants.csv",
+      "sha256": "bd2372fc7dc6880aad7abf179fa07ef1c8c65b8cedf10f63bffe4ac97468617c",
+      "size_bytes": 42452
+    },
+    {
+      "path": "figures/01_event_trajectories.pdf",
+      "sha256": "a0dd84cb21af0b95f750b66b8d9c588a122a480ae18a53f56f3f0978ca1bf554",
+      "size_bytes": 71456
+    },
+    {
+      "path": "figures/01_event_trajectories.png",
+      "sha256": "2fe48b899864e0bb6c103ddd34340168df559c203ae8967bb69f4400154422d7",
+      "size_bytes": 727770
+    },
+    {
+      "path": "figures/02_variant_comparison.pdf",
+      "sha256": "5915653dcb0a6b5e550f5ef0aa6181fdf5fa697ebb191f3a4a3e874b0425755b",
+      "size_bytes": 65174
+    },
+    {
+      "path": "figures/02_variant_comparison.png",
+      "sha256": "12bb4657feae7f7fe164ac35a8481905169e7c780f131a17710ce0acae9bf1f7",
+      "size_bytes": 600573
+    },
+    {
+      "path": "figures/03_horizon_mae_and_objectives.pdf",
+      "sha256": "cd375785f0a50d0d62082f00831ccec09883e6b021265d14faeb47c62d55eb7f",
+      "size_bytes": 43263
+    },
+    {
+      "path": "figures/03_horizon_mae_and_objectives.png",
+      "sha256": "cfa19cc1cb4dae95f28ea171bdb458e51d4bab26f8f1a363af4f4eebf51be428",
+      "size_bytes": 427832
+    },
+    {
+      "path": "figures/04_released_moment_illustration.pdf",
+      "sha256": "c7534c0d2739f33532e2b0f1f48e077fe5435009ef1d0acd3177399d603b7d50",
+      "size_bytes": 42830
+    },
+    {
+      "path": "figures/04_released_moment_illustration.png",
+      "sha256": "28f8abdcdb49db9dcb15e13862b81023a8e4a449cbd748d9c72ccbad81c8eed0",
+      "size_bytes": 382046
+    }
+  ]
+}

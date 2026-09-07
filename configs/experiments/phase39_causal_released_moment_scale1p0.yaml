@@ -1,0 +1,52 @@
+experiment_name: phase39_causal_released_moment_scale1p0
+fixed_endpoint_candidate_summary: /home/lihe/PINN_Mag/runs/phase39-expanded-fixed-split-20260831T0740Z/candidates/seed_73/candidate_summary.json
+expected_split_assignment_sha256: e4807aa1e6b5b389caf23974f62ff9da6b8add7f7887ec23a59d5d35a455eba7
+fold: 0
+seed: 73
+training:
+  initialization: scratch
+  trainable_scope: all
+  epochs: 200
+  learning_rate: 1.0e-04
+  weight_decay: 1.0e-05
+  grad_clip_norm: 1.0
+  early_stop_patience: 50
+  warmup_epochs: 5
+  scheduler_T0: 15
+  scheduler_T_mult: 2
+  scheduler_eta_min: 1.0e-06
+  minimum_prefix_horizon_sec: 5
+  maximum_prefix_horizon_sec: 199
+  horizon_cycle_multiplier: 73
+  prefix_pair_gap_sec: 0
+  prefix_curriculum_start_epoch: 0
+  prefix_curriculum_full_epoch: 1
+  prefix_science_weight: 0.5
+  endpoint_science_weight: 1.0
+  lambda_synth: 0.5
+  moment_scale_augmentation_weight: 1.0
+  moment_scale_delta_min_mw: -1.0        # knob 2: wider counterfactual down-scaling (train min is M6.4)
+  moment_scale_delta_max_mw: 0.5
+  # Direction 1: causal prefix labels.
+  prefix_presentation: zero_pad          # zero_pad | truncate
+  released_moment_floor_nm: 1.0e+15      # Mw ~ 3.93 floor for both label and prediction
+  min_constrained_window_sec: 1.0        # prefix samples with h - tau_P below this skip L_MSE^h / L_mag^h
+  # The old error-descent term compared "final Mw from prefix" against the
+  # endpoint; that quantity is no longer supervised, so the term is off.
+  error_descent_weight: 0.0
+  released_monotone_weight: 0.0          # optional pair term relu(B_early - B_late - slack)^2
+  released_monotone_slack_mw: 0.03
+evaluation:
+  anchor_horizons_sec:
+    - 30
+    - 60
+    - 90
+    - 120
+    - 160
+    - 200
+  full_horizon_start_sec: 1
+  full_horizon_end_sec: 200
+  endpoint_target_mw: 0.171305           # endpoint Phase 39 fixed-validation event MAE
+  endpoint_stretch_target_mw: 0.127016   # causal Phase 39 fixed-validation event MAE
+  endpoint_band_tolerance_mw: 0.05
+  processing_delay_sec: 6.0

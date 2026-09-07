@@ -1,0 +1,48 @@
+experiment_name: phase39_causal_expanded_fixed_split
+fixed_endpoint_candidate_summary: /home/lihe/PINN_Mag/runs/phase39-expanded-fixed-split-20260831T0740Z/candidates/seed_73/candidate_summary.json
+expected_split_assignment_sha256: e4807aa1e6b5b389caf23974f62ff9da6b8add7f7887ec23a59d5d35a455eba7
+fold: 0
+seed: 73
+training:
+  initialization: scratch
+  trainable_scope: all
+  epochs: 200
+  learning_rate: 1.0e-04
+  weight_decay: 1.0e-05
+  grad_clip_norm: 1.0
+  early_stop_patience: 50
+  warmup_epochs: 5
+  scheduler_T0: 15
+  scheduler_T_mult: 2
+  scheduler_eta_min: 1.0e-06
+  minimum_prefix_horizon_sec: 5
+  maximum_prefix_horizon_sec: 199
+  horizon_cycle_multiplier: 73
+  prefix_pair_gap_sec: 0
+  prefix_curriculum_start_epoch: 0
+  prefix_curriculum_full_epoch: 1
+  ema_start_epoch: 0
+  ema_decay: 0.0
+  prefix_science_weight: 0.5
+  endpoint_science_weight: 1.0
+  error_descent_weight: 0.5
+  error_descent_slack_mw: 0.03
+  event_magnitude_weight: 0.0
+  lambda_synth: 0.5
+  moment_scale_augmentation_weight: 1.0
+  moment_scale_delta_min_mw: -0.75
+  moment_scale_delta_max_mw: 0.5
+evaluation:
+  anchor_horizons_sec:
+    - 30
+    - 60
+    - 90
+    - 120
+    - 160
+    - 200
+  full_horizon_start_sec: 1
+  full_horizon_end_sec: 200
+  endpoint_target_mw: 0.2
+  endpoint_stretch_target_mw: 0.17
+  endpoint_band_tolerance_mw: 0.05
+  processing_delay_sec: 6.0

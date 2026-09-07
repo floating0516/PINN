@@ -1,0 +1,21 @@
+variant,gate,value,passed
+OLD,200 s event MAE < 0.1270 (causal P39),0.12687297662099203,True
+OLD,no event above catalog at 1 s (A),3.0,False
+OLD,mean sign changes (B*) < 10,41.0,False
+OLD,stable entry before Crowell on >= 4/6 events,4.0,True
+OLD,"rho(B*, catalog) at 30 s >= 0.94 (old A)",0.7142857142857143,False
+NEW-1,200 s event MAE < 0.1270 (causal P39),0.11822569370269775,True
+NEW-1,no event above catalog at 1 s (A),1.0,False
+NEW-1,mean sign changes (B*) < 10,29.833333333333332,False
+NEW-1,stable entry before Crowell on >= 4/6 events,3.0,False
+NEW-1,"rho(B*, catalog) at 30 s >= 0.94 (old A)",0.7714285714285715,False
+NEW-2,200 s event MAE < 0.1270 (causal P39),0.12229736646016438,True
+NEW-2,no event above catalog at 1 s (A),1.0,False
+NEW-2,mean sign changes (B*) < 10,33.666666666666664,False
+NEW-2,stable entry before Crowell on >= 4/6 events,3.0,False
+NEW-2,"rho(B*, catalog) at 30 s >= 0.94 (old A)",0.8857142857142857,False
+NEW-3,200 s event MAE < 0.1270 (causal P39),0.09009798367818196,True
+NEW-3,no event above catalog at 1 s (A),0.0,True
+NEW-3,mean sign changes (B*) < 10,29.5,False
+NEW-3,stable entry before Crowell on >= 4/6 events,4.0,True
+NEW-3,"rho(B*, catalog) at 30 s >= 0.94 (old A)",0.7714285714285715,False
