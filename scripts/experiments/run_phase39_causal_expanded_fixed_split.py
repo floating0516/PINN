@@ -67,6 +67,18 @@ def _load_fixed_source(
         raise ValueError("fixed endpoint config hash changed")
 
     config = direct._read_yaml(config_path)
+    # Optional RNG override (loader shuffle order); the split and the endpoint
+    # source remain pinned to the candidate identified by ``seed``.
+    config["training"]["random_seed"] = int(experiment.get("training_seed", seed))
+    experiment_training = experiment.get("training") or {}
+    if "event_balanced_sampling" in experiment_training:
+        config["training"]["event_balanced_sampling"] = bool(
+            experiment_training["event_balanced_sampling"]
+        )
+    if "event_balance_estimator" in experiment_training:
+        config["training"]["event_balance_estimator"] = str(
+            experiment_training["event_balance_estimator"]
+        )
     validate_config_on_startup(config)
     loss = config["training"]["stf_rate_loss"]
     required_loss = {
