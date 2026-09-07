@@ -698,6 +698,107 @@ def figure_station_convergence(validation: dict[str, Any], old: dict[str, Any], 
     return _save(figure, stem)
 
 
+DATASET_NPZ = Path(
+    "/home/lihe/PINN_Mag/data/magnitude-label-snapshots/"
+    "phase39-expanded-20260831T035810Z-2e1fa4c1/gnss_events_matched.phase39_expanded.npz"
+)
+MECHANISM_ORDER = ("Reverse", "Strike slip", "Normal")
+MECHANISM_COLORS = {"Reverse": "#3B6EA8", "Strike slip": "#E9A23B", "Normal": "#2A9D8F"}
+
+
+def event_metadata() -> pd.DataFrame:
+    """Per-event focal mechanism / depth from the frozen dataset snapshot."""
+    npz = np.load(DATASET_NPZ, allow_pickle=True)
+    frame = pd.DataFrame({
+        "event": [str(e) for e in npz["events"]],
+        "mechanism": [str(m) for m in npz["mechanism"]],
+        "strike": npz["strike"].astype(float),
+        "dip": npz["dip"].astype(float),
+        "rake": npz["rake"].astype(float),
+        "depth_km": npz["depth_km"].astype(float),
+    })
+    if set(frame["mechanism"]) - set(MECHANISM_ORDER):
+        raise ValueError(f"unexpected mechanism labels: {sorted(set(frame['mechanism']))}")
+    return frame
+
+
+def figure_error_by_mechanism(cohort_table: pd.DataFrame, meta: pd.DataFrame, stem: Path) -> tuple[list[Path], pd.DataFrame, pd.DataFrame]:
+    """Signed 200 s error grouped by focal mechanism (A), against rake (B) and depth (C)."""
+    configure_matplotlib()
+    frame = cohort_table if "mechanism" in cohort_table.columns else cohort_table.merge(meta, on="event", how="left")
+    frame = frame[frame["cohort"].isin(("train", "validation"))].copy()
+    if frame["mechanism"].isna().any():
+        raise ValueError("mechanism missing for some evaluated events")
+    figure, axes = plt.subplots(1, 3, figsize=(16.5, 5.6), gridspec_kw={"width_ratios": [1.15, 1.0, 1.0]})
+    figure.subplots_adjust(left=0.05, right=0.99, bottom=0.13, top=0.84, wspace=0.28)
+    markers = {"train": "o", "validation": "^"}
+
+    ax = axes[0]
+    rng = np.random.default_rng(1)
+    for k, mech in enumerate(MECHANISM_ORDER):
+        for model, offset, color, alpha in (("old_error", -0.25, "#7F7F7F", 0.75), ("new3_error", 0.25, None, 0.95)):
+            sub = frame[frame["mechanism"] == mech]
+            values = sub[model].to_numpy()
+            x = k + offset + rng.uniform(-0.07, 0.07, len(sub))
+            for cohort, marker in markers.items():
+                sel = (sub["cohort"] == cohort).to_numpy()
+                ax.scatter(x[sel], values[sel], marker=marker, s=46,
+                           color=color or MECHANISM_COLORS[mech], edgecolor="white", lw=0.6, alpha=alpha, zorder=3)
+            ax.hlines(np.mean(values), k + offset - 0.14, k + offset + 0.14, color="#202124", lw=2.0, zorder=4)
+            ax.text(k + offset, -0.485, f"{'OLD' if model == 'old_error' else 'NEW-3'}\nMAE {np.mean(np.abs(values)):.3f}\nbias {np.mean(values):+.3f}",
+                    ha="center", va="bottom", fontsize=7.0)
+    ax.axhline(0.0, color="#202124", lw=0.9)
+    ax.axhspan(-0.2, 0.2, color="#E9A23B", alpha=0.10, lw=0)
+    ax.set_xticks(range(len(MECHANISM_ORDER)))
+    ax.set_xticklabels([f"{m}\n(n={int((frame['mechanism'] == m).sum())})" for m in MECHANISM_ORDER])
+    ax.set_ylim(-0.5, 0.5)
+    ax.set_xlim(-0.6, len(MECHANISM_ORDER) - 0.4)
+    ax.set_ylabel("Signed 200 s event error vs catalog (Mw)")
+    ax.set_title("A. Error by focal mechanism | left grey = OLD, right = NEW-3", loc="left", fontweight="bold", fontsize=10.5)
+    ax.grid(axis="y", color="#D7DCE2", linewidth=0.55)
+    from matplotlib.lines import Line2D
+    ax.legend(handles=[
+        Line2D([0], [0], marker="o", ls="", color="#5F6368", label="train event"),
+        Line2D([0], [0], marker="^", ls="", color="#5F6368", label="validation event"),
+        Line2D([0], [0], color="#202124", lw=2.0, label="group mean"),
+    ], frameon=False, fontsize=8.5, loc="upper left")
+
+    for ax, column, label, letter in ((axes[1], "rake", "Rake (deg)", "B"), (axes[2], "depth_km", "Hypocentral depth (km)", "C")):
+        for mech in MECHANISM_ORDER:
+            sub = frame[frame["mechanism"] == mech]
+            for cohort, marker in markers.items():
+                s = sub[sub["cohort"] == cohort]
+                ax.scatter(s[column], s["new3_error"], marker=marker, s=48 + 120 * np.sqrt(s["n_stations"] / frame["n_stations"].max()),
+                           color=MECHANISM_COLORS[mech], edgecolor="white", lw=0.6, alpha=0.92, zorder=3,
+                           label=f"{mech} ({cohort})" if letter == "B" else None)
+        for row in frame[(frame["new3_error"].abs() > 0.18) | (frame["cohort"] == "validation")].itertuples(index=False):
+            ax.annotate(row.event, (getattr(row, column), row.new3_error), xytext=(5, 4), textcoords="offset points", fontsize=7.5)
+        ax.axhline(0.0, color="#202124", lw=0.9)
+        ax.axhspan(-0.2, 0.2, color="#E9A23B", alpha=0.10, lw=0)
+        ax.set_ylim(-0.5, 0.5)
+        ax.set_xlabel(label)
+        ax.set_ylabel("NEW-3 signed 200 s error (Mw)")
+        ax.grid(True, color="#D7DCE2", linewidth=0.55)
+        ax.set_title(f"{letter}. NEW-3 error against {label.split(' (')[0].lower()} | size = station count",
+                     loc="left", fontweight="bold", fontsize=10.5)
+    axes[1].set_xticks([-180, -90, 0, 90, 180])
+    axes[1].legend(frameon=False, fontsize=7.6, ncol=2, loc="lower left")
+    axes[2].axvspan(47.4, 115, color="#6C757D", alpha=0.08, lw=0)
+    axes[2].text(50, 0.43, "deeper than any\ntraining event", fontsize=8, color="#5F6368")
+    figure.suptitle("Endpoint error by focal mechanism, rake and depth (training + validation events; test not evaluated)",
+                    fontsize=13.5, fontweight="bold", y=0.965)
+    paths = _save(figure, stem)
+    summary = (frame.groupby(["mechanism", "cohort"])
+               .agg(n_events=("event", "size"), n_stations=("n_stations", "sum"),
+                    new3_mae=("new3_error", lambda v: float(np.mean(np.abs(v)))),
+                    new3_bias=("new3_error", "mean"),
+                    old_mae=("old_error", lambda v: float(np.mean(np.abs(v)))),
+                    old_bias=("old_error", "mean"),
+                    crowell_mae=("crowell_error", lambda v: float(np.mean(np.abs(v)))))
+               .reset_index())
+    return paths, frame, summary
+
+
 def cohort_summary_table(split_frame: pd.DataFrame, cohorts: dict[str, dict[str, dict[str, Any]]]) -> pd.DataFrame:
     rows = []
     for cohort in ("train", "validation"):
@@ -751,8 +852,11 @@ def generate(output_dir: Path) -> dict[str, Any]:
     generated += figure_event_errors(cohorts, figures_dir / "09_event_absolute_errors")
     generated += figure_station_convergence(cohorts["validation"]["new3"], cohorts["validation"]["old"],
                                             figures_dir / "10_station_convergence")
-    cohort_table = cohort_summary_table(split_frame, cohorts)
+    cohort_table = cohort_summary_table(split_frame, cohorts).merge(event_metadata(), on="event", how="left")
     cohort_table.to_csv(analysis_dir / "cohort_event_summary.csv", index=False, lineterminator="\n")
+    mech_paths, _, mech_summary = figure_error_by_mechanism(cohort_table, event_metadata(), figures_dir / "11_error_by_mechanism")
+    generated += mech_paths
+    mech_summary.to_csv(analysis_dir / "error_by_mechanism.csv", index=False, lineterminator="\n")
     for key, replay in cohorts["train"].items():
         shutil.copyfile(replay["root"] / "summary.json", analysis_dir / f"replay_summary_train_{key}.json")
         shutil.copyfile(replay["root"] / "train_event_predictions.csv", analysis_dir / f"event_trajectories_train_{key}.csv")

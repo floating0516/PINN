@@ -128,6 +128,39 @@ Tokachi2003 8.16（228）、Iquique2014 8.20（20）。
 红线为其中位数 B\*，灰虚线为旧模型的中位数 A。Noto 的 397 台在 90 s 后整体高于目录值；
 Anchorage、SandPoint 在 60–90 s 后收敛并稳定。
 
+### 3.1 按震源机制看误差
+
+划分没有按断层类型分层（只按事件互斥和震级覆盖）。用数据集自带的 GCMT/USGS `mechanism` 标签统计：
+
+| | 逆冲 | 走滑 | 正断 |
+|---|---:|---:|---:|
+| 训练 24 | 16（1 510 台） | 7（284 台） | 1（4 台，Tehuantepec） |
+| 验证 6 | 2（Noto、Maule） | 3（Parkfield、SandPoint、RatIslands） | 1（Anchorage） |
+| 测试 9（未评估） | 4（Tokachi、Iquique、Ecuador、us7000i9bw） | 3（Ridgecrest、Napa、ak014cbigci8） | 2（Puebla、2016p661332） |
+
+训练记录 84% 来自逆冲事件（Tohoku 688 + Ibaraki 507 占大半）；正断层训练里只有 4 台。
+模型输入不含机制信息，网络只看波形和几何量。
+
+![按机制的误差](figures/11_error_by_mechanism.png)
+
+图 11. 200 s 终点有符号误差。A 按机制分组（左灰 OLD，右彩 NEW-3；圆 = 训练事件，三角 = 验证事件，横线 = 组均值）；
+B、C 为 NEW-3 误差对 rake 和震源深度（点大小 = 台站数，灰带为比任何训练事件更深的范围）。
+数值见 [error_by_mechanism.csv](analysis/error_by_mechanism.csv)。
+
+| 200 s 事件 MAE / 偏差 | 逆冲 | 走滑 | 正断 |
+|---|---:|---:|---:|
+| 训练 NEW-3 | 0.104 / −0.103 | 0.113 / −0.113 | 0.160 / −0.160（n=1） |
+| 训练 OLD | 0.085 / −0.085 | 0.109 / −0.109 | 0.086 / −0.086 |
+| 验证 NEW-3 | 0.195 / +0.192 | 0.050 / −0.006 | 0.007 / +0.007（n=1） |
+| 验证 OLD | 0.218 / +0.218 | 0.102 / +0.052 | 0.021 / +0.021 |
+| 验证 Crowell | 0.012 | 0.258 | 0.214 |
+
+- 训练集三类机制的 NEW-3 误差都在 −0.10 到 −0.16 之间，没有哪一类被系统性地学偏；旧模型同样如此。机制不是当前误差的主要解释变量。
+- 验证集逆冲组的 0.195 全部来自 Noto（+0.39），Maule 只有 −0.003；走滑组三个事件都在 ±0.09 内，正断 Anchorage +0.01。
+- 唯一没学过的正断层（Anchorage，深 47 km）和唯一的中源事件（RatIslands 109 km，比任何训练事件深 60 km）误差都不大，但各只有 1 个样本，说明"未失败"而非"已验证"。
+- Crowell 在逆冲组好、走滑/正断组差，与 PGD 标度律主要由俯冲带逆冲事件拟合一致；NEW-3 的机制依赖性比 PGD 小。
+- 测试集 4 逆冲 / 3 走滑 / 2 正断的分布比验证集均衡，机制泛化真正的检验要等测试回放。
+
 ## 4. 报告量
 
 - **B\***：已释放震级，只在 P 已到达（`h − τ_P ≥ 1 s`）的台站上取事件中位数。这是与累积 PGD "在有定义处取中位"对等的口径。
@@ -207,7 +240,7 @@ Anchorage、SandPoint 在 60–90 s 后收敛并稳定。
 
 ## 8. 文件
 
-- `figures/01–10_*.png|pdf`：本页十张图，由 `scripts/plotting/plot_phase39_causal_released_moment.py` 从冻结回放生成，不做任何推断。
+- `figures/01–11_*.png|pdf`：本页十一张图，由 `scripts/plotting/plot_phase39_causal_released_moment.py` 从冻结回放生成，不做任何推断。
 - `analysis/replay_summary_*.json`：四次验证回放的完整摘要（含 checkpoint、配置哈希、按方法的客观量）。
 - `analysis/event_trajectories_*.csv`：每个变体、每种方法、每秒的事件中位震级（验证集四个变体 + 训练集 NEW-3/OLD）。
 - `analysis/cohort_event_summary.csv`：训练/验证各事件 200 s 终点估计与误差，测试集只有组成。
