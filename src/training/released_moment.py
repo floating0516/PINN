@@ -234,3 +234,61 @@ def released_monotone_loss(
         dtype=violation.dtype,
     )
     return (weights * violation).mean()
+
+
+def distance_stratified_delta_bounds(
+    source_distance_m: torch.Tensor,
+    *,
+    near_km: float,
+    far_km: float,
+    near_min_mw: float,
+    near_max_mw: float,
+    far_min_mw: float,
+    far_max_mw: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Linearly interpolate the ΔMw sampling interval from near to far stations.
+
+    ``t = clip((r_km - near_km) / (far_km - near_km), 0, 1)``.
+    Near stations keep the baseline interval; far stations shift toward
+    down-scaling so that a Tohoku-type far record can become an M7 far record.
+    """
+    if not math.isfinite(near_km) or not math.isfinite(far_km) or far_km <= near_km:
+        raise ValueError("far_km must be finite and greater than near_km")
+    for name, lo, hi in (
+        ("near", near_min_mw, near_max_mw),
+        ("far", far_min_mw, far_max_mw),
+    ):
+        if not math.isfinite(lo) or not math.isfinite(hi) or lo >= hi:
+            raise ValueError(f"{name} ΔMw interval must be finite with min < max")
+    distance_km = torch.as_tensor(source_distance_m, dtype=torch.float32).reshape(-1) / 1000.0
+    if bool((distance_km < 0.0).any()) or not bool(torch.isfinite(distance_km).all()):
+        raise ValueError("source_distance_m must be finite and nonnegative")
+    t = torch.clamp((distance_km - float(near_km)) / (float(far_km) - float(near_km)), 0.0, 1.0)
+    lo = (1.0 - t) * float(near_min_mw) + t * float(far_min_mw)
+    hi = (1.0 - t) * float(near_max_mw) + t * float(far_max_mw)
+    return lo, hi
+
+
+def sample_distance_stratified_delta_mw(
+    source_distance_m: torch.Tensor,
+    *,
+    near_km: float,
+    far_km: float,
+    near_min_mw: float,
+    near_max_mw: float,
+    far_min_mw: float,
+    far_max_mw: float,
+    generator: torch.Generator | None = None,
+) -> torch.Tensor:
+    """Draw one ΔMw per sample from the distance-dependent interval."""
+    lo, hi = distance_stratified_delta_bounds(
+        source_distance_m,
+        near_km=near_km,
+        far_km=far_km,
+        near_min_mw=near_min_mw,
+        near_max_mw=near_max_mw,
+        far_min_mw=far_min_mw,
+        far_max_mw=far_max_mw,
+    )
+    unit = torch.rand(lo.shape, device=lo.device, dtype=lo.dtype, generator=generator)
+    return lo + unit * (hi - lo)

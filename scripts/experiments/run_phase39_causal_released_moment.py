@@ -59,6 +59,7 @@ from src.training.released_moment import (  # noqa: E402
     released_magnitude,
     released_monotone_loss,
     released_prefix_losses,
+    sample_distance_stratified_delta_mw,
     zero_pad_prefix,
 )
 from src.training.train import (  # noqa: E402
@@ -368,7 +369,8 @@ def run_experiment(
     experiment = direct._read_yaml(experiment_config_path)
     training = experiment["training"]
     evaluation = experiment["evaluation"]
-    seed = int(experiment["seed"])
+    source_seed = int(experiment["seed"])  # endpoint candidate whose config/split we reuse
+    seed = int(experiment.get("training_seed", source_seed))  # RNG for init, prefix sampling, augmentation
     configure_runtime(seed, device)
 
     synth_weight = float(training["lambda_synth"])
@@ -396,10 +398,19 @@ def run_experiment(
     moment_scale_weight = float(training.get("moment_scale_augmentation_weight", 0.0))
     moment_scale_min_mw = float(training.get("moment_scale_delta_min_mw", -0.75))
     moment_scale_max_mw = float(training.get("moment_scale_delta_max_mw", 0.5))
+    moment_scale_stratified = bool(training.get("moment_scale_distance_stratified", False))
+    moment_scale_near_km = float(training.get("moment_scale_near_km", 100.0))
+    moment_scale_far_km = float(training.get("moment_scale_far_km", 300.0))
+    moment_scale_far_min_mw = float(training.get("moment_scale_far_delta_min_mw", -1.5))
+    moment_scale_far_max_mw = float(training.get("moment_scale_far_delta_max_mw", 0.0))
     if moment_scale_weight < 0.0 or (
         moment_scale_weight > 0.0 and moment_scale_min_mw >= moment_scale_max_mw
     ):
         raise ValueError("invalid moment-scale augmentation settings")
+    if moment_scale_stratified and (
+        moment_scale_far_min_mw >= moment_scale_far_max_mw or moment_scale_far_km <= moment_scale_near_km
+    ):
+        raise ValueError("invalid distance-stratified moment-scale settings")
     curriculum_start_epoch = int(training.get("prefix_curriculum_start_epoch", 0))
     curriculum_full_epoch = int(training.get("prefix_curriculum_full_epoch", 1))
     direct.causal_curriculum_scale(
@@ -464,12 +475,18 @@ def run_experiment(
         "held_out_test_event_count": len(fixed.TEST_EVENTS),
         "held_out_test_loader_iterated": False,
         "seed": seed,
+        "source_candidate_seed": source_seed,
         "lambda_synth": synth_weight,
         "lambda_MSE": float(criterion.lambda_MSE),
         "lambda_mag": float(criterion.lambda_mag),
         "moment_scale_augmentation_weight": moment_scale_weight,
         "moment_scale_delta_min_mw": moment_scale_min_mw,
         "moment_scale_delta_max_mw": moment_scale_max_mw,
+        "moment_scale_distance_stratified": moment_scale_stratified,
+        "moment_scale_near_km": moment_scale_near_km,
+        "moment_scale_far_km": moment_scale_far_km,
+        "moment_scale_far_delta_min_mw": moment_scale_far_min_mw,
+        "moment_scale_far_delta_max_mw": moment_scale_far_max_mw,
         "prefix_presentation": presentation,
         "prefix_pair_gap_sec": prefix_pair_gap_sec,
         "error_descent_weight": 0.0,
@@ -477,6 +494,10 @@ def run_experiment(
         "released_monotone_slack_mw": monotone_slack,
         "released_moment_floor_nm": floor_nm,
         "min_constrained_window_sec": min_window,
+        "event_balanced_sampling": bool(config["training"].get("event_balanced_sampling", False)),
+        "event_balance_estimator": str(
+            config["training"].get("event_balance_estimator", "replacement_sampling")
+        ),
         "released_moment_definition": (
             "B(h) = Mw(sum_k clamp(STF_k,0) * m_k * dt) with m_k = clip((h - tau_P)/dt - k, 0, 1); "
             "tau_P = hypocentral_distance / alpha (origin-aligned axis). Label uses the SCARDEC "
@@ -540,9 +561,20 @@ def run_experiment(
             prepared = _prepare_v2_batch(batch, config, device)
             weights = _batch_event_sample_weights(batch, event_weights, reference=prepared.radial)
             if moment_scale_weight > 0.0:
-                delta_mw = torch.empty_like(prepared.true_mag).uniform_(
-                    moment_scale_min_mw, moment_scale_max_mw
-                )
+                if moment_scale_stratified:
+                    delta_mw = sample_distance_stratified_delta_mw(
+                        prepared.source_distance_m,
+                        near_km=moment_scale_near_km,
+                        far_km=moment_scale_far_km,
+                        near_min_mw=moment_scale_min_mw,
+                        near_max_mw=moment_scale_max_mw,
+                        far_min_mw=moment_scale_far_min_mw,
+                        far_max_mw=moment_scale_far_max_mw,
+                    ).to(device=prepared.true_mag.device, dtype=prepared.true_mag.dtype)
+                else:
+                    delta_mw = torch.empty_like(prepared.true_mag).uniform_(
+                        moment_scale_min_mw, moment_scale_max_mw
+                    )
                 prepared, weights = direct.augment_prepared_with_moment_scaling(
                     prepared, weights, delta_mw=delta_mw, augmentation_weight=moment_scale_weight
                 )
@@ -763,6 +795,7 @@ def run_experiment(
         "moment_scale_augmentation_weight": moment_scale_weight,
         "moment_scale_delta_min_mw": moment_scale_min_mw,
         "moment_scale_delta_max_mw": moment_scale_max_mw,
+        "moment_scale_distance_stratified": moment_scale_stratified,
         "error_descent_weight": 0.0,
         "released_monotone_weight": monotone_weight,
         "initialization": initialization,

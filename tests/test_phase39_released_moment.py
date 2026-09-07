@@ -9,12 +9,14 @@ from src.training.released_moment import (
     DEFAULT_MOMENT_FLOOR_NM,
     constrained_source_mask,
     constrained_window_sec,
+    distance_stratified_delta_bounds,
     magnitude_from_moment,
     masked_encoded_mse,
     moment_from_rate,
     released_magnitude,
     released_monotone_loss,
     released_prefix_losses,
+    sample_distance_stratified_delta_mw,
     zero_pad_prefix,
 )
 
@@ -171,3 +173,40 @@ def test_released_monotone_loss_only_penalises_decrease() -> None:
     late = torch.tensor([6.5, 6.5, 6.8])
     loss = released_monotone_loss(early, late, slack_mw=0.03)
     assert math.isclose(float(loss), ((0.2 - 0.03) ** 2) / 3.0, abs_tol=1.0e-6)
+
+
+def test_distance_stratified_bounds_are_near_at_100km_and_far_at_300km() -> None:
+    distance_m = torch.tensor([50_000.0, 100_000.0, 200_000.0, 300_000.0, 500_000.0])
+    lo, hi = distance_stratified_delta_bounds(
+        distance_m,
+        near_km=100.0,
+        far_km=300.0,
+        near_min_mw=-1.0,
+        near_max_mw=0.5,
+        far_min_mw=-1.5,
+        far_max_mw=0.0,
+    )
+    assert torch.allclose(lo[:2], torch.tensor([-1.0, -1.0]))
+    assert torch.allclose(hi[:2], torch.tensor([0.5, 0.5]))
+    assert torch.allclose(lo[2], torch.tensor(-1.25))
+    assert torch.allclose(hi[2], torch.tensor(0.25))
+    assert torch.allclose(lo[3:], torch.tensor([-1.5, -1.5]))
+    assert torch.allclose(hi[3:], torch.tensor([0.0, 0.0]))
+
+
+def test_sample_distance_stratified_delta_mw_stays_inside_bounds() -> None:
+    distance_m = torch.tensor([80_000.0, 400_000.0])
+    generator = torch.Generator().manual_seed(0)
+    drawn = sample_distance_stratified_delta_mw(
+        distance_m,
+        near_km=100.0,
+        far_km=300.0,
+        near_min_mw=-1.0,
+        near_max_mw=0.5,
+        far_min_mw=-1.5,
+        far_max_mw=0.0,
+        generator=generator,
+    )
+    assert drawn.shape == (2,)
+    assert -1.0 <= float(drawn[0]) <= 0.5
+    assert -1.5 <= float(drawn[1]) <= 0.0
