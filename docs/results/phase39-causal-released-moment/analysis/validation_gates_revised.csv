@@ -1,0 +1,21 @@
+variant,gate,value,passed
+OLD,200 s event MAE < 0.1270 (raw B* = A),0.1269,True
+OLD,no event above catalog at 1 s (A),3.0,False
+OLD,mean sign changes of filtered B* (EMA 5 s + envelope) < 10,10.3333,False
+OLD,stable entry of filtered B* before Crowell on >= 4/6,4.0,True
+OLD,"rho(A, catalog) at 30 s >= 0.94 (old A)",0.9429,True
+NEW-1,200 s event MAE < 0.1270 (raw B* = A),0.1182,True
+NEW-1,no event above catalog at 1 s (A),1.0,False
+NEW-1,mean sign changes of filtered B* (EMA 5 s + envelope) < 10,8.1667,True
+NEW-1,stable entry of filtered B* before Crowell on >= 4/6,3.0,False
+NEW-1,"rho(A, catalog) at 30 s >= 0.94 (old A)",0.7714,False
+NEW-2,200 s event MAE < 0.1270 (raw B* = A),0.1223,True
+NEW-2,no event above catalog at 1 s (A),1.0,False
+NEW-2,mean sign changes of filtered B* (EMA 5 s + envelope) < 10,9.3333,True
+NEW-2,stable entry of filtered B* before Crowell on >= 4/6,2.0,False
+NEW-2,"rho(A, catalog) at 30 s >= 0.94 (old A)",0.9429,True
+NEW-3,200 s event MAE < 0.1270 (raw B* = A),0.0901,True
+NEW-3,no event above catalog at 1 s (A),0.0,True
+NEW-3,mean sign changes of filtered B* (EMA 5 s + envelope) < 10,8.3333,True
+NEW-3,stable entry of filtered B* before Crowell on >= 4/6,3.0,False
+NEW-3,"rho(A, catalog) at 30 s >= 0.94 (old A)",0.9429,True

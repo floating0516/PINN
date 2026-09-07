@@ -31,8 +31,8 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "c57d884bdd419ba9c411d13b6c57552d347c6374df38d9bfe820eeb47f3653e6",
-      "size_bytes": 17223
+      "sha256": "fd6ae79ec609485a2601a152b0343d188ed738ef0575e5e6720de6719d80b90c",
+      "size_bytes": 22800
     },
     {
       "path": "analysis/cohort_event_summary.csv",
@@ -75,6 +75,21 @@
       "size_bytes": 5178959
     },
     {
+      "path": "analysis/noto_station_error_by_distance.csv",
+      "sha256": "dca88a46bba21147d8c845c4bf36f96e7f5926fdf416543c8abb8848d87f8d80",
+      "size_bytes": 436
+    },
+    {
+      "path": "analysis/postprocess_objective.csv",
+      "sha256": "5d2a79ecbb23b842d541cfd46abf7a6b1908f39ad0eb645c161b8d322a2c4e55",
+      "size_bytes": 7160
+    },
+    {
+      "path": "analysis/prior_A1s_by_distance.csv",
+      "sha256": "7bbfbcdca6bcc74ddf5b098da3a46415aba8855967d6b2c41820f2531455cc9d",
+      "size_bytes": 620
+    },
+    {
       "path": "analysis/replay_summary_new-1.json",
       "sha256": "6655e6b5009b1586917a261cb671ffc03faa4cd0e1f3df3670c6da6c1cc05415",
       "size_bytes": 13235
@@ -108,6 +123,11 @@
       "path": "analysis/validation_gates.csv",
       "sha256": "fee1e89ff07f6ef4288765bcaade6f2bb4b9e3e9ec07eebb1225d8379d7eb9fe",
       "size_bytes": 1237
+    },
+    {
+      "path": "analysis/validation_gates_revised.csv",
+      "sha256": "7da7efbaaa3e47b087205ccad66b50d77c149fd0b1b3b08463ff8b4368f3b58a",
+      "size_bytes": 1265
     },
     {
       "path": "analysis/validation_objective_by_variant.csv",
@@ -228,6 +248,26 @@
       "path": "figures/11_error_by_mechanism.png",
       "sha256": "da45b1ff82a622240dff0f59b8cd17692ee8965a2279b3f399b889334d543db1",
       "size_bytes": 396554
+    },
+    {
+      "path": "figures/12_causal_envelope.pdf",
+      "sha256": "dcebae7f9a26cca5bf7e1670b7236fa5a31142bf272e4654d6812dc492784c8a",
+      "size_bytes": 54056
+    },
+    {
+      "path": "figures/12_causal_envelope.png",
+      "sha256": "64c93ed95fe0809a26ca975a37c7dc64ca2aa302df4fbc875785f08b6eed5094",
+      "size_bytes": 412522
+    },
+    {
+      "path": "figures/13_noto_diagnostic.pdf",
+      "sha256": "a96d79f1c600e8aae9153c7ee1af19770dc0cd2cef7d83d4cfe99ab0aae0f62c",
+      "size_bytes": 199430
+    },
+    {
+      "path": "figures/13_noto_diagnostic.png",
+      "sha256": "fc8f1c5c96af5a9288e240b924f55414abc1fb6258c151bcbab7d61c583db8c5",
+      "size_bytes": 582823
     }
   ]
 }

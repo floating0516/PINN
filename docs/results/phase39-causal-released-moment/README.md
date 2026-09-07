@@ -232,6 +232,75 @@ B、C 为 NEW-3 误差对 rake 和震源深度（点大小 = 台站数，灰带�
    要过变号门和早期秩相关门，需要带状态的震矩头或对 B 曲线的因果后处理，这超出了本轮授权范围。
 5. Noto 的系统性高估在四个变体上一致存在，与前缀目标无关，应单独排查（台站密度权重 / 近场饱和）。
 
+## 6a. 三个遗留问题的处置（诊断与后处理，均不重训）
+
+### 6a.1 Noto 为什么高估
+
+![Noto 诊断](figures/13_noto_diagnostic.png)
+
+图 13. A：Noto 397 台 200 s 误差对震中距（灰 OLD、红 NEW-3，红线为 NEW-3 分箱中位）；
+B：NEW-3 在 h = 1 s（任何信号到达前）给出的最终震级 A，对震中距，训练 + 验证全部记录；
+C：训练集中震中距 > 200 km 的记录来自哪些事件。数值见
+[noto_station_error_by_distance.csv](analysis/noto_station_error_by_distance.csv)、[prior_A1s_by_distance.csv](analysis/prior_A1s_by_distance.csv)。
+
+三个假设的检验结果：
+
+1. **标签没问题。** Noto 的 SCARDEC 200 s 震级 7.51，目录 7.50。模型不是贴着一个偏高的标签走。
+2. **不是近场饱和。** 震中距 < 50 km 的 3 台中位误差 −0.19，无高估；50–500 km 的 394 台中位 +0.39，且在 50–500 km 各分箱内几乎一致（+0.31 到 +0.44）。高估来自远场，不来自近场。
+3. **是学到的几何先验。** 图 13B 显示模型在还没看到任何信号时给出的 A(1 s) 几乎是震中距的确定性函数：训练记录上 corr(A(1 s), 距离) = 0.96，
+   而 corr(A(1 s), 目录 Mw) 只有 0.65。原因在图 13C：训练集 1 183 条 > 200 km 的记录里，Tohoku（M9.1）占 53%，Ibaraki（M7.9）占 28%——
+   "一条在 300 km 外被质控接受的记录"在训练分布里几乎等价于"这是一场 M8–9 的日本地震"。Noto 的 397 台有 278 台在 200 km 外，
+   台网几何与 Tohoku/Ibaraki 同源，模型以大地震先验去解释远场波形，60 s 后（破裂已结束）仍持续往 STF 里加矩（图 10C：B\* 从 60 s 的 7.41 升到 160 s 的 7.9）。
+
+处置方向（下一轮训练）：`event_balanced_sampling`（代码里已有开关）让 24 个训练事件等权，削弱 Tohoku + Ibaraki 对远场的垄断；
+或在几何输入上做距离分层的反事实缩放。两者都在核心创新内部，不改结构。**本轮未实施。**
+
+### 6a.2 逐秒抖动：因果后处理
+
+![因果包络](figures/12_causal_envelope.png)
+
+图 12. NEW-3 的 B\* 事件曲线：浅红为原始，粗红为 EMA（τ = 5 s）后再加因果包络（允许每秒最多下降 0.005 Mw），
+紫虚线为纯 running max，蓝为 Crowell。生成脚本 `scripts/analysis/phase39_released_moment_postprocess.py`，
+数值见 [postprocess_objective.csv](analysis/postprocess_objective.csv)。
+
+| NEW-3 验证集 | 200 s MAE | 平均变号 | 最大变号 | 稳定进入 ±0.3 中位 | 早于 Crowell |
+|---|---:|---:|---:|---:|---:|
+| 原始 B\* | 0.090 | 29.5 | 42 | 60 s | 4/6 |
+| running max | 0.154 | 0 | 0 | 28 s | 4/6 |
+| 包络（0.005 Mw/s） | 0.090 | 23.2 | 32 | 60 s | 4/6 |
+| **EMA 5 s + 包络** | 0.100 | **8.3** | 13 | 64 s | 3/6 |
+
+- 纯 running max（Crowell 累积 PGD 的做法）把变号压到 0，但会锁死早期高估：RatIslands 40 s 的 7.95、Parkfield 60 s 的 6.17 再也降不下来，MAE 从 0.090 恶化到 0.154。已释放震矩"不能减少"的物理先验对**估计值**并不成立，因为估计值本身会修正。
+- 只加包络（允许缓慢下降）几乎不减少变号：抖动是上升段上的小锯齿，不是回落。
+- EMA 5 s + 包络把平均变号压到 8.3（过预注册的 < 10），代价是 5 s 左右的滞后：200 s MAE 0.090 → 0.100（Maule 200 s 仍在上升，滞后直接体现为误差），
+  Parkfield 稳定进入从 7 s 推到 12 s，输给 Crowell 的 8 s，"早于 Crowell"从 4/6 掉到 3/6。τ 从 2 到 12 s 的扫描显示变号与滞后严格此消彼长，没有免费午餐。
+- 这证实了抖动是结构性的：滤波能压掉它，但只能用延迟换。要不付延迟代价，只能在网络里加状态（路 C）。
+
+### 6a.3 早期排序：报告量用错了对象
+
+预注册把"30 s 秩相关 ≥ 旧模型 A 的 0.94"定在 B\* 上。但 B\* 在 30 s 是**已释放**震矩：Maule 破裂持续约 100 s，30 s 时 B\* 低于 Noto 是物理上正确的，
+却会拉低与最终目录 Mw 的秩相关。旧模型 A 的 0.94 恰恰来自它对最终值的先验猜测——这正是方向 1 要去掉的东西。
+
+同一个网络的 A（最终震级猜测）在 30 s 的秩相关：OLD 0.94，NEW-1 0.77，NEW-2 0.94，**NEW-3 0.94**，与旧模型持平。
+所以 NEW-3 的早期排序能力并没有丢，只是不在 B\* 里。两个量应分工：早期用 A 排序，后期用 B\* 定值。
+
+### 6a.4 修订后的门（验证集）
+
+修订：变号门作用在 EMA 5 s + 包络后的 B\*，早期秩相关门作用在 A；其余不变。
+[validation_gates_revised.csv](analysis/validation_gates_revised.csv)
+
+| 门 | OLD | NEW-1 | NEW-2 | NEW-3 |
+|---|:-:|:-:|:-:|:-:|
+| 200 s 事件 MAE < 0.1270 | 0.1269 | 0.118 | 0.122 | **0.090** |
+| A 在 1 s 无事件高于目录 | 3 | 1 | 1 | **0** |
+| 滤波后 B\* 平均变号 < 10 | 10.3 | 8.2 | 9.3 | **8.3** |
+| 滤波后 B\* 早于 Crowell ≥ 4/6 | 4 | 3 | 2 | 3 |
+| A 的 30 s 秩相关 ≥ 0.94 | 0.943 | 0.771 | 0.943 | **0.943** |
+| 通过数 | 3/5 | 2/5 | 3/5 | **4/5** |
+
+NEW-3 剩下一项没过：滤波滞后让 Parkfield 输给 Crowell 4 s。这是滤波与"早"之间的直接权衡，不是模型缺陷。
+**按修订门 4/5 仍不满足"全部通过"**，测试集回放的条件依然没有达成；修订门本身是在看过验证结果之后定的，这一点必须写明，其效力低于预注册门。
+
 ## 7. 边界
 
 - 训练集结果是对训练事件的回放，只用于诊断拟合程度；测试集与外部事件未被加载或评分（各 run 的 `summary.json` 中 `test_split_iterated = false`）。
@@ -240,7 +309,7 @@ B、C 为 NEW-3 误差对 rake 和震源深度（点大小 = 台站数，灰带�
 
 ## 8. 文件
 
-- `figures/01–11_*.png|pdf`：本页十一张图，由 `scripts/plotting/plot_phase39_causal_released_moment.py` 从冻结回放生成，不做任何推断。
+- `figures/01–11_*.png|pdf`：由 `scripts/plotting/plot_phase39_causal_released_moment.py` 从冻结回放生成；`12_*` 由 `scripts/analysis/phase39_released_moment_postprocess.py`、`13_*` 由 `scripts/analysis/phase39_noto_diagnostic.py` 生成。全部只读回放结果，不做推断。
 - `analysis/replay_summary_*.json`：四次验证回放的完整摘要（含 checkpoint、配置哈希、按方法的客观量）。
 - `analysis/event_trajectories_*.csv`：每个变体、每种方法、每秒的事件中位震级（验证集四个变体 + 训练集 NEW-3/OLD）。
 - `analysis/cohort_event_summary.csv`：训练/验证各事件 200 s 终点估计与误差，测试集只有组成。
