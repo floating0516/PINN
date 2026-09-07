@@ -454,6 +454,20 @@ def _load_cohort(config: dict[str, Any], expected_assignment: str, cohort: str):
     )
     if loader_manifest["assignment_sha256"] != expected_assignment:
         raise ValueError("loader split assignment changed")
+    if cohort == "train":
+        # The training loader shuffles / resamples; replay the same Subset in a
+        # fixed order with the validation loader's batching so that record
+        # order matches ``split.train_indices``.
+        del validation_loader, test_loader
+        ordered = torch.utils.data.DataLoader(
+            train_loader.dataset,
+            batch_size=int(config["training"]["batch_size"]),
+            shuffle=False,
+            num_workers=0,
+            collate_fn=train_loader.collate_fn,
+        )
+        del train_loader
+        return ordered, [samples[i] for i in split.train_indices], set(fixed.TRAIN_EVENTS)
     del train_loader
     if cohort == "validation":
         del test_loader
@@ -474,8 +488,8 @@ def run_replay(
     device: torch.device,
     provenance: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if cohort not in {"validation", "test"}:
-        raise ValueError("cohort must be validation or test")
+    if cohort not in {"train", "validation", "test"}:
+        raise ValueError("cohort must be train, validation or test")
     if output_root.exists() and any(output_root.iterdir()):
         raise ValueError(f"output root must be new or empty: {output_root}")
     output_root.mkdir(parents=True, exist_ok=True)
@@ -605,7 +619,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         required=True,
         help="training run directory containing summary.json and protocol.json",
     )
-    parser.add_argument("--cohort", choices=("validation", "test"), required=True)
+    parser.add_argument("--cohort", choices=("train", "validation", "test"), required=True)
     parser.add_argument(
         "--prefix-presentation",
         choices=("zero_pad", "truncate"),
