@@ -560,12 +560,16 @@ def fig5_test(test_new, test_old, stem: Path) -> list[Path]:
     cr = endpoint(test_new["events"], "crowell")
     ev = ev.sort_values("mw_catalog").reset_index(drop=True)
     fig, axes = plt.subplots(1, 3, figsize=(FULL_W, 2.55), layout="constrained", gridspec_kw={"width_ratios": [1.0, 1.15, 1.1]})
+    # Legend MAE over the applicability range (M >= 6.4, 7 events); all 9 events are plotted.
+    def in_range_mae(frame):
+        return float(frame.loc[frame["mw_catalog"] >= 6.4, "abs_error"].mean())
     _endpoint_scatter(axes[0], [
-        (cr, STYLE_CROWELL, "Crowell PGD (MAE {mae:.3f})"),
-        (ev, STYLE_ENDPOINT, "endpoint model (MAE {mae:.3f})"),
-        (ca, STYLE_OLD, "causal, final-$M_\\mathrm{{w}}$ target (MAE {mae:.3f})"),
-        (ne, STYLE_NEW, "released-moment target (MAE {mae:.3f})"),
+        (cr, STYLE_CROWELL, f"Crowell PGD (MAE {in_range_mae(cr):.3f})"),
+        (ev, STYLE_ENDPOINT, f"endpoint model (MAE {in_range_mae(ev):.3f})"),
+        (ca, STYLE_OLD, f"causal, final-$M_\\mathrm{{{{w}}}}$ target (MAE {in_range_mae(ca):.3f})"),
+        (ne, STYLE_NEW, f"released-moment target (MAE {in_range_mae(ne):.3f})"),
     ], 5.7, 8.7, annotate=ne, size_ref=ne["n_stations"].max(), legend_loc="upper left")
+    axes[0].axvspan(5.7, 6.4, color=C["band"], alpha=0.12, lw=0)
     inside_label(axes[0], "(a)", x=0.86, y=0.12)
     _mae_vs_horizon(axes[1], [
         (horizon_rows(test_old, "final"), dict(color=C["old"], lw=1.0), "causal final-$M_\\mathrm{w}$ target: A"),
