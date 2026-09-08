@@ -197,10 +197,20 @@ def objective_table(new: dict[str, Any], old: dict[str, Any], table: pd.DataFram
         obj = var["objective"]
         sub = obj[obj["method"] == method].set_index("event")
         in_range = [e for e in TEST_EVENTS if not table.set_index("event").loc[e, "below_train_min"]]
+        err = sub.loc[in_range, "error_200s"]
+        crowell = var["objective"].query("method == 'crowell'").set_index("event").loc[in_range, "error_200s"].abs()
         rows.append({
             "series": label,
             "event_mae_200s": o["event_mae_200s"], "event_rmse_200s": o["event_rmse_200s"], "event_bias_200s": o["event_bias_200s"],
-            "event_mae_200s_within_train_range_7ev": float(sub.loc[in_range, "error_200s"].abs().mean()),
+            # Applicability range M >= 6.4 (training minimum): the report's main table.
+            "in_range_event_count": len(in_range),
+            "in_range_event_mae_200s": float(err.abs().mean()),
+            "in_range_event_rmse_200s": float(np.sqrt((err ** 2).mean())),
+            "in_range_event_bias_200s": float(err.mean()),
+            "in_range_events_within_0p3": int((err.abs() <= 0.3).sum()),
+            "in_range_wins_vs_crowell": int(((err.abs() - crowell) < -0.02).sum()),
+            "in_range_ties_vs_crowell": int(((err.abs() - crowell).abs() <= 0.02).sum()),
+            "in_range_losses_vs_crowell": int(((err.abs() - crowell) > 0.02).sum()),
             "mean_mw_1s": o.get("mean_mw_1s"), "events_overshooting_catalog_at_1s": o["events_overshooting_catalog_at_1s"],
             "mean_sign_changes": o["mean_sign_changes"],
             "events_with_stable_entry": o["events_with_stable_entry"], "median_stable_entry_sec": o["median_stable_entry_sec"],
