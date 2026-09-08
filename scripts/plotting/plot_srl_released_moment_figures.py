@@ -783,6 +783,20 @@ def write_tables(events: pd.DataFrame, val_new, val_old, train_new, train_old, t
                 f"{first} & {fmt(r.old_err)} & {fmt(r.crowell_err)} \\\\"
             )
     (out_dir / "events_table_rows.tex").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Self-contained longtable for the manuscript (\multicolumn cannot follow \input inside a row).
+    header = (
+        "Event & Origin date & $M_{\\mathrm{w}}$ & Mechanism & Depth (km) & Stations & NEW-3 & FINAL & Crowell \\\\\n\\midrule"
+    )
+    longtable = "\n".join([
+        "\\begin{longtable}{@{}lccclrrrr@{}}",
+        "\\caption*{\\textbf{Table S1.} Events, cohorts, faulting style, depth, accepted stations and signed 200-s "
+        "event error (estimate $-$ catalog) of the released-moment model (NEW-3), the final-magnitude model (FINAL) "
+        "and Crowell PGD.}\\\\",
+        "\\toprule", header, "\\endfirsthead", "\\toprule", header, "\\endhead", "\\bottomrule", "\\endfoot",
+        *lines,
+        "\\end{longtable}",
+    ])
+    (out_dir / "events_table.tex").write_text(longtable + "\n", encoding="utf-8")
 
 
 def generate(output_dir: Path) -> dict[str, Any]:
