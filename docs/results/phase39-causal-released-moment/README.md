@@ -1,6 +1,6 @@
 # Phase 39 因果模型：已释放震矩前缀目标（方向 1）验证报告
 
-> 日期 2026-09-07，2026-09-08 补第 0 节（白话版）、第 6b 节（种子复现与两个采样旋钮）。
+> 日期 2026-09-07，2026-09-08 补第 0 节（白话版）、第 6b 节（种子复现与两个采样旋钮），图 4 加入真实 STF 与吻合度。
 > 本页只报告固定划分的 **验证集（6 事件，446 条台站记录）**。
 > 9 事件测试集没有被本页任何模型评估过：预注册验证门未全部通过，按规则停在验证阶段。
 > 上一阶段的终点实验与旧因果模型见 [phase39-expanded-fixed-split](../phase39-expanded-fixed-split/README.md)。
@@ -69,10 +69,33 @@ P 波还没到的台站什么都不知道，就监督成下限；P 波到了之�
 
 ![已释放震矩目标示意](figures/04_released_moment_illustration.png)
 
-图 4. Maule2010 近台 CONS（P 到时 9.9 s）。A：六个前缀下预测的 STF，竖虚线是受约束窗口 `h − τ_P` 的末端；
-B：同一台站的已释放震级 B(h)（只积分窗口内）与最终震级 A(h)（积分全长 200 s）。
+图 4. Maule2010 近台 CONS（P 到时 9.9 s）。A：六个前缀下预测的 STF（彩色）与 **SCARDEC 真实 STF（黑粗线）**，竖虚线是受约束窗口 `h − τ_P` 的末端；
+B：同一台站的已释放震级 B(h)（只积分窗口内）、最终震级 A(h)（积分全长 200 s）和 **训练目标 B_ref(h)（同一窗口作用于真实 STF，绿点线）**。
 B 从下限（Mw 3.93，对应 1e15 N·m）起步，P 到达后上升并收敛到 SCARDEC 200 s 震级。
 注意 A 中 h = 20、40 s 时窗口外（140–200 s）出现的"尾部矩"：那是模型对尚未观测部分的猜测，不受因果标签约束。
+C、D：全部 446 个验证台站上预测 STF 与真实 STF 的吻合度随前缀的变化（实线每事件一票；虚线按台站合并，被 Noto 的 397 台主导）。
+数值见 [stf_agreement_summary.csv](analysis/stf_agreement_summary.csv)、[逐台站表](analysis/stf_agreement_stations.csv)，
+真实 STF 由 `scripts/analysis/phase39_stf_agreement.py` 按回放同一配置重建并存于 `analysis/validation_reference_stf.npz`。
+
+**预测与真实 STF 的吻合度**（吻合度分两个量看：**形状**用窗口内两条曲线的 Pearson 相关 r，**总量**用窗口内已释放震级之差 ΔMw）：
+
+| | 30 s | 60 s | 90 s | 120 s | 160 s | 200 s |
+|---|---:|---:|---:|---:|---:|---:|
+| CONS 这一台：形状 r | 0.23 | 0.40 | 0.13 | 0.47 | 0.76 | **0.89** |
+| CONS 这一台：ΔMw（窗口内） | −0.69 | +0.01 | +0.05 | −0.05 | −0.09 | **−0.08** |
+| 验证 6 事件中位：形状 r，NEW-3 | 0.55 | 0.46 | 0.51 | 0.67 | 0.69 | **0.73** |
+| 验证 6 事件中位：形状 r，OLD | 0.44 | 0.54 | 0.60 | 0.69 | 0.71 | 0.76 |
+| 验证事件级 MAE（窗口内 ΔMw），NEW-3 | 0.27 | 0.17 | 0.16 | 0.19 | 0.25 | **0.09** |
+| 验证事件级 MAE（窗口内 ΔMw），OLD | 0.23 | 0.19 | 0.15 | 0.26 | 0.22 | 0.13 |
+
+- **总量吻合得好，形状吻合一般。** 200 s 时 NEW-3 的已释放震矩与真实值的事件级 MAE 是 0.09 Mw（与第 5 节终点 MAE 一致），
+  但 STF 形状相关只有 0.73（CONS 单台 0.89 是较好的例子）。图 4A 里可以直接看到：预测 STF 在 20–50 s 有多个尖峰、幅度约为真实的 1.5 倍，
+  而真实 STF 在 50 s 附近单峰、100 s 结束；两者积分接近，但"什么时候释放"对不上。
+- **早期窗口只对得上量，对不上形。** 30–90 s 时事件级 ΔMw 已经在 0.16–0.27 以内，而形状 r 只有 0.5 左右；按台站合并的 r 在 60 s 甚至是 −0.07
+  （Noto 的 397 台在窗口内的预测形状与真实反相）。模型先学会"到现在释放了多少"，再逐渐学会"怎么释放的"。
+- **OLD 的形状略好（0.76 vs 0.73），量却更差（0.13 vs 0.09）。** 和第 3 节"新目标放松了对训练事件的记忆"一致：新目标只约束窗口内的积分，形状是副产品。
+- 逐事件看 200 s：Parkfield r 0.92、Maule 0.74（全长 0.86）、Noto 0.77、Anchorage 0.72、RatIslands 0.71、SandPoint 0.67；
+  ΔMw 中位除 Noto +0.39、RatIslands −0.08 外都在 ±0.06 内。Noto 形状不差、量偏高，再次指向 6a.1 的几何先验而非波形拟合失败。
 
 实现：`src/training/released_moment.py`、`scripts/experiments/run_phase39_causal_released_moment.py`、
 `scripts/evaluation/evaluate_phase39_causal_released_moment.py`、`tests/test_phase39_released_moment.py`。
@@ -417,6 +440,7 @@ NEW-3 剩下一项没过：滤波滞后让 Parkfield 输给 Crowell 4 s。这是
 - `figures/01–11_*.png|pdf`：由 `scripts/plotting/plot_phase39_causal_released_moment.py` 从冻结回放生成；`12_*` 由 `scripts/analysis/phase39_released_moment_postprocess.py`、`13_*` 由 `scripts/analysis/phase39_noto_diagnostic.py`、`14–15_*` 由 `scripts/analysis/phase39_released_moment_followup.py` 生成。全部只读回放结果，不做推断。
 - `analysis/replay_summary_*.json`：验证回放的完整摘要（含 checkpoint、配置哈希、按方法的客观量）；`replay_summary_{seed42,balanced,farscale}.json` 与对应 `event_trajectories_*.csv` 为第 6b 节三次追加实验。
 - `analysis/followup_objective_*.csv`：第 6b 节四个 checkpoint 的客观量与逐事件 200 s 误差。
+- `analysis/validation_reference_stf.npz`、`stf_agreement_*.csv`：446 个验证台站的 SCARDEC 真实 STF（按回放同一配置重建，不含模型推断）及其与 NEW-3 / OLD 预测 STF 在各前缀窗口内的形状相关与 ΔMw（图 4A–D）。
 - `analysis/event_trajectories_*.csv`：每个变体、每种方法、每秒的事件中位震级（验证集四个变体 + 训练集 NEW-3/OLD）。
 - `analysis/cohort_event_summary.csv`：训练/验证各事件 200 s 终点估计与误差，测试集只有组成。
 - `figure_manifest.json`：所有文件的 sha256。

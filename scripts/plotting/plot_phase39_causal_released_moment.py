@@ -380,29 +380,51 @@ def figure_released_moment_illustration(primary: dict[str, Any], stem: Path, eve
     b_curve = mag((rate * mask).sum(axis=1))
     a_curve = mag(rate.sum(axis=1))
 
-    figure, axes = plt.subplots(1, 2, figsize=(15.0, 5.2), gridspec_kw={"width_ratios": [1.25, 1.0]})
-    figure.subplots_adjust(left=0.06, right=0.99, bottom=0.14, top=0.84, wspace=0.2)
-    ax = axes[0]
+    # SCARDEC label STF for the same station (written by scripts/analysis/phase39_stf_agreement.py).
+    analysis_dir = stem.parent.parent / "analysis"
+    ref_path = analysis_dir / "validation_reference_stf.npz"
+    ref_rate = None
+    if ref_path.exists():
+        ref = np.load(ref_path)
+        j = np.flatnonzero((ref["events"] == event) & (ref["stations"] == station))
+        if j.size:
+            ref_rate = ref["stf_ref_over_m_ref"][int(j[0])].astype(np.float64) * float(ref["m_ref_nm"])
+    agreement_path = analysis_dir / "stf_agreement_summary.csv"
+    agreement = pd.read_csv(agreement_path) if agreement_path.exists() else None
+
+    figure = plt.figure(figsize=(15.0, 9.6))
+    grid = figure.add_gridspec(2, 2, width_ratios=[1.25, 1.0], height_ratios=[1.0, 0.8],
+                               left=0.06, right=0.99, bottom=0.07, top=0.91, wspace=0.2, hspace=0.32)
+    ax = figure.add_subplot(grid[0, 0])
     show = (20, 40, 60, 90, 120, 200)
     cmap = plt.get_cmap("viridis")
     for k, h in enumerate(show):
         color = cmap(k / (len(show) - 1))
         ax.plot(t, rate[h - 1] / 1e18, color=color, lw=1.6, label=f"h = {h} s  (window {max(h - tau, 0):.0f} s)")
         ax.axvline(max(h - tau, 0), color=color, lw=0.9, ls=":")
+    if ref_rate is not None:
+        r_full = float(np.corrcoef(rate[199], ref_rate)[0, 1])
+        d_full = float(mag(rate[199].sum()) - mag(ref_rate.sum()))
+        ax.plot(t, ref_rate / 1e18, color="#202124", lw=2.6, alpha=0.85, zorder=6,
+                label=f"SCARDEC label STF (true)   200 s fit: r = {r_full:.2f}, dMw = {d_full:+.2f}")
     ax.set_xlim(0, 200)
     ax.set_ylim(bottom=0)
     ax.set_xlabel("Source time since origin (s)")
-    ax.set_ylabel("Predicted moment rate (1e18 N m / s)")
+    ax.set_ylabel("Moment rate (1e18 N m / s)")
     ax.set_title(
-        f"A. {event} station {station}: predicted STF at six prefixes (P arrival {tau:.1f} s)",
+        f"A. {event} {station}: predicted STF at six prefixes vs SCARDEC label (P at {tau:.1f} s)",
         loc="left", fontweight="bold",
     )
     ax.grid(True, color="#D7DCE2", linewidth=0.55, alpha=0.75)
     ax.legend(frameon=False, fontsize=8.5, title="dotted line = end of constrained window h - tau_P", title_fontsize=8.5)
 
-    ax = axes[1]
-    ax.plot(horizons, b_curve, color=primary["color"], lw=2.3, label="B(h): integral of STF over [0, h - tau_P]")
+    ax = figure.add_subplot(grid[0, 1])
+    ax.plot(horizons, b_curve, color=primary["color"], lw=2.3, label="B(h): integral of predicted STF over [0, h - tau_P]")
     ax.plot(horizons, a_curve, color=primary["color"], lw=1.3, ls="--", label="A(h): integral over the full 200 s")
+    if ref_rate is not None:
+        b_ref = mag((ref_rate[None, :] * mask).sum(axis=1))
+        ax.plot(horizons, b_ref, color="#2CA02C", lw=1.8, ls=":", zorder=6,
+                label="B_ref(h): same window on the SCARDEC label (training target)")
     ax.axhline(catalog, color="#202124", lw=1.2, ls=":", label=f"Catalog Mw {catalog:.2f}")
     ax.axhline(native, color="#2CA02C", lw=1.0, ls="-.", label=f"SCARDEC 200 s Mw {native:.2f}")
     ax.axvline(tau, color="#4C78A8", lw=1.0, ls=":")
@@ -411,10 +433,41 @@ def figure_released_moment_illustration(primary: dict[str, Any], stem: Path, eve
     ax.set_ylim(3.8, 9.4)
     ax.set_xlabel("Observed causal prefix h (s since origin)")
     ax.set_ylabel("Magnitude (Mw)")
-    ax.set_title("B. Released (B) and final (A) magnitude for the same station", loc="left", fontweight="bold")
+    ax.set_title("B. B, A and label B_ref for the same station", loc="left", fontweight="bold")
     ax.grid(True, color="#D7DCE2", linewidth=0.55, alpha=0.75)
     ax.legend(frameon=False, fontsize=8.5, loc="lower right")
-    figure.suptitle("What the released-moment target supervises at each prefix", fontsize=14, fontweight="bold", y=0.975)
+
+    if agreement is not None:
+        styles = {"new3": dict(color=primary["color"], lw=2.2, label="NEW-3"),
+                  "old": dict(color="#7F7F7F", lw=1.6, label="OLD (causal Phase 39)")}
+        for col, panel, ylabel, title in (
+            ("median_shape_r", grid[1, 0], "Median Pearson r of STF shape in window",
+             "C. Shape agreement with the SCARDEC label inside [0, h - tau_P], validation stations"),
+            ("mae_delta_mw", grid[1, 1], "MAE of released Mw vs label (Mw)",
+             "D. Released Mw vs label inside the same window (solid: event-level MAE)"),
+        ):
+            ax = figure.add_subplot(panel)
+            for variant, style in styles.items():
+                for scope, ls, suffix in (("EVENT_MEDIAN", "-", ", one vote per event"),
+                                          ("ALL", "--", ", station-pooled (Noto 397/446)")):
+                    rows = agreement[(agreement["variant"] == variant) & (agreement["event"] == scope)]
+                    rows = rows.sort_values("horizon_sec")
+                    ax.plot(rows["horizon_sec"], rows[col], ls=ls, marker="o", ms=4,
+                            color=style["color"], lw=style["lw"], label=style["label"] + suffix)
+            if col == "median_shape_r":
+                ax.axhline(0, color="#202124", lw=0.8)
+                ax.set_ylim(-0.2, 1.0)
+            else:
+                ax.set_ylim(bottom=0)
+            ax.set_xlim(20, 205)
+            ax.set_xticks([30, 60, 90, 120, 160, 200])
+            ax.set_xlabel("Observed causal prefix h (s since origin)")
+            ax.set_ylabel(ylabel)
+            ax.set_title(title, loc="left", fontweight="bold", fontsize=10.5)
+            ax.grid(True, color="#D7DCE2", linewidth=0.55, alpha=0.75)
+            ax.legend(frameon=False, fontsize=8.2, loc="lower right")
+    figure.suptitle("What the released-moment target supervises at each prefix, and how close the prediction gets",
+                    fontsize=14, fontweight="bold", y=0.975)
     return _save(figure, stem)
 
 

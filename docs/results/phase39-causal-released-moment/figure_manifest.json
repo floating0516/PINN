@@ -49,8 +49,8 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "e617b01f6f9976c5a7f0b41c807b63700c149c1dcda2d365881e44bfbcbec476",
-      "size_bytes": 33213
+      "sha256": "12aa8bd067d96518ec3cdfc697b4539db5339862514170f7b3fc44f086459041",
+      "size_bytes": 36203
     },
     {
       "path": "analysis/cohort_event_summary.csv",
@@ -178,6 +178,16 @@
       "size_bytes": 13097
     },
     {
+      "path": "analysis/stf_agreement_stations.csv",
+      "sha256": "c0d505eef8f53d93076a2b0f404df7106b8d4f4ef9dc3967b64b03c7d4a81a6f",
+      "size_bytes": 542871
+    },
+    {
+      "path": "analysis/stf_agreement_summary.csv",
+      "sha256": "157c45aa887a366e387f00b5c383685c86255b8e8276428a3dde2b988a89606a",
+      "size_bytes": 7909
+    },
+    {
       "path": "analysis/validation_gates.csv",
       "sha256": "fee1e89ff07f6ef4288765bcaade6f2bb4b9e3e9ec07eebb1225d8379d7eb9fe",
       "size_bytes": 1237
@@ -196,6 +206,11 @@
       "path": "analysis/validation_objective_per_event_all_variants.csv",
       "sha256": "bd2372fc7dc6880aad7abf179fa07ef1c8c65b8cedf10f63bffe4ac97468617c",
       "size_bytes": 42452
+    },
+    {
+      "path": "analysis/validation_reference_stf.npz",
+      "sha256": "577446c2519033be7760a9672fbda808ea6cb9064835d30150d526f24e76750f",
+      "size_bytes": 7409
     },
     {
       "path": "figures/01_event_trajectories.pdf",
@@ -229,13 +244,13 @@
     },
     {
       "path": "figures/04_released_moment_illustration.pdf",
-      "sha256": "c7534c0d2739f33532e2b0f1f48e077fe5435009ef1d0acd3177399d603b7d50",
-      "size_bytes": 42830
+      "sha256": "9244a71a37249385a1ba2b15856696a1d9d52d75f3aba24847c34f4c58d437ed",
+      "size_bytes": 52700
     },
     {
       "path": "figures/04_released_moment_illustration.png",
-      "sha256": "28f8abdcdb49db9dcb15e13862b81023a8e4a449cbd748d9c72ccbad81c8eed0",
-      "size_bytes": 382046
+      "sha256": "586ce391120d6d9282d38c81e3027f9f3db190a0a724e571a6bd0bc96ceb548b",
+      "size_bytes": 725443
     },
     {
       "path": "figures/05_split_overview.pdf",
