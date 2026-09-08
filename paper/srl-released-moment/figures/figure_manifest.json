@@ -1,0 +1,68 @@
+{
+  "files": [
+    {
+      "path": "figures/fig1_dataset.pdf",
+      "sha256": "a626b715984ad2aa97f9def42923e870115c99414b43947f47dc876ecfdc977c"
+    },
+    {
+      "path": "figures/fig1_dataset.png",
+      "sha256": "71317876fa66598af7036768c6374ad3889a043f20129c5754a9f420bfbb93cc"
+    },
+    {
+      "path": "figures/fig2_method.pdf",
+      "sha256": "c63285248bd202c23afb6f6ba8415b3d74a2b0efeb209058a9b1fbf191fda853"
+    },
+    {
+      "path": "figures/fig2_method.png",
+      "sha256": "ae2fd9069de5662b56a1c0be67dd2a1692f9c72111a564394595b3fa2a9a96fd"
+    },
+    {
+      "path": "figures/fig3_validation_endpoint.pdf",
+      "sha256": "cd2177b4e10c1aa9b2683dede7c844c3db5e163fe1ba21fab08749d1be3eea05"
+    },
+    {
+      "path": "figures/fig3_validation_endpoint.png",
+      "sha256": "baffda5d9ba99e542e9d3a7bbb7eb28f670f179ef063e20db18b8a2ea619cdbc"
+    },
+    {
+      "path": "figures/fig4_validation_trajectories.pdf",
+      "sha256": "a9481d561f8b9d29cf7419f200846411a0ed1d2b5b65c3390a38a6939bd7c701"
+    },
+    {
+      "path": "figures/fig4_validation_trajectories.png",
+      "sha256": "2cc079b49feaa61896c799ab276f82b8c4e1113a753b6887ec313606e92c6269"
+    },
+    {
+      "path": "figures/fig5_test_endpoint.pdf",
+      "sha256": "2413152008bce20e7e142a05f33a7e72c08309f82f6ea092b0726643643778af"
+    },
+    {
+      "path": "figures/fig5_test_endpoint.png",
+      "sha256": "e6bce75caeda286d92f9211555468cd91114b4cfd61b515e4855c3cb09526b39"
+    },
+    {
+      "path": "figures/fig6_test_trajectories.pdf",
+      "sha256": "9993788f65151af3d2206f0bc110b98a1c44516ac9d858ab9d1a48fe162c7d81"
+    },
+    {
+      "path": "figures/fig6_test_trajectories.png",
+      "sha256": "888c3f195be045c56a22d5587bb35f818891bf3da2a6e0e189382e47fda785b4"
+    },
+    {
+      "path": "figures/figS1_mechanism.pdf",
+      "sha256": "04eb73f5e6beafca5a03a8978375fe5510adec4b57d60de589f0735981e344ef"
+    },
+    {
+      "path": "figures/figS1_mechanism.png",
+      "sha256": "c74f3e36706108ba51c11b5f37485603b7b970cbbf6911434ad7371e258f778d"
+    },
+    {
+      "path": "figures/figS2_station_scatter.pdf",
+      "sha256": "85782e2d70008aff1fa84b8a92206370d6891851745aec38f93ca66f2f297b9f"
+    },
+    {
+      "path": "figures/figS2_station_scatter.png",
+      "sha256": "09f607d8fe5f61b26573c8a0ba1fdacf747f3d8035462755e9c9b4db68c8f413"
+    }
+  ]
+}

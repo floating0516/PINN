@@ -1,0 +1,135 @@
+{
+  "validation": {
+    "released_moment": {
+      "mae": 0.09076968828837073,
+      "rmse": 0.16325574834224083,
+      "bias": 0.061926285425821924
+    },
+    "causal_final_target": {
+      "mae": 0.12701606750488278,
+      "rmse": 0.1710377326450925,
+      "bias": 0.102298100789388
+    },
+    "crowell": {
+      "mae": 0.16898735309542787
+    },
+    "ruhl": {
+      "mae": 0.5221142144309775
+    },
+    "melgar": {
+      "mae": 0.33693553549525945
+    },
+    "objective_released_moment": {
+      "event_count": 6,
+      "event_mae_200s": 0.09009798367818196,
+      "event_rmse_200s": 0.1631491692307352,
+      "event_bias_200s": 0.06122597058614095,
+      "mean_mw_1s": null,
+      "std_mw_1s_across_events": null,
+      "mean_sign_changes": 29.5,
+      "mean_abs_step_mw_per_sec": 0.02432252195224593,
+      "mean_post120_range_mw": 0.24249855677286783,
+      "max_post120_max_abs_step_mw": 0.11413049697875977,
+      "events_with_stable_entry": 5,
+      "median_stable_entry_sec": 60.0,
+      "events_overshooting_catalog_at_1s": 0,
+      "spearman_vs_catalog_010s": null,
+      "spearman_vs_catalog_020s": 0.37142857142857144,
+      "spearman_vs_catalog_030s": 0.7714285714285715,
+      "spearman_vs_catalog_060s": 0.9428571428571428,
+      "spearman_vs_catalog_090s": 0.8285714285714286
+    },
+    "objective_causal_final": {
+      "event_count": 6,
+      "event_mae_200s": 0.1270160675048828,
+      "event_rmse_200s": 0.1710377326450925,
+      "event_bias_200s": 0.10229810078938802,
+      "mean_mw_1s": 7.439358671506246,
+      "std_mw_1s_across_events": 0.48063380393292765,
+      "mean_sign_changes": 48.5,
+      "mean_abs_step_mw_per_sec": 0.013633494201417344,
+      "mean_post120_range_mw": 0.24782133102416992,
+      "max_post120_max_abs_step_mw": 0.08698511123657227,
+      "events_with_stable_entry": 5,
+      "median_stable_entry_sec": 48.0,
+      "events_overshooting_catalog_at_1s": 3,
+      "spearman_vs_catalog_010s": 0.9428571428571428,
+      "spearman_vs_catalog_020s": 0.9428571428571428,
+      "spearman_vs_catalog_030s": 0.9428571428571428,
+      "spearman_vs_catalog_060s": 0.9428571428571428,
+      "spearman_vs_catalog_090s": 0.9428571428571428
+    },
+    "objective_crowell": {
+      "event_count": 6,
+      "event_mae_200s": 0.16898735309542787,
+      "event_rmse_200s": 0.24564881671899458,
+      "event_bias_200s": -0.16898735309542787,
+      "mean_mw_1s": 6.094882192134915,
+      "std_mw_1s_across_events": 0.5564675690497293,
+      "mean_sign_changes": 0.0,
+      "mean_abs_step_mw_per_sec": 0.006102833106045171,
+      "mean_post120_range_mw": 0.13899351286377648,
+      "max_post120_max_abs_step_mw": 0.056622055443755315,
+      "events_with_stable_entry": 5,
+      "median_stable_entry_sec": 87.0,
+      "events_overshooting_catalog_at_1s": 0,
+      "spearman_vs_catalog_010s": 0.7714285714285715,
+      "spearman_vs_catalog_020s": 0.8285714285714286,
+      "spearman_vs_catalog_030s": 0.8285714285714286,
+      "spearman_vs_catalog_060s": 0.8285714285714286,
+      "spearman_vs_catalog_090s": 0.9428571428571428
+    }
+  },
+  "train": {
+    "released_moment": {
+      "mae": 0.1092833578586578,
+      "bias": -0.10805339614550269
+    },
+    "causal_final_target": {
+      "mae": 0.0923920373121897,
+      "bias": -0.0923920373121897
+    },
+    "crowell": {
+      "mae": 0.18972802764899574
+    }
+  },
+  "test": {
+    "endpoint_model": {
+      "mae": 0.3496432304382324,
+      "rmse": 0.4669581667938597
+    },
+    "causal_final_target": {
+      "mae": 0.3400597837236192,
+      "rmse": 0.5057920861874866
+    },
+    "crowell": {
+      "mae": 0.31104161233689137
+    },
+    "ruhl": {
+      "mae": 0.44482227958968085
+    },
+    "melgar": {
+      "mae": 0.3569705568018607
+    },
+    "trajectory_causal": {
+      "endpoint_event_mae_mw": 0.3400597837236192,
+      "minimum_event_mae_mw": 0.32017766104804146,
+      "minimum_event_mae_horizon_sec": 121,
+      "mae_linear_slope_mw_per_sec": -0.001432699552441418,
+      "mae_decreasing_step_fraction": 0.6432160804020101,
+      "stable_horizon_within_endpoint_band_sec": 77,
+      "endpoint_band_upper_mw": 0.3900597837236192,
+      "post120_event_abs_step_p95_mw": 0.017827332019805867
+    },
+    "trajectory_crowell": {
+      "endpoint_event_mae_mw": 0.31104161233689137,
+      "minimum_event_mae_mw": 0.298821362149536,
+      "minimum_event_mae_horizon_sec": 136,
+      "mae_linear_slope_mw_per_sec": -0.002874717378490127,
+      "mae_decreasing_step_fraction": 0.864321608040201,
+      "stable_horizon_within_endpoint_band_sec": 87,
+      "endpoint_band_upper_mw": 0.36104161233689136,
+      "post120_event_abs_step_p95_mw": 0.0
+    }
+  }
+}
