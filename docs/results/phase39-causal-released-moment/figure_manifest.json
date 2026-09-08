@@ -26,13 +26,31 @@
       "label": "+ scaling floor -1.0 Mw",
       "replay": "/home/lihe/PINN_Mag/runs/phase39-causal-released-moment-scale1p0-seed73-20260907-v1-replay-validation",
       "checkpoint_sha256": "56d55b1ad65388ae5924c4d0504211adf2aa724bc7873c49eea7cddca1f02d31"
+    },
+    "seed42": {
+      "short": "NEW-3 s42",
+      "label": "NEW-3 recipe, seed 42",
+      "replay": "/home/lihe/PINN_Mag/runs/phase39-causal-released-moment-scale1p0-seed42-20260907-v1-replay-validation",
+      "checkpoint_sha256": "25dca4bbb1377899a0658554342742d275ee983126f2c0dc44d778fe63338e27"
+    },
+    "balanced": {
+      "short": "5a",
+      "label": "5a: event resampling",
+      "replay": "/home/lihe/PINN_Mag/runs/phase39-causal-released-moment-scale1p0-balanced-seed73-20260907-v1-replay-validation",
+      "checkpoint_sha256": "0cde6daa8e467ce6730014a53b71bc34af4f6e6b981a2e036a24693c3acf0df3"
+    },
+    "farscale": {
+      "short": "5b",
+      "label": "5b: far-station down-scaling",
+      "replay": "/home/lihe/PINN_Mag/runs/phase39-causal-released-moment-scale1p0-farscale-seed73-20260907-v1-replay-validation",
+      "checkpoint_sha256": "c06ab33fd0c88436c7c6bd88f1a697302c906a4fb04384e93881cc4b6847cda2"
     }
   },
   "files": [
     {
       "path": "README.md",
-      "sha256": "fd6ae79ec609485a2601a152b0343d188ed738ef0575e5e6720de6719d80b90c",
-      "size_bytes": 22800
+      "sha256": "e617b01f6f9976c5a7f0b41c807b63700c149c1dcda2d365881e44bfbcbec476",
+      "size_bytes": 33213
     },
     {
       "path": "analysis/cohort_event_summary.csv",
@@ -43,6 +61,16 @@
       "path": "analysis/error_by_mechanism.csv",
       "sha256": "256a6ec0a361b3909e64adbe20cc80e00fb15e0054421d369496129cab31af4e",
       "size_bytes": 815
+    },
+    {
+      "path": "analysis/event_trajectories_balanced.csv",
+      "sha256": "b98f92cb6d47a5756444fcfdd6c3446d68cc746c1ffe38f2d6b34423347fad7f",
+      "size_bytes": 1284332
+    },
+    {
+      "path": "analysis/event_trajectories_farscale.csv",
+      "sha256": "7e85dca344730eb7a11aed226c58c469bb2bb1fe3cf8a16d7be1f204d74c3046",
+      "size_bytes": 1285667
     },
     {
       "path": "analysis/event_trajectories_new-1.csv",
@@ -65,6 +93,11 @@
       "size_bytes": 1284355
     },
     {
+      "path": "analysis/event_trajectories_seed42.csv",
+      "sha256": "585b28528cc441673aa8f010638a33bf70c1f669269956e774e00e8e8bc4d768",
+      "size_bytes": 1284318
+    },
+    {
       "path": "analysis/event_trajectories_train_new3.csv",
       "sha256": "d9d3355eeff3d3f309b7712d944613aaf779995cfeaf0fdad63c6d148efc058e",
       "size_bytes": 5176078
@@ -73,6 +106,16 @@
       "path": "analysis/event_trajectories_train_old.csv",
       "sha256": "792fec9a8f64a0c34af85bdb184d0a9689f2c123041b84ae933ca6a7c0281b6f",
       "size_bytes": 5178959
+    },
+    {
+      "path": "analysis/followup_objective_by_variant.csv",
+      "sha256": "dcad62533a48e505b5cf9e3e034310537cabe83b46daa31e050ceec3761421f5",
+      "size_bytes": 1313
+    },
+    {
+      "path": "analysis/followup_objective_per_event.csv",
+      "sha256": "7021597f97d700cd8add79beb921ce4107434e243bf073a41393123de63b710b",
+      "size_bytes": 1747
     },
     {
       "path": "analysis/noto_station_error_by_distance.csv",
@@ -88,6 +131,16 @@
       "path": "analysis/prior_A1s_by_distance.csv",
       "sha256": "7bbfbcdca6bcc74ddf5b098da3a46415aba8855967d6b2c41820f2531455cc9d",
       "size_bytes": 620
+    },
+    {
+      "path": "analysis/replay_summary_balanced.json",
+      "sha256": "0c9fff59512853369f474c40e01234328cc3fd40809974b261a81c34e27c4e3f",
+      "size_bytes": 13297
+    },
+    {
+      "path": "analysis/replay_summary_farscale.json",
+      "sha256": "233db3b205f30d6096e409a9a568f0399003354f3f55b81e8c67406bd641c87d",
+      "size_bytes": 13384
     },
     {
       "path": "analysis/replay_summary_new-1.json",
@@ -108,6 +161,11 @@
       "path": "analysis/replay_summary_old.json",
       "sha256": "865d91f668d66dc1119d23d20d983a820cc6c59f07c5651bd13031124485cb2d",
       "size_bytes": 13057
+    },
+    {
+      "path": "analysis/replay_summary_seed42.json",
+      "sha256": "3d663677f0ade912226b482a6c97c9fb017900bd4ab39ceeca7322c7ba2aab55",
+      "size_bytes": 13248
     },
     {
       "path": "analysis/replay_summary_train_new3.json",
@@ -268,6 +326,26 @@
       "path": "figures/13_noto_diagnostic.png",
       "sha256": "fc8f1c5c96af5a9288e240b924f55414abc1fb6258c151bcbab7d61c583db8c5",
       "size_bytes": 582823
+    },
+    {
+      "path": "figures/14_followup_seed_and_sampling_curves.pdf",
+      "sha256": "f34b0af16db9e81b31488e3a70e14e3372c0c02c6e86cb5d47436802597258c9",
+      "size_bytes": 63617
+    },
+    {
+      "path": "figures/14_followup_seed_and_sampling_curves.png",
+      "sha256": "5b7941403b0a06870398d8b773a5adb89e38280c3f9dfc78d655727b44fac0a8",
+      "size_bytes": 626605
+    },
+    {
+      "path": "figures/15_followup_endpoint_errors.pdf",
+      "sha256": "3a87ab59b11793c80ab82c5876dd4c001df776c30211908948ccba28c418a2d9",
+      "size_bytes": 27906
+    },
+    {
+      "path": "figures/15_followup_endpoint_errors.png",
+      "sha256": "690e1482b751133dc812aa4555843e46ccf2c1549974ac47f03cf562134b5f43",
+      "size_bytes": 115626
     }
   ]
 }
