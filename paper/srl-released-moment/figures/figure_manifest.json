@@ -34,19 +34,19 @@
     },
     {
       "path": "figures/fig5_test_endpoint.pdf",
-      "sha256": "2413152008bce20e7e142a05f33a7e72c08309f82f6ea092b0726643643778af"
+      "sha256": "2c285185424d5290eb0c7bcda62cfcb22cc2baafa0359968eb455d8896bb0c50"
     },
     {
       "path": "figures/fig5_test_endpoint.png",
-      "sha256": "e6bce75caeda286d92f9211555468cd91114b4cfd61b515e4855c3cb09526b39"
+      "sha256": "493599da140edc7e4eda7371b9d4cde7bd3120e181591c16a605798fa2b58c91"
     },
     {
       "path": "figures/fig6_test_trajectories.pdf",
-      "sha256": "9993788f65151af3d2206f0bc110b98a1c44516ac9d858ab9d1a48fe162c7d81"
+      "sha256": "0335d5f5fb89072f9158c0a6278ac6ce02c0dc4996e7ddc474afc7121ede624f"
     },
     {
       "path": "figures/fig6_test_trajectories.png",
-      "sha256": "888c3f195be045c56a22d5587bb35f818891bf3da2a6e0e189382e47fda785b4"
+      "sha256": "1c0f5df6e9ab010135d06359fb9e0ca939e155eec2046f3ad974dab4da1f891d"
     },
     {
       "path": "figures/figS1_mechanism.pdf",

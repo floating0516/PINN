@@ -46,6 +46,10 @@ REPLAY = {
     "train_new": RUNS / "phase39-causal-released-moment-scale1p0-seed73-20260907-v1-replay-train",
     "train_old": RUNS / "phase39-causal-4a25-released-replay-train-20260907",
     "test_old_causal": RUNS / "phase39-causal-expanded-fixed-test-20260831-v1",
+    # One-time held-out test replay of the final candidate (decided 2026-09-08) and the
+    # same-frame replay of the old causal checkpoint (already tested on 2026-08-31).
+    "test_new": RUNS / "phase39-causal-released-moment-scale1p0-seed73-20260907-v1-replay-test",
+    "test_old": RUNS / "phase39-causal-4a25-released-replay-test-20260908",
 }
 CHECKPOINTS = {
     "new": "56d55b1ad65388ae",
@@ -548,40 +552,45 @@ def trajectory_grid(frame_new, frame_old, events: Sequence[str], stem: Path, *, 
 
 
 # ----------------------------------------------------------------------------- Fig 5 test
-def fig5_test(test_causal, stem: Path) -> list[Path]:
+def fig5_test(test_new, test_old, stem: Path) -> list[Path]:
     ev = pd.read_csv(FIXED_SPLIT_DIR / "selected_test_event_predictions.csv")
     ev["abs_error"] = ev["error_vs_catalog"].abs()
-    ca = endpoint(test_causal["events"], "direct")
-    cr = endpoint(test_causal["events"], "crowell")
+    ne = endpoint(test_new["events"], "released_constrained")
+    ca = endpoint(test_old["events"], "final")
+    cr = endpoint(test_new["events"], "crowell")
     ev = ev.sort_values("mw_catalog").reset_index(drop=True)
     fig, axes = plt.subplots(1, 3, figsize=(FULL_W, 2.55), layout="constrained", gridspec_kw={"width_ratios": [1.0, 1.15, 1.1]})
     _endpoint_scatter(axes[0], [
         (cr, STYLE_CROWELL, "Crowell PGD (MAE {mae:.3f})"),
         (ev, STYLE_ENDPOINT, "endpoint model (MAE {mae:.3f})"),
-        (ca, dict(color=C["old"], edgecolor="white", lw=0.4, zorder=4), "causal, final-$M_\\mathrm{{w}}$ target (MAE {mae:.3f})"),
-    ], 5.7, 8.7, annotate=ca, size_ref=ca["n_stations"].max(), legend_loc="lower right")
-    inside_label(axes[0], "(a)")
+        (ca, STYLE_OLD, "causal, final-$M_\\mathrm{{w}}$ target (MAE {mae:.3f})"),
+        (ne, STYLE_NEW, "released-moment target (MAE {mae:.3f})"),
+    ], 5.7, 8.7, annotate=ne, size_ref=ne["n_stations"].max(), legend_loc="upper left")
+    inside_label(axes[0], "(a)", x=0.86, y=0.12)
     _mae_vs_horizon(axes[1], [
-        (horizon_rows(test_causal, "direct"), dict(color=C["old"], lw=1.3), "causal final-$M_\\mathrm{w}$ target"),
-    ], test_causal["horizon"], (0, 1.6))
+        (horizon_rows(test_old, "final"), dict(color=C["old"], lw=1.0), "causal final-$M_\\mathrm{w}$ target: A"),
+        (horizon_rows(test_new, "released_constrained"), dict(color=C["new"], lw=1.3), "released-moment target: B*"),
+    ], test_new["horizon"], (0, 1.6))
     inside_label(axes[1], "(b)")
 
     ax = axes[2]
-    merged = ca[["event", "mw_catalog", "n_stations", "abs_error"]].rename(columns={"abs_error": "causal"})
+    merged = ne[["event", "mw_catalog", "n_stations", "abs_error"]].rename(columns={"abs_error": "new"})
+    merged = merged.merge(ca[["event", "abs_error"]].rename(columns={"abs_error": "causal"}), on="event")
     merged = merged.merge(ev[["event", "abs_error"]].rename(columns={"abs_error": "endpoint"}), on="event")
     merged = merged.merge(cr[["event", "abs_error"]].rename(columns={"abs_error": "crowell"}), on="event")
     merged = merged.sort_values("mw_catalog", ascending=True)
     y = np.arange(len(merged))
-    h = 0.27
-    ax.barh(y + h, merged["endpoint"], h, color=C["endpoint"], label="endpoint model")
-    ax.barh(y, merged["causal"], h, color=C["old"], label="causal final-$M_\\mathrm{w}$ target")
-    ax.barh(y - h, merged["crowell"], h, color=C["crowell"], label="Crowell PGD")
+    h = 0.21
+    ax.barh(y + 1.5 * h, merged["endpoint"], h, color=C["endpoint"], label="endpoint model")
+    ax.barh(y + 0.5 * h, merged["causal"], h, color=C["old"], label="causal final-$M_\\mathrm{w}$ target")
+    ax.barh(y - 0.5 * h, merged["new"], h, color=C["new"], label="released-moment target")
+    ax.barh(y - 1.5 * h, merged["crowell"], h, color=C["crowell"], label="Crowell PGD")
     ax.axvline(0.2, color=C["band"], lw=1.0, ls="--")
     ax.set_yticks(y)
     ax.set_yticklabels([f"{e}\n$M_\\mathrm{{w}}$ {m:.2f}, $n$={n}" for e, m, n in zip(merged["event"], merged["mw_catalog"], merged["n_stations"])],
                        fontsize=5.6, linespacing=1.0)
     ax.set_xlabel("Absolute error at 200 s ($M_\\mathrm{w}$)")
-    ax.set_xlim(0, 1.1)
+    ax.set_xlim(0, 1.45)
     ax.set_ylim(-0.6, len(merged) - 0.4)
     ax.legend(loc="upper right", fontsize=6.0, labelspacing=0.35)
     grid(ax, "x")
@@ -686,11 +695,12 @@ def figS2_stations(val_new, train_new, stem: Path) -> list[Path]:
 
 
 # ----------------------------------------------------------------------------- tables
-def write_tables(events: pd.DataFrame, val_new, val_old, train_new, train_old, test_causal, out_dir: Path) -> None:
+def write_tables(events: pd.DataFrame, val_new, val_old, train_new, train_old, test_new, test_old, out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     ev_test = pd.read_csv(FIXED_SPLIT_DIR / "selected_test_event_predictions.csv").set_index("event")
-    ca = endpoint(test_causal["events"], "direct").set_index("event")
-    cr_t = endpoint(test_causal["events"], "crowell").set_index("event")
+    ne_t = endpoint(test_new["events"], "released_constrained").set_index("event")
+    ca = endpoint(test_old["events"], "final").set_index("event")
+    cr_t = endpoint(test_new["events"], "crowell").set_index("event")
     vn = endpoint(val_new["events"], "final").set_index("event")
     vo = endpoint(val_old["events"], "final").set_index("event")
     vc = endpoint(val_new["events"], "crowell").set_index("event")
@@ -707,7 +717,8 @@ def write_tables(events: pd.DataFrame, val_new, val_old, train_new, train_old, t
         elif row.role == "validation":
             rec.update(new_err=vn.loc[e, "error_vs_catalog"], old_err=vo.loc[e, "error_vs_catalog"], crowell_err=vc.loc[e, "error_vs_catalog"])
         else:
-            rec.update(endpoint_err=ev_test.loc[e, "error_vs_catalog"], old_err=ca.loc[e, "error_vs_catalog"], crowell_err=cr_t.loc[e, "error_vs_catalog"])
+            rec.update(new_err=ne_t.loc[e, "error_vs_catalog"], endpoint_err=ev_test.loc[e, "error_vs_catalog"],
+                       old_err=ca.loc[e, "error_vs_catalog"], crowell_err=cr_t.loc[e, "error_vs_catalog"])
         rows.append(rec)
     pd.DataFrame(rows).to_csv(out_dir / "table_events.csv", index=False, lineterminator="\n")
 
@@ -732,13 +743,17 @@ def write_tables(events: pd.DataFrame, val_new, val_old, train_new, train_old, t
             "crowell": {"mae": mae(tc["error_vs_catalog"])},
         },
         "test": {
+            "evaluated_once": "NEW-3 declared final candidate 2026-09-08; single replay, no further tuning",
+            "released_moment": {"mae": mae(ne_t["error_vs_catalog"]), "rmse": float(np.sqrt(np.mean(ne_t["error_vs_catalog"] ** 2))),
+                                "bias": float(ne_t["error_vs_catalog"].mean())},
             "endpoint_model": {"mae": mae(ev_test["error_vs_catalog"]), "rmse": float(np.sqrt(np.mean(ev_test["error_vs_catalog"] ** 2)))},
             "causal_final_target": {"mae": mae(ca["error_vs_catalog"]), "rmse": float(np.sqrt(np.mean(ca["error_vs_catalog"] ** 2)))},
             "crowell": {"mae": mae(cr_t["error_vs_catalog"])},
-            "ruhl": {"mae": mae(endpoint(test_causal["events"], "ruhl")["error_vs_catalog"])},
-            "melgar": {"mae": mae(endpoint(test_causal["events"], "melgar")["error_vs_catalog"])},
-            "trajectory_causal": test_causal["summary"]["trajectory"]["direct"],
-            "trajectory_crowell": test_causal["summary"]["trajectory"]["crowell"],
+            "ruhl": {"mae": mae(endpoint(test_new["events"], "ruhl")["error_vs_catalog"])},
+            "melgar": {"mae": mae(endpoint(test_new["events"], "melgar")["error_vs_catalog"])},
+            "objective_released_moment": test_new["summary"]["objective_by_method"]["released_constrained"],
+            "objective_causal_final": test_old["summary"]["objective_by_method"]["final"],
+            "objective_crowell": test_new["summary"]["objective_by_method"]["crowell"],
         },
     }
     (out_dir / "results_summary.json").write_text(json.dumps(summary, indent=2, default=float) + "\n", encoding="utf-8")
@@ -758,7 +773,7 @@ def write_tables(events: pd.DataFrame, val_new, val_old, train_new, train_old, t
         for r in sub.itertuples(index=False):
             name = r.event.replace("_", "\\_")
             date = r.origin_time[:10]
-            first = fmt(r.endpoint_err) if role == "test" else fmt(r.new_err)
+            first = fmt(r.new_err)
             lines.append(
                 f"{name} & {date} & {r.mw:.2f} & {MECH_LABEL[r.mechanism]} & {r.depth_km:.0f} & {r.n_stations} & "
                 f"{first} & {fmt(r.old_err)} & {fmt(r.crowell_err)} \\\\"
@@ -773,8 +788,9 @@ def generate(output_dir: Path) -> dict[str, Any]:
     val_old = read_replay("val_old", "validation")
     train_new = read_replay("train_new", "train")
     train_old = read_replay("train_old", "train")
-    test_causal = read_replay("test_old_causal", "test")
-    for key, prefix in (("val_new", "new"), ("train_new", "new"), ("val_old", "old"), ("train_old", "old"), ("test_old_causal", "old")):
+    test_new = read_replay("test_new", "test")
+    test_old = read_replay("test_old", "test")
+    for key, prefix in (("val_new", "new"), ("train_new", "new"), ("val_old", "old"), ("train_old", "old"), ("test_new", "new"), ("test_old", "old")):
         sha = read_replay(key, "validation" if key.startswith("val") else "train" if key.startswith("train") else "test")["summary"]["checkpoint_sha256"]
         if not str(sha).startswith(CHECKPOINTS[prefix]):
             raise ValueError(f"unexpected checkpoint for {key}: {sha}")
@@ -784,12 +800,12 @@ def generate(output_dir: Path) -> dict[str, Any]:
     figs += fig3_validation(val_new, val_old, train_new, train_old, output_dir / "fig3_validation_endpoint")
     figs += trajectory_grid(val_new["events"], val_old["events"], VALIDATION_EVENTS, output_dir / "fig4_validation_trajectories",
                             ncols=3, height=4.3, show_new=True, old_label="causal final-Mw target: A")
-    figs += fig5_test(test_causal, output_dir / "fig5_test_endpoint")
-    figs += trajectory_grid(None, test_causal["events"], TEST_EVENTS, output_dir / "fig6_test_trajectories",
-                            ncols=3, height=6.0, show_new=False, old_label="causal final-Mw target (frozen), event median", ylim=(5.4, 9.0))
+    figs += fig5_test(test_new, test_old, output_dir / "fig5_test_endpoint")
+    figs += trajectory_grid(test_new["events"], test_old["events"], TEST_EVENTS, output_dir / "fig6_test_trajectories",
+                            ncols=3, height=6.0, show_new=True, old_label="causal final-Mw target: A", ylim=(4.6, 9.4))
     figs += figS1_mechanism(events, val_new, val_old, train_new, train_old, output_dir / "figS1_mechanism")
     figs += figS2_stations(val_new, train_new, output_dir / "figS2_station_scatter")
-    write_tables(events, val_new, val_old, train_new, train_old, test_causal, output_dir.parent / "tables")
+    write_tables(events, val_new, val_old, train_new, train_old, test_new, test_old, output_dir.parent / "tables")
     manifest = {"files": [{"path": p.relative_to(output_dir.parent).as_posix(), "sha256": sha256_file(p)} for p in figs]}
     (output_dir / "figure_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return {"figures": [str(p) for p in figs]}

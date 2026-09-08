@@ -49,8 +49,8 @@
   "files": [
     {
       "path": "README.md",
-      "sha256": "12aa8bd067d96518ec3cdfc697b4539db5339862514170f7b3fc44f086459041",
-      "size_bytes": 36203
+      "sha256": "32a36b224d5b89a666e10242a0ec382fdc06b28460dd8af3bf7990dc0969c834",
+      "size_bytes": 43834
     },
     {
       "path": "analysis/cohort_event_summary.csv",
@@ -96,6 +96,16 @@
       "path": "analysis/event_trajectories_seed42.csv",
       "sha256": "585b28528cc441673aa8f010638a33bf70c1f669269956e774e00e8e8bc4d768",
       "size_bytes": 1284318
+    },
+    {
+      "path": "analysis/event_trajectories_test_new3.csv",
+      "sha256": "ad0b0e87802d81cd002d29d81ca20faf251a42a64c0d2e5b9ed529d71152e279",
+      "size_bytes": 1935652
+    },
+    {
+      "path": "analysis/event_trajectories_test_old.csv",
+      "sha256": "0971d24dbe7a3a660f6a8be451fae889ac7b0dfcbdd45cd184059f40d089e2dc",
+      "size_bytes": 1935354
     },
     {
       "path": "analysis/event_trajectories_train_new3.csv",
@@ -168,6 +178,16 @@
       "size_bytes": 13248
     },
     {
+      "path": "analysis/replay_summary_test_new3.json",
+      "sha256": "537065b1bf04c13265e7e5bf83568ee690a22e40ae93bbd609e9c64622d421b0",
+      "size_bytes": 13081
+    },
+    {
+      "path": "analysis/replay_summary_test_old.json",
+      "sha256": "2d29823a02ac3c3bc0ab5232bcf2ea36da5cb3e62b5b932f1ef485ba7ac2613c",
+      "size_bytes": 12842
+    },
+    {
       "path": "analysis/replay_summary_train_new3.json",
       "sha256": "7b92449decb3a636b1e70c31ff7de1c293f25ac9f715e3bbe4014c2fa4f11d74",
       "size_bytes": 13321
@@ -186,6 +206,26 @@
       "path": "analysis/stf_agreement_summary.csv",
       "sha256": "157c45aa887a366e387f00b5c383685c86255b8e8276428a3dde2b988a89606a",
       "size_bytes": 7909
+    },
+    {
+      "path": "analysis/test_event_summary.csv",
+      "sha256": "48e27b8016e635c525b50c650c46a0dde8a0df5c9af69f237884675dc0248077",
+      "size_bytes": 1510
+    },
+    {
+      "path": "analysis/test_objective_by_series.csv",
+      "sha256": "93a9c01bba80ff41f3912894a8fe34e483a6cf8a3c2afbe02f54b0d8b7c93e4b",
+      "size_bytes": 1293
+    },
+    {
+      "path": "analysis/test_objective_per_event_new3.csv",
+      "sha256": "aeb134887276521d262916a913a20072e0c1c0ae31ede9e9a5cef3cfec2af612",
+      "size_bytes": 15891
+    },
+    {
+      "path": "analysis/test_objective_per_event_old.csv",
+      "sha256": "314e636ca86e338069a71bacf69ae272fe1ddd8093096efb07d580c96e82f6ff",
+      "size_bytes": 15896
     },
     {
       "path": "analysis/validation_gates.csv",
@@ -361,6 +401,26 @@
       "path": "figures/15_followup_endpoint_errors.png",
       "sha256": "690e1482b751133dc812aa4555843e46ccf2c1549974ac47f03cf562134b5f43",
       "size_bytes": 115626
+    },
+    {
+      "path": "figures/16_test_event_trajectories.pdf",
+      "sha256": "65190c0180909d31578c62508b903e42e4822f8ec3ef21501252e62ae99894d1",
+      "size_bytes": 81918
+    },
+    {
+      "path": "figures/16_test_event_trajectories.png",
+      "sha256": "a0eac18bc039d0c1734914d62cba1423e19d374061482494e89cc37a54f613f7",
+      "size_bytes": 820974
+    },
+    {
+      "path": "figures/17_test_endpoint.pdf",
+      "sha256": "70311b06ceacf3801282957113c87d2485e516145d15c6fea0448fb5bfb4da82",
+      "size_bytes": 36800
+    },
+    {
+      "path": "figures/17_test_endpoint.png",
+      "sha256": "d153e71e80808ba0a20aa2b6e8f0c8abacfc8d5a274127005c068cf24788b87f",
+      "size_bytes": 264410
     }
   ]
 }
